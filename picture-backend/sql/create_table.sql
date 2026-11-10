@@ -36,6 +36,10 @@ create table if not exists picture
     editTime     datetime default CURRENT_TIMESTAMP not null comment '编辑时间',
     updateTime   datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
     isDelete     tinyint  default 0                 not null comment '是否删除',
+    reviewStatus int      default 0                 not null comment '审核状态：0-待审核 1-通过 2-拒绝',
+    reviewMessage varchar(512)                      null comment '审核信息',
+    reviewerId   bigint                             null comment '审核人 id',
+    reviewTime   datetime                           null comment '审核时间',
     INDEX idx_name (name),                 -- 提升基于图片名称的查询性能
     INDEX idx_introduction (introduction), -- 用于模糊搜索图片简介
     INDEX idx_category (category),         -- 提升基于分类的查询性能
