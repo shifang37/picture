@@ -47,7 +47,8 @@ public class FileManager {
         String originFilename = multipartFile.getOriginalFilename();
         String uploadFilename = String.format("%s_%s.%s", DateUtil.formatDate(new Date()),uuid,
                 FileUtil.getSuffix(originFilename));
-        String uploadPath = String.format("/%s/%s", uploadPathPrefix, uploadFilename);
+        // 注意：这里的路径不能以 "/" 开头，否则拼接 host 后会生成 "https://xxx//public/..." 的双斜杠地址
+        String uploadPath = String.format("%s/%s", uploadPathPrefix, uploadFilename);
         File file = null;
         try {
             // 创建临时文件
