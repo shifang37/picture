@@ -13,7 +13,7 @@ declare namespace API {
 
   type BaseResponseLong = {
     code?: number
-    data?: number
+    data?: string
     message?: string
   }
 
@@ -76,19 +76,19 @@ declare namespace API {
   }
 
   type getPictureByIdParams = {
-    id: string | number
+    id: string
   }
 
   type getPictureVOByIdParams = {
-    id: string | number
+    id: string
   }
 
   type getUserByIdParams = {
-    id: string | number
+    id: number
   }
 
   type getUserVOByIdParams = {
-    id: string | number
+    id: number
   }
 
   type LoginUserVO = {
@@ -116,7 +116,7 @@ declare namespace API {
     optimizeCountSql?: PagePicture
     searchCount?: PagePicture
     optimizeJoinOfCountSql?: boolean
-    maxLimit?: number
+    maxLimit?: string
     countId?: string
     pages?: number
   }
@@ -130,7 +130,7 @@ declare namespace API {
     optimizeCountSql?: PagePictureVO
     searchCount?: PagePictureVO
     optimizeJoinOfCountSql?: boolean
-    maxLimit?: number
+    maxLimit?: string
     countId?: string
     pages?: number
   }
@@ -144,7 +144,7 @@ declare namespace API {
     optimizeCountSql?: PageUserVO
     searchCount?: PageUserVO
     optimizeJoinOfCountSql?: boolean
-    maxLimit?: number
+    maxLimit?: string
     countId?: string
     pages?: number
   }
@@ -156,7 +156,7 @@ declare namespace API {
     introduction?: string
     category?: string
     tags?: string
-    picSize?: number
+    picSize?: string
     picWidth?: number
     picHeight?: number
     picScale?: number
@@ -166,6 +166,10 @@ declare namespace API {
     editTime?: string
     updateTime?: string
     isDelete?: number
+    reviewStatus?: number
+    reviewMessage?: string
+    reviewerId?: string
+    reviewTime?: string
   }
 
   type PictureEditRequest = {
@@ -181,18 +185,27 @@ declare namespace API {
     pageSize?: number
     sortField?: string
     sortOrder?: string
-    id?: number
+    id?: string
     name?: string
     introduction?: string
     category?: string
     tags?: string[]
-    picSize?: number
+    picSize?: string
     picWidth?: number
     picHeight?: number
     picScale?: number
     picFormat?: string
     searchText?: string
-    userId?: number
+    userId?: string
+    reviewStatus?: number
+    reviewMessage?: string
+    reviewerId?: string
+  }
+
+  type PictureReviewRequest = {
+    id?: string
+    reviewStatus?: number
+    reviewMessage?: string
   }
 
   type PictureTagCategory = {
@@ -201,7 +214,7 @@ declare namespace API {
   }
 
   type PictureUpdateRequest = {
-    id?: number
+    id?: string
     name?: string
     introduction?: string
     category?: string
@@ -219,7 +232,7 @@ declare namespace API {
     introduction?: string
     tags?: string[]
     category?: string
-    picSize?: number
+    picSize?: string
     picWidth?: number
     picHeight?: number
     picScale?: number
@@ -228,6 +241,10 @@ declare namespace API {
     createTime?: string
     editTime?: string
     updateTime?: string
+    reviewStatus?: number
+    reviewMessage?: string
+    reviewerId?: string
+    reviewTime?: string
     user?: UserVO
   }
 
@@ -271,7 +288,7 @@ declare namespace API {
     pageSize?: number
     sortField?: string
     sortOrder?: string
-    id?: number
+    id?: string
     userName?: string
     userAccount?: string
     userProfile?: string
@@ -285,7 +302,7 @@ declare namespace API {
   }
 
   type UserUpdateRequest = {
-    id?: number
+    id?: string
     userName?: string
     userAvatar?: string
     userProfile?: string

@@ -2,13 +2,16 @@ import { saveAs } from 'file-saver'
 
 /**
  * 格式化文件大小
+ * 后端将 Long 序列化为字符串，因此这里同时接受 number 和 string
  * @param size
  */
-export const formatSize = (size?: number) => {
-  if (!size) return '未知'
-  if (size < 1024) return size + ' B'
-  if (size < 1024 * 1024) return (size / 1024).toFixed(2) + ' KB'
-  return (size / (1024 * 1024)).toFixed(2) + ' MB'
+export const formatSize = (size?: number | string) => {
+  if (size === undefined || size === null || size === '') return '未知'
+  const value = Number(size)
+  if (!value || Number.isNaN(value)) return '未知'
+  if (value < 1024) return value + ' B'
+  if (value < 1024 * 1024) return (value / 1024).toFixed(2) + ' KB'
+  return (value / (1024 * 1024)).toFixed(2) + ' MB'
 }
 
 /**

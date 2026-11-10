@@ -96,7 +96,7 @@ const canEdit = computed(() => {
 })
 
 const props = defineProps<{
-  id: string | number
+  id: string
 }>()
 const picture = ref<API.PictureVO>({})
 

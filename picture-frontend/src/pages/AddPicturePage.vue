@@ -115,9 +115,10 @@ const route = useRoute()
 const getOldPicture = async () => {
   // 获取数据
   const id = route.query?.id
-  if (id) {
+  // 雪花 ID 超出 JS 安全整数范围，必须按字符串传递，不能转 Number
+  if (typeof id === 'string') {
     const res = await getPictureVoById({
-      id: Number(id),
+      id,
     })
     if (res.data.code === 0 && res.data.data) {
       const data = res.data.data
