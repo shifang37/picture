@@ -1,0 +1,50 @@
+# ================== 通用 ==================
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo
+
+# ================== 编辑器 / IDE ==================
+/.idea/
+/.vscode/
+*.iml
+*.ipr
+*.iws
+
+# ================== 密钥与本地配置（禁止提交）==================
+# 含腾讯云 COS 真实 AK/SK 的本地配置，只保留脱敏模板 .example
+/picture-backend/src/main/resources/application-local.yml
+/picture-backend/src/main/resources/application-local.yaml
+/picture-backend/src/main/resources/application-prod.yml
+/picture-backend/src/main/resources/application-prod.yaml
+**/application-secret*.yml
+**/application-secret*.yaml
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks
+.env
+.env.*
+!.env.example
+
+# ================== 后端 ==================
+/picture-backend/target/
+/picture-backend/build/
+/picture-backend/.mvn/wrapper/maven-wrapper.jar
+/picture-backend/HELP.md
+
+# ================== 前端 ==================
+/picture-frontend/node_modules/
+/picture-frontend/dist/
+/picture-frontend/dist-ssr/
+/picture-frontend/coverage/
+/picture-frontend/*.tsbuildinfo
+/picture-frontend/.eslintcache
+/picture-frontend/*.local
+/picture-frontend/*.timestamp-*.mjs
+
+# ================== 日志 / 临时文件 ==================
+logs/
+*.tmp
+*.bak
