@@ -1,0 +1,254 @@
+package com.tzy.picturebackend.service.impl;
+
+import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.mapper.UserMapper;
+import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.LoginUserVO;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.util.DigestUtils;
+
+import java.nio.charset.StandardCharsets;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * UserServiceImpl 单元测试，不依赖 Spring 容器与数据库
+ */
+class UserServiceImplTest {
+
+    private static final String LEGACY_SALT = "yupi";
+
+    private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+
+    private UserServiceImpl userService;
+
+    private UserMapper userMapper;
+
+    @BeforeEach
+    void setUp() {
+        userService = new UserServiceImpl();
+        userMapper = mock(UserMapper.class);
+        // baseMapper 定义在 MyBatis-Plus 的 CrudRepository 中
+        ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
+    }
+
+    // ==================== 密码加密 ====================
+
+    @Test
+    @DisplayName("加密结果应为 BCrypt 格式")
+    void getEncryptPassword_producesBcryptHash() {
+        String hash = userService.getEncryptPassword("123456");
+        assertTrue(hash.startsWith("$2a$"), "BCrypt 前缀应为 $2a$，实际: " + hash);
+        assertEquals(60, hash.length());
+        assertTrue(encoder.matches("123456", hash));
+    }
+
+    @Test
+    @DisplayName("同一明文两次加密结果不同（自带随机盐）")
+    void getEncryptPassword_usesRandomSalt() {
+        assertNotEquals(userService.getEncryptPassword("123456"), userService.getEncryptPassword("123456"));
+    }
+
+    // ==================== 注册校验 ====================
+
+    @Test
+    @DisplayName("注册：参数为空应拒绝")
+    void userRegister_rejectsBlankParams() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userRegister("", "123456", "123456"));
+        assertEquals("参数为空", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("注册：账号少于 4 位应拒绝")
+    void userRegister_rejectsShortAccount() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userRegister("abc", "123456", "123456"));
+        assertEquals("账号过短", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("注册：密码少于 6 位应拒绝")
+    void userRegister_rejectsShortPassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userRegister("tzyy", "123", "123"));
+        assertEquals("密码过短", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("注册：两次密码不一致应拒绝")
+    void userRegister_rejectsMismatchedPassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userRegister("tzyy", "123456", "654321"));
+        assertEquals("密码不一致", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("注册：账号已存在应拒绝")
+    void userRegister_rejectsDuplicateAccount() {
+        when(userMapper.selectCount(any())).thenReturn(1L);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userRegister("tzyy", "123456", "123456"));
+        assertEquals("账号重复", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("注册：入库密码应为 BCrypt 密文，角色为 user")
+    void userRegister_storesBcryptPassword() {
+        when(userMapper.selectCount(any())).thenReturn(0L);
+        when(userMapper.insert(any(User.class))).thenAnswer(invocation -> {
+            User saved = invocation.getArgument(0);
+            saved.setId(100L);
+            return 1;
+        });
+
+        long id = userService.userRegister("tzyy", "123456", "123456");
+        assertEquals(100L, id);
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).insert(captor.capture());
+        User saved = captor.getValue();
+        assertTrue(encoder.matches("123456", saved.getUserPassword()), "入库密码应能用明文校验通过");
+        assertEquals("user", saved.getUserRole());
+    }
+
+    // ==================== 登录 ====================
+
+    @Test
+    @DisplayName("登录：密码错误应拒绝")
+    void userLogin_rejectsWrongPassword() {
+        when(userMapper.selectOne(any())).thenReturn(userWithPassword(encoder.encode("123456")));
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userLogin("tzyy", "wrong6", new MockHttpServletRequest()));
+        assertEquals("用户不存在或密码错误", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("登录：账号不存在应拒绝")
+    void userLogin_rejectsUnknownAccount() {
+        when(userMapper.selectOne(any())).thenReturn(null);
+
+        assertThrows(BusinessException.class,
+                () -> userService.userLogin("nobody", "123456", new MockHttpServletRequest()));
+    }
+
+    @Test
+    @DisplayName("登录：BCrypt 密码校验通过并写入 Session")
+    void userLogin_successWithBcryptPassword() {
+        User user = userWithPassword(encoder.encode("123456"));
+        when(userMapper.selectOne(any())).thenReturn(user);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+
+        LoginUserVO vo = userService.userLogin("tzyy", "123456", request);
+
+        assertNotNull(vo);
+        assertNotNull(request.getSession().getAttribute("user_login"), "登录后应写入 Session");
+        // 已是 BCrypt，不应触发升级
+        verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    @DisplayName("登录：存量 MD5 密码校验通过后自动升级为 BCrypt")
+    void userLogin_upgradesLegacyMd5Password() {
+        String legacyHash = DigestUtils.md5DigestAsHex(
+                (LEGACY_SALT + "123456").getBytes(StandardCharsets.UTF_8));
+        User user = userWithPassword(legacyHash);
+        when(userMapper.selectOne(any())).thenReturn(user);
+        when(userMapper.updateById(any(User.class))).thenReturn(1);
+
+        userService.userLogin("tzyy", "123456", new MockHttpServletRequest());
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).updateById(captor.capture());
+        User upgraded = captor.getValue();
+        assertEquals(user.getId(), upgraded.getId());
+        assertTrue(upgraded.getUserPassword().startsWith("$2a$"), "升级后的密文应为 BCrypt");
+        assertTrue(encoder.matches("123456", upgraded.getUserPassword()));
+    }
+
+    // ==================== 修改密码 ====================
+
+    @Test
+    @DisplayName("改密：未登录应拒绝")
+    void updatePassword_rejectsAnonymous() {
+        assertThrows(BusinessException.class,
+                () -> userService.updatePassword(null, "123456", "abcdef"));
+    }
+
+    @Test
+    @DisplayName("改密：新密码少于 6 位应拒绝")
+    void updatePassword_rejectsShortNewPassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.updatePassword(userWithPassword("x"), "123456", "123"));
+        assertEquals("新密码不能少于 6 位", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("改密：新旧密码相同应拒绝")
+    void updatePassword_rejectsSamePassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.updatePassword(userWithPassword("x"), "123456", "123456"));
+        assertEquals("新密码不能与原密码相同", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("改密：原密码错误应拒绝")
+    void updatePassword_rejectsWrongOldPassword() {
+        User stored = userWithPassword(encoder.encode("123456"));
+        when(userMapper.selectById(any())).thenReturn(stored);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.updatePassword(loginUser(), "wrong-old", "newpass1"));
+        assertEquals("原密码错误", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("改密：校验通过后写入新的 BCrypt 密文")
+    void updatePassword_updatesHash() {
+        User stored = userWithPassword(encoder.encode("123456"));
+        when(userMapper.selectById(any())).thenReturn(stored);
+        lenient().when(userMapper.updateById(any(User.class))).thenReturn(1);
+
+        userService.updatePassword(loginUser(), "123456", "newpass1");
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).updateById(captor.capture());
+        assertTrue(encoder.matches("newpass1", captor.getValue().getUserPassword()));
+    }
+
+    // ==================== 辅助方法 ====================
+
+    private User userWithPassword(String password) {
+        User user = new User();
+        user.setId(1L);
+        user.setUserAccount("tzyy");
+        user.setUserPassword(password);
+        user.setUserRole("user");
+        return user;
+    }
+
+    private User loginUser() {
+        User user = new User();
+        user.setId(1L);
+        user.setUserAccount("tzyy");
+        return user;
+    }
+}
