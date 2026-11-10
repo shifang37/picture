@@ -15,27 +15,27 @@
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
     "ant-design-vue": "^4.2.6",
-    "axios": "^1.13.6",
+    "axios": "^1.21.1",
     "dayjs": "^1.11.19",
     "file-saver": "^2.0.5",
     "pinia": "^3.0.4",
-    "tslib": "^2.8.1",
-    "vue": "^3.5.29",
-    "vue-router": "^5.0.3"
+    "tslib": "^2.9.1",
+    "vue": "^3.5.45",
+    "vue-router": "^5.4.0"
   },
   "devDependencies": {
-    "@tsconfig/node24": "^24.0.4",
+    "@tsconfig/node24": "^24.0.5",
     "@types/file-saver": "^2.0.7",
-    "@types/node": "^24.11.0",
+    "@types/node": "^24.19.2",
     "@umijs/openapi": "^1.14.1",
-    "@vitejs/plugin-vue": "^6.0.4",
-    "@vue/tsconfig": "^0.8.1",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/tsconfig": "^0.9.1",
     "npm-run-all2": "^8.0.4",
-    "prettier": "3.8.1",
+    "prettier": "3.9.10",
     "typescript": "~5.9.3",
     "vite": "^7.3.1",
-    "vite-plugin-vue-devtools": "^8.0.6",
-    "vue-tsc": "^3.2.5"
+    "vite-plugin-vue-devtools": "^8.2.1",
+    "vue-tsc": "^3.3.14"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
