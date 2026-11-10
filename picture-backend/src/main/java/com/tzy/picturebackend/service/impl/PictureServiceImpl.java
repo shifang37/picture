@@ -24,7 +24,6 @@ import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -206,24 +205,32 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Override
     public void doPictureReview(PictureReviewRequest pictureReviewRequest, User loginUser) {
+        ThrowUtils.throwIf(pictureReviewRequest == null, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
         Long id = pictureReviewRequest.getId();
         Integer reviewStatus = pictureReviewRequest.getReviewStatus();
         PictureReviewStatusEnum reviewStatusEnum = PictureReviewStatusEnum.getEnumByValue(reviewStatus);
-        if(id == null || reviewStatusEnum == null || PictureReviewStatusEnum.REVIEWING.equals(reviewStatusEnum)) {
+        // 审核的目标状态必须是通过或拒绝，不能是待审核
+        if (id == null || reviewStatusEnum == null || PictureReviewStatusEnum.REVIEWING.equals(reviewStatusEnum)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
 
         Picture oldPicture = this.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.PARAMS_ERROR);
-        if(oldPicture.getReviewStatus().equals(reviewStatus)){
+        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        // reviewStatus 理论上非空，这里仍判空以避免 NPE
+        Integer currentStatus = oldPicture.getReviewStatus();
+        if (currentStatus != null && currentStatus.equals(reviewStatus)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "请勿重复审核");
         }
+        // 只更新审核相关字段，避免整对象覆盖
         Picture updatePicture = new Picture();
-        BeanUtils.copyProperties(pictureReviewRequest, updatePicture);
+        updatePicture.setId(id);
+        updatePicture.setReviewStatus(reviewStatus);
+        updatePicture.setReviewMessage(pictureReviewRequest.getReviewMessage());
         updatePicture.setReviewerId(loginUser.getId());
         updatePicture.setReviewTime(new Date());
         boolean result = this.updateById(updatePicture);
-        ThrowUtils.throwIf(!result, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "审核失败");
     }
 
 
