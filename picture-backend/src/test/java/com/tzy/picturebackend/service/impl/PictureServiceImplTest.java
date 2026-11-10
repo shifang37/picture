@@ -2,6 +2,7 @@ package com.tzy.picturebackend.service.impl;
 
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.mapper.PictureMapper;
+import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -14,11 +15,15 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -26,7 +31,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * PictureServiceImpl 单元测试：审核可见性与审核动作，不依赖数据库
+ * PictureServiceImpl 单元测试：审核可见性、审核动作与排序字段校验，不依赖数据库
  */
 class PictureServiceImplTest {
 
@@ -180,7 +185,65 @@ class PictureServiceImplTest {
         assertNull(updated.getUserId(), "不应覆盖 userId");
     }
 
+    // ==================== 排序 ====================
+
+    @Test
+    @DisplayName("排序：白名单内的字段按指定方向拼接 ORDER BY")
+    void getQueryWrapper_sortsByWhitelistedField() {
+        String descSql = pictureService.getQueryWrapper(queryRequest("createTime", "descend")).getSqlSegment();
+        String ascSql = pictureService.getQueryWrapper(queryRequest("picSize", "ascend")).getSqlSegment();
+
+        assertTrue(descSql.contains("ORDER BY createTime DESC"), "实际 SQL 片段: " + descSql);
+        assertTrue(ascSql.contains("ORDER BY picSize ASC"), "实际 SQL 片段: " + ascSql);
+    }
+
+    @Test
+    @DisplayName("排序：不在白名单内的字段应拒绝，注入片段不能进入 SQL")
+    void getQueryWrapper_rejectsSortFieldOutsideWhitelist() {
+        List<String> illegalSortFields = List.of(
+                "createTime,(select 1)", "(select 1)", "createTime desc", "isDelete", "notAColumn", " ");
+
+        for (String sortField : illegalSortFields) {
+            BusinessException e = assertThrows(BusinessException.class,
+                    () -> pictureService.getQueryWrapper(queryRequest(sortField, "descend")),
+                    "应拒绝排序字段: " + sortField);
+            assertEquals("排序字段不合法", e.getMessage());
+        }
+    }
+
+    @Test
+    @DisplayName("排序：不传排序字段时不拼接 ORDER BY，sortOrder 为空也不抛空指针")
+    void getQueryWrapper_skipsOrderByWithoutSortField() {
+        String sql = pictureService.getQueryWrapper(queryRequest(null, null)).getSqlSegment();
+
+        assertFalse(sql.contains("ORDER BY"), "实际 SQL 片段: " + sql);
+    }
+
+    @Test
+    @DisplayName("排序：sortOrder 为空时按降序处理")
+    void getQueryWrapper_treatsNullSortOrderAsDescend() {
+        String sql = pictureService.getQueryWrapper(queryRequest("createTime", null)).getSqlSegment();
+
+        assertTrue(sql.contains("ORDER BY createTime DESC"), "实际 SQL 片段: " + sql);
+    }
+
+    @Test
+    @DisplayName("排序：白名单内的字段必须都是 Picture 实体的属性")
+    void sortFieldWhitelist_containsOnlyEntityFields() {
+        for (String sortField : PictureServiceImpl.SORT_FIELD_WHITELIST) {
+            assertDoesNotThrow(() -> Picture.class.getDeclaredField(sortField),
+                    "白名单字段不是 Picture 的属性: " + sortField);
+        }
+    }
+
     // ==================== 辅助方法 ====================
+
+    private PictureQueryRequest queryRequest(String sortField, String sortOrder) {
+        PictureQueryRequest request = new PictureQueryRequest();
+        request.setSortField(sortField);
+        request.setSortOrder(sortOrder);
+        return request;
+    }
 
     private Picture picture(Long id, Long userId, int reviewStatus) {
         Picture picture = new Picture();

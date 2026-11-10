@@ -42,6 +42,13 @@ import java.util.stream.Collectors;
 public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     implements PictureService{
 
+    /**
+     * 允许排序的字段白名单：sortField 会被原样拼进 ORDER BY，不能直接使用客户端传入的值
+     */
+    static final Set<String> SORT_FIELD_WHITELIST = Set.of(
+            "id", "name", "category", "picSize", "picWidth", "picHeight", "picScale", "picFormat",
+            "userId", "createTime", "editTime", "updateTime", "reviewStatus", "reviewTime");
+
     @Resource
     private FileManager fileManager;
 
@@ -140,8 +147,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 queryWrapper.like("tags", "\"" + tag + "\"");
             }
         }
-        // 排序
-        queryWrapper.orderBy(StrUtil.isNotEmpty(sortField), sortOrder.equals("ascend"), sortField);
+        // 排序：sortField 会被拼进 ORDER BY，只接受白名单内的字段
+        if (StrUtil.isNotEmpty(sortField)) {
+            ThrowUtils.throwIf(!SORT_FIELD_WHITELIST.contains(sortField), ErrorCode.PARAMS_ERROR, "排序字段不合法");
+            queryWrapper.orderBy(true, "ascend".equals(sortOrder), sortField);
+        }
         return queryWrapper;
     }
 

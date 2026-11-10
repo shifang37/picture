@@ -25,6 +25,7 @@ import org.springframework.util.DigestUtils;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -53,6 +54,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      * 历史遗留的固定盐，仅用于校验存量密码
      */
     private static final String LEGACY_SALT = "yupi";
+
+    /**
+     * 允许排序的字段白名单：sortField 会被原样拼进 ORDER BY，不能直接使用客户端传入的值。
+     * 不含 userPassword，避免通过排序结果推断密文
+     */
+    static final Set<String> SORT_FIELD_WHITELIST = Set.of(
+            "id", "userAccount", "userName", "userRole", "createTime", "editTime", "updateTime");
 
 
     @Override
@@ -271,7 +279,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         queryWrapper.like(StrUtil.isNotBlank(userAccount), "userAccount", userAccount);
         queryWrapper.like(StrUtil.isNotBlank(userName), "userName", userName);
         queryWrapper.like(StrUtil.isNotBlank(userProfile), "userProfile", userProfile);
-        queryWrapper.orderBy(StrUtil.isNotEmpty(sortField), sortOrder.equals("ascend"), sortField);
+        // 排序：sortField 会被拼进 ORDER BY，只接受白名单内的字段
+        if (StrUtil.isNotEmpty(sortField)) {
+            if (!SORT_FIELD_WHITELIST.contains(sortField)) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR,"排序字段不合法");
+            }
+            queryWrapper.orderBy(true, "ascend".equals(sortOrder), sortField);
+        }
 
         return queryWrapper;
     }
