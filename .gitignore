@@ -44,6 +44,10 @@ Thumbs.db
 /picture-frontend/*.local
 /picture-frontend/*.timestamp-*.mjs
 
+# ================== 本地文档（不上交）==================
+# 项目产生的说明性文本统一放在 docs/ 下，仅本地留存
+/docs/
+
 # ================== 日志 / 临时文件 ==================
 logs/
 *.tmp
