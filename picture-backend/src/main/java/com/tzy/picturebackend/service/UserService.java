@@ -26,6 +26,14 @@ public interface UserService extends IService<User> {
 
     User getLoginUser(HttpServletRequest request);
 
+    /**
+     * 获取当前登录用户，未登录时返回 null（不抛异常）
+     *
+     * @param request
+     * @return
+     */
+    User getLoginUserOrNull(HttpServletRequest request);
+
     boolean userLogout(HttpServletRequest request);
 
     UserVO getUserVO(User user);

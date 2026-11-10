@@ -114,6 +114,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         Long userId = pictureQueryRequest.getUserId();
         String sortField = pictureQueryRequest.getSortField();
         String sortOrder = pictureQueryRequest.getSortOrder();
+        Integer reviewStatus = pictureQueryRequest.getReviewStatus();
         // 从多字段中搜索
         if (StrUtil.isNotBlank(searchText)) {
             // 需要拼接查询条件
@@ -132,6 +133,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         queryWrapper.eq(ObjUtil.isNotEmpty(picHeight), "picHeight", picHeight);
         queryWrapper.eq(ObjUtil.isNotEmpty(picSize), "picSize", picSize);
         queryWrapper.eq(ObjUtil.isNotEmpty(picScale), "picScale", picScale);
+        queryWrapper.eq(ObjUtil.isNotEmpty(reviewStatus), "reviewStatus", reviewStatus);
         // JSON 数组查询
         if (CollUtil.isNotEmpty(tags)) {
             for (String tag : tags) {
@@ -200,6 +202,25 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         if (StrUtil.isNotBlank(introduction)) {
             ThrowUtils.throwIf(introduction.length() > 800, ErrorCode.PARAMS_ERROR, "简介过长");
+        }
+    }
+
+    @Override
+    public void checkPictureVisible(Picture picture, HttpServletRequest request) {
+        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        Integer reviewStatus = picture.getReviewStatus();
+        // 已通过审核的图片所有人可见
+        if (reviewStatus != null && reviewStatus == PictureReviewStatusEnum.PASS.getValue()) {
+            return;
+        }
+        // 未通过审核的图片仅管理员和作者本人可见，其余一律当作不存在
+        User loginUser = userService.getLoginUserOrNull(request);
+        if (loginUser == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        }
+        boolean isOwner = picture.getUserId() != null && picture.getUserId().equals(loginUser.getId());
+        if (!isOwner && !userService.isAdmin(loginUser)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "图片不存在");
         }
     }
 

@@ -41,6 +41,15 @@ public interface PictureService extends IService<Picture> {
     void validPicture(Picture picture);
 
     /**
+     * 校验图片对当前请求者是否可见：已通过审核的图片所有人可见，
+     * 未通过审核的仅管理员和作者本人可见
+     *
+     * @param picture
+     * @param request
+     */
+    void checkPictureVisible(Picture picture, HttpServletRequest request);
+
+    /**
      * 图片审核
      *
      * @param pictureReviewRequest

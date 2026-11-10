@@ -15,6 +15,7 @@ import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.mapper.UserMapper;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
@@ -129,6 +130,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
         return currentUser;
+    }
+
+    @Override
+    public User getLoginUserOrNull(HttpServletRequest request) {
+        if (request == null) {
+            return null;
+        }
+        HttpSession session = request.getSession(false);
+        if (session == null) {
+            return null;
+        }
+        User currentUser = (User) session.getAttribute(USER_LOGIN_STATE);
+        if (currentUser == null || currentUser.getId() == null) {
+            return null;
+        }
+        return this.getById(currentUser.getId());
     }
 
     @Override
