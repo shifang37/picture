@@ -40,7 +40,9 @@ jobs:
       - name: 安装 Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # 与本地开发环境保持一致（npm 11）。用 Node 22（npm 10）时
+          # npm ci 会把 vite/rollup 的可选依赖 chokidar 误判为缺少。
+          node-version: '24'
           cache: npm
           cache-dependency-path: picture-frontend/package-lock.json
 
