@@ -13,6 +13,7 @@ import com.tzy.picturebackend.manager.CosManager;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,9 +24,15 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.io.IOException;
 
+/**
+ * 文件上传下载测试接口。
+ * <p>
+ * 仅用于本地联调 COS，非 local 环境不装配，避免调试接口暴露到生产。
+ */
 @Slf4j
 @RestController
 @RequestMapping("/file")
+@Profile("local")
 public class FileController {
     @Resource
     private CosManager cosManager;
