@@ -10,6 +10,14 @@
       <!-- 图片信息区 -->
       <a-col :sm="24" :md="8" :xl="6">
         <a-card title="图片信息">
+          <a-alert
+            v-if="picture.id && reviewStatus !== 1"
+            :message="`当前图片状态：${reviewStatusText}`"
+            :description="reviewDescription"
+            :type="reviewStatus === 2 ? 'error' : 'warning'"
+            show-icon
+            style="margin-bottom: 16px"
+          />
           <a-descriptions :column="1">
             <a-descriptions-item label="作者">
               <a-space>
@@ -99,6 +107,27 @@ const props = defineProps<{
   id: string
 }>()
 const picture = ref<API.PictureVO>({})
+
+// 审核状态：0 待审核、1 已通过、2 已拒绝
+const reviewStatus = computed(() => picture.value.reviewStatus ?? 1)
+
+const reviewStatusText = computed(() => {
+  const map: Record<number, string> = { 0: '待审核', 1: '已通过', 2: '已拒绝' }
+  return map[reviewStatus.value] ?? '未知'
+})
+
+// 未通过时给出说明，管理员和作者本人才能看到该页
+const reviewDescription = computed(() => {
+  if (reviewStatus.value === 0) {
+    return '该图片尚未通过审核，暂不会出现在首页列表中。'
+  }
+  if (reviewStatus.value === 2) {
+    return picture.value.reviewMessage
+      ? `拒绝原因：${picture.value.reviewMessage}`
+      : '该图片未通过审核，暂不会出现在首页列表中。'
+  }
+  return ''
+})
 
 // 获取图片详情
 const fetchPictureDetail = async () => {
