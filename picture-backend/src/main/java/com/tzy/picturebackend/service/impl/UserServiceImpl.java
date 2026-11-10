@@ -17,11 +17,15 @@ import com.tzy.picturebackend.mapper.UserMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.BeanUtils;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
@@ -34,6 +38,21 @@ import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     implements UserService{
+
+    /**
+     * 密码编码器：BCrypt 自带随机盐，同一明文每次加密结果不同
+     */
+    private static final PasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
+
+    /**
+     * 历史遗留密码格式：MD5(固定盐 + 明文)，32 位十六进制
+     */
+    private static final Pattern LEGACY_MD5_PATTERN = Pattern.compile("^[0-9a-fA-F]{32}$");
+
+    /**
+     * 历史遗留的固定盐，仅用于校验存量密码
+     */
+    private static final String LEGACY_SALT = "yupi";
 
 
     @Override
@@ -75,8 +94,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Override
     public String getEncryptPassword(String userPassword) {
-        final String SALT = "yupi";
-        return DigestUtils.md5DigestAsHex((SALT+userPassword).getBytes());
+        return PASSWORD_ENCODER.encode(userPassword);
+    }
+
+    /**
+     * 校验密码，兼容历史遗留的 MD5 密码
+     *
+     * @param rawPassword       明文密码
+     * @param encryptedPassword 库中存储的密文
+     * @return 是否匹配
+     */
+    private boolean isPasswordMatch(String rawPassword, String encryptedPassword) {
+        if (StrUtil.isBlank(encryptedPassword)) {
+            return false;
+        }
+        if (isLegacyPassword(encryptedPassword)) {
+            String legacy = DigestUtils.md5DigestAsHex(
+                    (LEGACY_SALT + rawPassword).getBytes(StandardCharsets.UTF_8));
+            return legacy.equalsIgnoreCase(encryptedPassword);
+        }
+        return PASSWORD_ENCODER.matches(rawPassword, encryptedPassword);
+    }
+
+    /**
+     * 是否为历史遗留的 MD5 密码（32 位十六进制）
+     */
+    private boolean isLegacyPassword(String encryptedPassword) {
+        return encryptedPassword != null && LEGACY_MD5_PATTERN.matcher(encryptedPassword).matches();
     }
 
     @Override
@@ -91,15 +135,20 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if(userPassword.length()<6){
             throw new BusinessException(ErrorCode.PARAMS_ERROR,"密码错误");
         }
-        //2.加密
-        String encryptPassword = getEncryptPassword(userPassword);
-        //3.查询用户是否存在
+        //2.查询用户
         QueryWrapper<User> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("userAccount",userAccount);
-        queryWrapper.eq("userPassword",encryptPassword);
         User user = this.baseMapper.selectOne(queryWrapper);
-        if(user==null){
+        if(user==null || !isPasswordMatch(userPassword, user.getUserPassword())){
             throw new BusinessException(ErrorCode.PARAMS_ERROR,"用户不存在或密码错误");
+        }
+        //3.存量 MD5 密码在登录成功后自动升级为 BCrypt
+        if(isLegacyPassword(user.getUserPassword())){
+            User upgrade = new User();
+            upgrade.setId(user.getId());
+            upgrade.setUserPassword(getEncryptPassword(userPassword));
+            this.updateById(upgrade);
+            user.setUserPassword(upgrade.getUserPassword());
         }
 
         //4.记录登录状态
@@ -157,6 +206,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         }
         request.getSession().removeAttribute(USER_LOGIN_STATE);
         return true;
+    }
+
+    @Override
+    public boolean updatePassword(User loginUser, String oldPassword, String newPassword) {
+        if (loginUser == null || loginUser.getId() == null) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+        }
+        if (StrUtil.hasBlank(oldPassword, newPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
+        }
+        if (newPassword.length() < 6) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码不能少于 6 位");
+        }
+        if (oldPassword.equals(newPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码不能与原密码相同");
+        }
+        User user = this.getById(loginUser.getId());
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+        if (!isPasswordMatch(oldPassword, user.getUserPassword())) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "原密码错误");
+        }
+        User update = new User();
+        update.setId(user.getId());
+        update.setUserPassword(getEncryptPassword(newPassword));
+        return this.updateById(update);
     }
 
     @Override

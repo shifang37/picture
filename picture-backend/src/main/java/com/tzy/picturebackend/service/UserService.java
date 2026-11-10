@@ -36,6 +36,16 @@ public interface UserService extends IService<User> {
 
     boolean userLogout(HttpServletRequest request);
 
+    /**
+     * 修改当前登录用户的密码
+     *
+     * @param loginUser   当前登录用户
+     * @param oldPassword 原密码
+     * @param newPassword 新密码
+     * @return 是否成功
+     */
+    boolean updatePassword(User loginUser, String oldPassword, String newPassword);
+
     UserVO getUserVO(User user);
 
     List<UserVO> getUserVOList(List<User> userList);
