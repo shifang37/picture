@@ -3,7 +3,7 @@ package com.tzy.picturebackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
 import com.tzy.picturebackend.model.entity.User;
-import com.baomidou.mybatisplus.extension.service.IService;
+import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import jakarta.servlet.http.HttpServletRequest;
