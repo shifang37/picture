@@ -6,6 +6,7 @@ import UserRegisterPage from '@/pages/user/UserRegisterPage.vue'
 import UserManagePage from '@/pages/admin/UserManagePage.vue'
 import AddPicturePage from '@/pages/AddPicturePage.vue'
 import PictureManagePage from '@/pages/admin/PictureManagePage.vue'
+import PictureReviewPage from '@/pages/admin/PictureReviewPage.vue'
 import PictureDetailPage from '@/pages/PictureDetailPage.vue'
 
 const router = createRouter({
@@ -25,6 +26,11 @@ const router = createRouter({
       path: '/user/register',
       name: '用户注册',
       component: UserRegisterPage,
+    },
+    {
+      path: '/admin/pictureReview',
+      name: '图片审核',
+      component: PictureReviewPage,
     },
     {
       path: '/admin/pictureManage',

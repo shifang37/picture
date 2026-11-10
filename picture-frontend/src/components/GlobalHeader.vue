@@ -65,6 +65,11 @@ const originItems = [
     title: '创建图片',
   },
   {
+    key: '/admin/pictureReview',
+    label: '图片审核',
+    title: '图片审核',
+  },
+  {
     key: '/admin/pictureManage',
     label: '图片管理',
     title: '图片管理',
