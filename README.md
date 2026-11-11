@@ -134,6 +134,19 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 4. 管理员在「图片审核」页面（`/admin/pictureReview`）通过或拒绝，可填写审核意见
 5. 审核通过（`reviewStatus = 1`）后，图片才对所有访客可见；作者可在「我的图片」中看到拒绝原因
 
+## 生产部署（Docker / 反向代理 / 监控）
+
+1. 复制 `.env.example` 为 `.env`，填写数据库密码和腾讯云 COS 配置
+2. 执行 `docker compose up -d --build`
+3. 访问 `http://localhost:8080`；前端 nginx 会把 `/api` 反向代理到后端 `8123`
+
+说明：
+
+- 后端以 `prod` profile 启动，默认关闭 Swagger 与 MyBatis SQL 日志（见 `application-prod.yml.example`）
+- 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）
+- 已有数据库升级时需要手动执行 `picture-backend/sql/create_table.sql` 中新增的 `picture_review_log` 表和 `downloadCount` 字段
+- 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
+
 ## 常用命令
 
 ```bash

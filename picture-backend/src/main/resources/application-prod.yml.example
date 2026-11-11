@@ -1,0 +1,56 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL:jdbc:mysql://mysql:3306/picture?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root}
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 3MB
+server:
+  port: 8123
+  forward-headers-strategy: framework
+  servlet:
+    context-path: /api
+    session:
+      cookie:
+        http-only: true
+        # 生产环境使用 HTTPS 时设为 true
+        secure: ${SESSION_COOKIE_SECURE:false}
+        same-site: lax
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: false
+    # 生产环境关闭 SQL 日志
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    db-config:
+      logic-delete-field: isDelete
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+cos:
+  client:
+    host: ${COS_HOST}
+    secretId: ${COS_SECRET_ID}
+    secretKey: ${COS_SECRET_KEY}
+    region: ${COS_REGION:ap-beijing}
+    bucket: ${COS_BUCKET}
+app:
+  cors:
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
