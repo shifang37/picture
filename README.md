@@ -513,6 +513,19 @@ cd picture-backend
 
 集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、重传后审核/机审字段确实被置空、逻辑删除与账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
+## 持续集成与依赖更新
+
+CI（`.github/workflows/ci.yml`）在推送到 `main` 和 PR 时执行：
+
+- **后端**：`./mvnw verify`，包含单元测试与 Testcontainers 集成测试；JaCoCo 报告生成在
+  `picture-backend/target/site/jacoco`，并作为 `backend-jacoco` artifact 上传（只出报告，不设覆盖率门槛）；
+- **前端**：格式检查、ESLint、构建、Vitest、Playwright；
+- **镜像**：测试通过后构建 `picture-backend` / `picture-frontend` 镜像，用 Trivy 扫描
+  `HIGH,CRITICAL` 漏洞；可修复的高危漏洞会直接让流水线失败（`ignore-unfixed: true`）。
+
+依赖更新由 `.github/dependabot.yml` 按月提出分组 PR：Maven、npm、GitHub Actions、Docker 各一组。
+Dependabot 只负责提案，合并与否仍由人工决定，不影响直接推送 `main`。
+
 ## 注意事项
 
 - `picture-backend/src/main/resources/application-local.yml` 存放真实密钥，已在 `.gitignore` 中排除，请勿提交。
