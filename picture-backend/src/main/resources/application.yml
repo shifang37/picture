@@ -20,6 +20,12 @@ server:
   forward-headers-strategy: framework
   servlet:
     context-path: /api
+    session:
+      cookie:
+        http-only: true
+        # 生产环境使用 HTTPS 时通过环境变量设为 true
+        secure: ${SESSION_COOKIE_SECURE:false}
+        same-site: lax
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: false
