@@ -61,10 +61,11 @@
           {{ dayjs(record.createTime).format('YYYY-MM-DD HH:mm:ss') }}
         </template>
         <template v-else-if="column.key === 'action'">
-          <a-space>
+          <a-space v-if="record.reviewStatus === 0">
             <a-button type="link" @click="openReview(record, 1)">通过</a-button>
             <a-button type="link" danger @click="openReview(record, 2)">拒绝</a-button>
           </a-space>
+          <span v-else class="reviewed-text">已审核</span>
         </template>
       </template>
     </a-table>
@@ -194,6 +195,11 @@ const reviewForm = reactive({
 const reviewTitle = computed(() => (reviewForm.reviewStatus === 1 ? '通过审核' : '拒绝审核'))
 
 const openReview = (record: API.Picture, reviewStatus: number) => {
+  // 已审核的图片不允许重复操作，避免无效请求
+  if (record.reviewStatus !== 0) {
+    message.info('该图片已审核，无需重复操作')
+    return
+  }
   currentRecord.value = record
   reviewForm.reviewStatus = reviewStatus
   reviewForm.reviewMessage = ''
@@ -235,4 +241,8 @@ onMounted(() => {
 })
 </script>
 
-<style scoped></style>
+<style scoped>
+.reviewed-text {
+  color: #999;
+}
+</style>
