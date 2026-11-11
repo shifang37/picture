@@ -22,7 +22,9 @@ myAxios.interceptors.response.use(
         !window.location.pathname.includes('/user/login')
       ) {
         message.warning('请先登录')
-        window.location.href = `/user/login?redirect=${window.location.href}`
+        // 使用站内相对路径并编码，登录页只接受以 / 开头的 redirect
+        const current = window.location.pathname + window.location.search
+        window.location.href = `/user/login?redirect=${encodeURIComponent(current)}`
       }
     }
     return response
