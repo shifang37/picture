@@ -16,10 +16,12 @@ import com.tzy.picturebackend.model.dto.picture.*;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
+import com.tzy.picturebackend.service.AiSuggestionService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
@@ -49,6 +51,9 @@ public class PictureController {
 
     @Resource
     private PictureEventPublisher pictureEventPublisher;
+
+    @Resource
+    private AiSuggestionService aiSuggestionService;
 
 
 
@@ -228,6 +233,18 @@ public class PictureController {
     @GetMapping("/tag_category")
     public BaseResponse<PictureTagCategory> listPictureTagCategory() {
         return ResultUtils.success(pictureService.listTagCategory());
+    }
+
+    /**
+     * 查询图片的 AI 建议（仅作者和管理员可读）
+     * <p>
+     * 尚未生成时 data 为 null，前端据此继续轮询。
+     */
+    @GetMapping("/ai_suggestion")
+    public BaseResponse<PictureAiSuggestionVO> getPictureAiSuggestion(@RequestParam Long id,
+                                                                      HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(aiSuggestionService.getSuggestion(id, loginUser));
     }
 
     @PostMapping("/review")

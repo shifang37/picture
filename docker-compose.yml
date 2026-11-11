@@ -64,6 +64,11 @@ services:
       CORS_ALLOWED_ORIGIN_PATTERNS: http://localhost:${FRONTEND_PORT:-8080}
       MACHINE_REVIEW_ENABLED: ${MACHINE_REVIEW_ENABLED:-false}
       MACHINE_REVIEW_MODE: ${MACHINE_REVIEW_MODE:-assist}
+      AI_TAG_ENABLED: ${AI_TAG_ENABLED:-false}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      AI_MODEL: ${AI_MODEL:-deepseek-flash}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-20}
     expose:
       - '8123'
     depends_on:

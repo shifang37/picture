@@ -12,10 +12,12 @@ import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
+import com.tzy.picturebackend.service.AiSuggestionService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,17 +61,21 @@ class PictureControllerTest {
 
     private PictureEventPublisher pictureEventPublisher;
 
+    private AiSuggestionService aiSuggestionService;
+
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
         userService = mock(UserService.class);
         pictureListCache = mock(PictureListCache.class);
         pictureEventPublisher = mock(PictureEventPublisher.class);
+        aiSuggestionService = mock(AiSuggestionService.class);
         PictureController pictureController = new PictureController();
         ReflectionTestUtils.setField(pictureController, "pictureService", pictureService);
         ReflectionTestUtils.setField(pictureController, "userService", userService);
         ReflectionTestUtils.setField(pictureController, "pictureListCache", pictureListCache);
         ReflectionTestUtils.setField(pictureController, "pictureEventPublisher", pictureEventPublisher);
+        ReflectionTestUtils.setField(pictureController, "aiSuggestionService", aiSuggestionService);
         mockMvc = MockMvcBuilders.standaloneSetup(pictureController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -222,6 +228,30 @@ class PictureControllerTest {
         verify(pictureService).updateById(any(Picture.class));
         verify(pictureListCache).invalidate();
         verify(pictureEventPublisher).pictureChanged(1L);
+    }
+
+    @Test
+    @DisplayName("AI 建议：委托给 service 并返回建议内容")
+    void getAiSuggestion_delegatesToService() throws Exception {
+        User owner = user(100L, "user");
+        when(userService.getLoginUser(any())).thenReturn(owner);
+        PictureAiSuggestionVO suggestion = new PictureAiSuggestionVO();
+        suggestion.setPictureId(1L);
+        suggestion.setName("海边日落");
+        suggestion.setIntroduction("夕阳下的海面");
+        suggestion.setCategory("风景");
+        suggestion.setTags(List.of("海边", "日落"));
+        suggestion.setStatus(1);
+        when(aiSuggestionService.getSuggestion(1L, owner)).thenReturn(suggestion);
+
+        mockMvc.perform(get("/picture/ai_suggestion").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.name").value("海边日落"))
+                .andExpect(jsonPath("$.data.category").value("风景"))
+                .andExpect(jsonPath("$.data.tags[0]").value("海边"));
+
+        verify(aiSuggestionService).getSuggestion(1L, owner);
     }
 
     // ==================== 公开列表缓存 ====================

@@ -134,7 +134,11 @@ const doLogin = () => {
 const doProfile = () => {
   router.push('/user/profile')
 }
-const doMenuClick = ({ key }: { key: string }) => {
+const doMenuClick: MenuProps['onClick'] = ({ key }) => {
+  // 菜单 key 可能是 number，只处理字符串路径
+  if (typeof key !== 'string') {
+    return
+  }
   router.push({
     path: key,
   })

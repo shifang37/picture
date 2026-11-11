@@ -45,6 +45,33 @@ export interface PictureReviewLog {
   createTime?: string
 }
 
+export interface PictureAiSuggestion {
+  pictureId?: string
+  name?: string
+  introduction?: string
+  category?: string
+  tags?: string[]
+  model?: string
+  status?: number
+  createTime?: string
+}
+
+/**
+ * 查询图片的 AI 建议（仅作者和管理员）
+ */
+export async function getPictureAiSuggestion(id: string, options?: { [key: string]: any }) {
+  return request<{ code?: number; data?: PictureAiSuggestion | null; message?: string }>(
+    '/picture/ai_suggestion',
+    {
+      method: 'GET',
+      params: {
+        id,
+      },
+      ...(options || {}),
+    },
+  )
+}
+
 /**
  * 记录一次图片下载（后端会校验图片可见性）
  */

@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ、数据万象内容审核 |
+| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ、数据万象内容审核、DeepSeek |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理与内容审核） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
 | 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、ESLint |
@@ -22,7 +22,7 @@ picture/
 │       ├── controller/              # 接口层
 │       ├── service/                 # 业务层（接口 + impl）
 │       ├── mapper/                  # MyBatis-Plus Mapper
-│       ├── manager/                 # COS 上传、数据万象机审与限流封装
+│       ├── manager/                 # COS 上传、数据万象机审、DeepSeek 标注与限流封装
 │       ├── event/                   # 图片事件模型与 Spring 事件转发
 │       ├── mq/                      # RabbitMQ 拓扑与队列消费者
 │       ├── model/                   # entity / dto / vo / enums
@@ -213,6 +213,51 @@ app:
 
 审核页（`/admin/pictureReview`）新增「机审」列，标签悬浮可看命中标签、置信度与机审时间；默认按机审状态倒序（疑似 → 违规 → 正常 → 未机审），同状态内按创建时间倒序。
 
+## AI 自动建议（DeepSeek）
+
+上传成功后，后端调用 DeepSeek 的 OpenAI 兼容接口，为图片生成名称、简介、分类和标签**建议**。建议只用于辅助填写，不会修改图片数据，也不参与审核结论。
+
+### 开关与模型
+
+```yaml
+app:
+  ai:
+    enabled: ${AI_TAG_ENABLED:false}
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: ${AI_MODEL:deepseek-flash}
+    daily-limit: ${AI_DAILY_LIMIT:20}
+```
+
+- 默认关闭；关闭时消费者不查库、不调用任何外部接口，上传页也不会出现建议区域；
+- `deepseek-flash` 支持图片输入与 JSON Output，请求显式关闭思考模式，降低延迟与费用；
+- API Key 只从环境变量 `DEEPSEEK_API_KEY` 读取，不写入仓库。
+
+### 触发与输入
+
+- 机审开启时消费 `picture.moderated`，**只处理机审为「正常」的图片**，疑似/违规内容不会发给第三方模型；管理员直传的图片没有机审事件，改由 `picture.uploaded` 直接生成；
+- 机审关闭时直接消费 `picture.uploaded`；
+- 已拒绝的图片不生成建议；
+- 图片地址追加 `imageMogr2/thumbnail/1024x` 后再发送，减少图片 token；分类与标签字典会放进提示词，要求模型优先从字典选择。
+
+### 输出校验与存储
+
+- 建议单独存表 `picture_ai_suggestion`，`pictureId` 唯一，状态为 0 处理中 / 1 成功 / 2 失败；
+- 模型输出一律视为不可信输入，入库前再次校验：名称 ≤128 字符、简介 ≤512、分类必须来自字典（否则忽略）、标签去重且最多 20 个、单个 ≤32 字符；
+- 图片重传后旧建议会按 `editTime` 判定为过期并重新生成；处理中记录超过 10 分钟也会被视为中断并允许重试；
+- 查询接口 `GET /api/picture/ai_suggestion?id=` 仅作者和管理员可读，尚未生成时返回 `data: null`。
+
+### 前端
+
+上传成功（含重传）后，上传页最多轮询约 10 秒。拿到成功建议后显示「AI 建议」卡片和「一键填入」按钮；超时、失败或开关关闭时不显示，也**不阻塞**用户手动填写。一键填入只会覆盖名称、简介、分类、标签四个表单项，提交前仍可修改。
+
+### 成本、重试与隐私
+
+- 每用户每日调用上限由 Redis 计数控制（`picture:ai:limit:<userId>:<yyyyMMdd>`，默认 20 次），超限不调用模型；
+- 429、5xx、网络异常最多重试 2 次（首次后按 1s、2s 退避，429 优先使用 `Retry-After`）；模型拒答、输出为空或 JSON 解析失败直接记失败，不重试；
+- DeepSeek 按 token 计费，开启前请确认预算；用户上传的图片会发送给 DeepSeek，生产环境需在用户协议/隐私政策中说明，或保持默认关闭；
+- 真实调用需要配置 `DEEPSEEK_API_KEY`，可用 `DEEPSEEK_BASE_URL` 指向兼容网关。
+
 ## 标签与分类字典
 
 标签和分类由管理员维护的字典表 `tag_category` 提供，不再从图片动态汇总：
@@ -258,7 +303,7 @@ app:
 
 | 路由键 | 触发时机 | 消费队列 |
 | --- | --- | --- |
-| `picture.uploaded` | 新上传或重传成功 | `picture.moderation.q`、`picture.search.q` |
+| `picture.uploaded` | 新上传或重传成功 | `picture.moderation.q`、`picture.search.q`、`picture.ai.q`（机审开启时 AI 消费者会跳过，等 `moderated`） |
 | `picture.moderated` | 机审完成 | `picture.ai.q` |
 | `picture.changed` | 人工审核、编辑、删除 | `picture.search.q` |
 
@@ -273,7 +318,7 @@ app:
 - 生产者开启 `publisher-confirm-type: correlated` 与 `publisher-returns`，确认失败或无法路由只记录日志；RabbitMQ 停机时上传、审核等主流程仍然成功（发布失败只留错误日志，接口正常返回）；
 - 消费者失败最多尝试 3 次（首次后按 1s、2s 退避），仍失败则拒绝消息，由队列的 `x-dead-letter-exchange` 转入 `${queue}.dlq`；消息体无法解析等「毒消息」同样进死信，不会无限重入队；
 - 消费者按 id 回查并检查状态：图片已删除、已审核或机审字段已有值时直接确认消息，避免重复处理；
-- 机审消费者在开关开启时调用数据万象并写回机审字段，另有每 5 分钟的兜底扫描；AI 标签与搜索索引消费者目前仍只做状态校验与事件记录，后续接入对应能力。
+- 机审消费者在开关开启时调用数据万象并写回机审字段，另有每 5 分钟的兜底扫描；AI 消费者机审开启时只处理机审正常的图片，机审关闭时直接消费上传事件；搜索索引消费者目前仍只做状态校验与事件记录，后续接入搜索能力。
 
 管理界面可以查看队列、绑定与死信：`http://127.0.0.1:15672`（本地默认 `guest / guest`）。生产环境不映射 15672 到宿主机。
 
@@ -298,7 +343,7 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 
 ## 生产部署（Docker / 反向代理 / 监控）
 
-1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码、RabbitMQ 账号密码和腾讯云 COS 配置
+1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码、RabbitMQ 账号密码、腾讯云 COS 配置；如开启 AI 建议，还需填写 `DEEPSEEK_API_KEY`
 2. 执行 `docker compose up -d --build`
 3. 访问 `http://localhost:8080`；前端 nginx 会把 `/api` 反向代理到后端 `8123`
 
@@ -308,7 +353,7 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 - 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）
 - **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/metrics` 不再可访问；确需 metrics 时使用独立管理端口（例如 `management.server.port: 8124`），该端口不要经过 nginx，只在内网/监控网络开放
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
-- **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增 `V2__xxx.sql`
+- **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增更高版本的迁移脚本（如 `V7__xxx.sql`）
 - **Redis 与会话**：compose 内置 `redis` 服务（AOF 持久化 + 密码认证，密码由 `REDIS_PASSWORD` 指定，务必改掉默认值）；`redis-data` 卷保存会话与失效版本，删除该卷会让所有用户重新登录
 - **RabbitMQ**：compose 内置 `rabbitmq` 服务（`rabbitmq:4-management`，持久化卷 `rabbitmq-data`，只在内网可达，不映射 5672/15672 到宿主机）。账号密码由 `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` 指定；**不要使用 `guest`**，RabbitMQ 的 guest 只允许本机回环地址登录，容器间连不上。账号只在数据卷首次初始化时生效，修改 `.env` 后需要删除 `rabbitmq-data` 卷（会丢失队列与死信）或进入容器手工改密码
 - **图片事件**：队列与交换机在应用启动时由 `RabbitAdmin` 幂等声明；RabbitMQ 不可用时上传与审核仍然成功，只是事件投递失败并记录日志。机审开启时每 5 分钟兜底补发遗漏图片（Redis 互斥），可用 `MACHINE_REVIEW_ENABLED` / `MACHINE_REVIEW_MODE` 控制；关闭机审则不会有任何外部审核调用
@@ -344,7 +389,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **280 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **310 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

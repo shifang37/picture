@@ -110,6 +110,19 @@ app:
       enabled: ${MACHINE_REVIEW_ENABLED:false}
       # assist（只记录结果，默认）| auto-reject（违规自动拒绝）| auto（违规拒绝、正常通过）
       mode: ${MACHINE_REVIEW_MODE:assist}
+  ai:
+    # 上传后生成名称、简介、分类与标签建议，默认关闭
+    enabled: ${AI_TAG_ENABLED:false}
+    # DeepSeek OpenAI 兼容接口
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: ${AI_MODEL:deepseek-flash}
+    # 每用户每日最多调用次数
+    daily-limit: ${AI_DAILY_LIMIT:20}
+    max-retries: ${AI_MAX_RETRIES:2}
+    retry-delay-millis: ${AI_RETRY_DELAY_MS:1000}
+    max-tokens: ${AI_MAX_TOKENS:800}
+    timeout: ${AI_TIMEOUT:60s}
 
 # 对象存储配置：生产环境通过环境变量注入，禁止把真实密钥写入仓库
 cos:

@@ -24,6 +24,28 @@
       style="margin: 16px 0"
     />
 
+    <a-card v-if="aiSuggestion" size="small" title="AI 建议" style="margin: 16px 0">
+      <div class="ai-suggestion-item">
+        <span class="ai-suggestion-label">名称</span>
+        <span>{{ aiSuggestion.name }}</span>
+      </div>
+      <div v-if="aiSuggestion.introduction" class="ai-suggestion-item">
+        <span class="ai-suggestion-label">简介</span>
+        <span>{{ aiSuggestion.introduction }}</span>
+      </div>
+      <div v-if="aiSuggestion.category" class="ai-suggestion-item">
+        <span class="ai-suggestion-label">分类</span>
+        <span>{{ aiSuggestion.category }}</span>
+      </div>
+      <div v-if="aiSuggestion.tags?.length" class="ai-suggestion-item">
+        <span class="ai-suggestion-label">标签</span>
+        <a-space wrap>
+          <a-tag v-for="tag in aiSuggestion.tags" :key="tag">{{ tag }}</a-tag>
+        </a-space>
+      </div>
+      <a-button type="primary" ghost size="small" @click="applyAiSuggestion"> 一键填入 </a-button>
+    </a-card>
+
     <a-form
       v-if="picture"
       layout="vertical"
@@ -71,11 +93,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message, type FormProps } from 'ant-design-vue'
 import PictureUpload from '@/components/PictureUpload.vue'
 import { editPicture, listPictureTagCategory, getPictureVoById } from '@/api/pictureController'
+import { getPictureAiSuggestion, type PictureAiSuggestion } from '@/api/pictureExtra'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 
 const router = useRouter()
@@ -88,6 +111,70 @@ const isEdit = computed(() => typeof route.query?.id === 'string')
 const picture = ref<API.PictureVO>()
 const pictureForm = reactive<API.PictureEditRequest>({})
 const submitting = ref(false)
+const aiSuggestion = ref<PictureAiSuggestion | null>(null)
+let aiPollTimer: number | undefined
+
+const AI_POLL_INTERVAL = 1000
+const AI_POLL_MAX_ATTEMPTS = 10
+
+const stopAiPolling = () => {
+  if (aiPollTimer !== undefined) {
+    window.clearTimeout(aiPollTimer)
+    aiPollTimer = undefined
+  }
+}
+
+/**
+ * 上传成功后轮询 AI 建议，最多约 10 秒；失败或超时就不显示，不阻断用户手填
+ */
+const pollAiSuggestion = (pictureId: string) => {
+  stopAiPolling()
+  aiSuggestion.value = null
+  let attempts = 0
+  const tick = async () => {
+    attempts += 1
+    try {
+      const res = await getPictureAiSuggestion(pictureId)
+      const data = res.data.data
+      if (res.data.code === 0 && data) {
+        // 1 成功：展示建议；2 失败：停止轮询并保持隐藏
+        if (data.status === 1) {
+          aiSuggestion.value = data
+          return
+        }
+        if (data.status === 2) {
+          return
+        }
+      }
+    } catch {
+      // 单次轮询失败不打断用户填写，下一轮继续
+    }
+    if (attempts < AI_POLL_MAX_ATTEMPTS) {
+      aiPollTimer = window.setTimeout(tick, AI_POLL_INTERVAL)
+    }
+  }
+  aiPollTimer = window.setTimeout(tick, 800)
+}
+
+const applyAiSuggestion = () => {
+  const suggestion = aiSuggestion.value
+  if (!suggestion) {
+    return
+  }
+  if (suggestion.name) {
+    pictureForm.name = suggestion.name
+  }
+  if (suggestion.introduction) {
+    pictureForm.introduction = suggestion.introduction
+  }
+  if (suggestion.category) {
+    pictureForm.category = suggestion.category
+  }
+  if (suggestion.tags?.length) {
+    pictureForm.tags = [...suggestion.tags]
+  }
+  message.success('已填入 AI 建议，可继续修改后提交')
+}
 
 // 标签逐个校验长度，避免总长度或单个标签过长被后端拒绝
 const validateTags = (_rule: any, value?: string[]) => {
@@ -135,6 +222,10 @@ const onSuccess = (newPicture: API.PictureVO) => {
   // 首次上传时用文件名作为默认名称；重新上传时不要覆盖用户已经填写的内容
   if (isFirstUpload || !pictureForm.name) {
     pictureForm.name = newPicture.name
+  }
+  // 新上传/重传都重新拉取建议；旧建议不能沿用到新文件
+  if (newPicture.id) {
+    pollAiSuggestion(newPicture.id)
   }
 }
 
@@ -229,11 +320,27 @@ onMounted(() => {
   getTagCategoryOptions()
   getOldPicture()
 })
+
+onUnmounted(() => {
+  stopAiPolling()
+})
 </script>
 
 <style scoped>
 #addPicturePage {
   max-width: 720px;
   margin: 0 auto;
+}
+
+.ai-suggestion-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+.ai-suggestion-label {
+  flex: 0 0 40px;
+  color: #999;
 }
 </style>

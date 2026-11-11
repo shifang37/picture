@@ -60,6 +60,13 @@ app:
       # 默认关闭；开启后按张计费，需 COS 桶已绑定数据万象
       enabled: ${MACHINE_REVIEW_ENABLED:false}
       mode: ${MACHINE_REVIEW_MODE:assist}
+  ai:
+    # 默认关闭；开启后按 token 计费，使用 DeepSeek 的 OpenAI 兼容接口
+    enabled: ${AI_TAG_ENABLED:false}
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: ${AI_MODEL:deepseek-flash}
+    daily-limit: ${AI_DAILY_LIMIT:20}
 management:
   endpoints:
     web:

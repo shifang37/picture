@@ -60,6 +60,7 @@ class PictureMqConfigTest {
         assertEquals(Set.of(
                 "picture.event picture.uploaded -> picture.moderation.q",
                 "picture.event picture.uploaded -> picture.search.q",
+                "picture.event picture.uploaded -> picture.ai.q",
                 "picture.event picture.moderated -> picture.ai.q",
                 "picture.event picture.changed -> picture.search.q",
                 "picture.dlx picture.moderation.q.dlq -> picture.moderation.q.dlq",

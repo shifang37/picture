@@ -21,7 +21,7 @@ import org.springframework.context.annotation.Configuration;
  * 拓扑（声明为 Declarable，应用启动时由 RabbitAdmin 自动创建，重复启动是幂等的）：
  * <pre>
  * picture.event (topic)
- *   ├─ picture.uploaded  → picture.moderation.q、picture.search.q
+ *   ├─ picture.uploaded  → picture.moderation.q、picture.search.q、picture.ai.q
  *   ├─ picture.moderated → picture.ai.q
  *   └─ picture.changed   → picture.search.q
  *
@@ -93,6 +93,9 @@ public class PictureMqConfig {
                 // 机审完成：触发 AI 标签建议
                 BindingBuilder.bind(aiQueue).to(eventExchange)
                         .with(PictureEventType.MODERATED.getRoutingKey()),
+                // 上传：机审关闭或管理员直传时由 AI 消费者直接生成建议；机审开启时消费者会跳过，等 moderated
+                BindingBuilder.bind(aiQueue).to(eventExchange)
+                        .with(PictureEventType.UPLOADED.getRoutingKey()),
                 // 人工审核、编辑、删除：只需要更新搜索索引
                 BindingBuilder.bind(searchQueue).to(eventExchange)
                         .with(PictureEventType.CHANGED.getRoutingKey()),
