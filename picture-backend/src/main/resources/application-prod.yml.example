@@ -48,7 +48,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info
+  # 需要 metrics 时使用独立管理端口，只在内网/监控网络开放：
+  # server:
+  #   port: 8124
   endpoint:
     health:
       probes:

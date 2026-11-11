@@ -65,12 +65,15 @@ cos:
     region: ${COS_REGION:ap-beijing}
     bucket: ${COS_BUCKET:}
 
-# 健康检查与指标（生产环境可通过 /api/actuator/health 探测）
+# 健康检查（生产环境可通过 /api/actuator/health 探测）
+# 公网 /api 会经过 nginx 反向代理，只暴露 health/info；metrics 属于内部信息。
+# 确实需要 metrics 时使用独立管理端口（例如 management.server.port: 8124），
+# 只在内网/监控网络开放，不要把 metrics 加回这里的 include。
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info
   endpoint:
     health:
       probes:
