@@ -53,7 +53,7 @@
       </a-form-item>
 
       <a-form-item>
-        <a-button type="primary" html-type="submit" style="width: 100%">
+        <a-button type="primary" html-type="submit" style="width: 100%" :loading="submitting">
           {{ isEdit ? '保存修改' : '创建' }}
         </a-button>
       </a-form-item>
@@ -76,6 +76,7 @@ const isEdit = computed(() => typeof route.query?.id === 'string')
 
 const picture = ref<API.PictureVO>()
 const pictureForm = reactive<API.PictureEditRequest>({})
+const submitting = ref(false)
 
 // 标签逐个校验长度，避免总长度或单个标签过长被后端拒绝
 const validateTags = (_rule: any, value?: string[]) => {
@@ -128,18 +129,25 @@ const handleSubmit = async (values: any) => {
     message.error('请先上传图片')
     return
   }
-  const res = await editPicture({
-    id: pictureId,
-    ...values,
-  })
-  if (res.data.code === 0) {
-    message.success(isEdit.value ? '保存成功' : '创建成功')
-    // 跳转到图片详情页
-    router.push({
-      path: `/picture/${pictureId}`,
+  submitting.value = true
+  try {
+    const res = await editPicture({
+      id: pictureId,
+      ...values,
     })
-  } else {
-    message.error('保存失败，' + (res.data.message || '未知错误'))
+    if (res.data.code === 0) {
+      message.success(isEdit.value ? '保存成功' : '创建成功')
+      // 跳转到图片详情页
+      router.push({
+        path: `/picture/${pictureId}`,
+      })
+    } else {
+      message.error('保存失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('保存失败：' + (e.message || '系统错误'))
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -148,23 +156,27 @@ const tagOptions = ref<{ value: string; label: string }[]>([])
 
 // 获取标签和分类选项
 const getTagCategoryOptions = async () => {
-  const res = await listPictureTagCategory()
-  if (res.data.code === 0 && res.data.data) {
-    // 转换成下拉选项组件接受的格式
-    tagOptions.value = (res.data.data.tagList ?? []).map((data: string) => {
-      return {
-        value: data,
-        label: data,
-      }
-    })
-    categoryOptions.value = (res.data.data.categoryList ?? []).map((data: string) => {
-      return {
-        value: data,
-        label: data,
-      }
-    })
-  } else {
-    message.error('加载选项失败，' + res.data.message)
+  try {
+    const res = await listPictureTagCategory()
+    if (res.data.code === 0 && res.data.data) {
+      // 转换成下拉选项组件接受的格式
+      tagOptions.value = (res.data.data.tagList ?? []).map((data: string) => {
+        return {
+          value: data,
+          label: data,
+        }
+      })
+      categoryOptions.value = (res.data.data.categoryList ?? []).map((data: string) => {
+        return {
+          value: data,
+          label: data,
+        }
+      })
+    } else {
+      message.error('加载选项失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('加载选项失败：' + (e.message || '系统错误'))
   }
 }
 
@@ -174,18 +186,22 @@ const getOldPicture = async () => {
   const id = route.query?.id
   // 雪花 ID 超出 JS 安全整数范围，必须按字符串传递，不能转 Number
   if (typeof id === 'string') {
-    const res = await getPictureVoById({
-      id,
-    })
-    if (res.data.code === 0 && res.data.data) {
-      const data = res.data.data
-      picture.value = data
-      pictureForm.name = data.name
-      pictureForm.introduction = data.introduction
-      pictureForm.category = data.category
-      pictureForm.tags = data.tags
-    } else {
-      message.error('获取图片信息失败：' + (res.data.message || '图片不存在'))
+    try {
+      const res = await getPictureVoById({
+        id,
+      })
+      if (res.data.code === 0 && res.data.data) {
+        const data = res.data.data
+        picture.value = data
+        pictureForm.name = data.name
+        pictureForm.introduction = data.introduction
+        pictureForm.category = data.category
+        pictureForm.tags = data.tags
+      } else {
+        message.error('获取图片信息失败：' + (res.data.message || '图片不存在'))
+      }
+    } catch (e: any) {
+      message.error('获取图片信息失败：' + (e.message || '系统错误'))
     }
   }
 }

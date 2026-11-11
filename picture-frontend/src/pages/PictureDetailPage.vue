@@ -3,13 +3,13 @@
     <a-row :gutter="[16, 16]">
       <!-- 图片展示区 -->
       <a-col :sm="24" :md="16" :xl="18">
-        <a-card title="图片预览">
+        <a-card title="图片预览" :loading="loading">
           <a-image style="max-height: 600px; object-fit: contain" :src="picture.url" />
         </a-card>
       </a-col>
       <!-- 图片信息区 -->
       <a-col :sm="24" :md="8" :xl="6">
-        <a-card title="图片信息">
+        <a-card title="图片信息" :loading="loading">
           <a-alert
             v-if="picture.id && reviewStatus !== 1"
             :message="`当前图片状态：${reviewStatusText}`"
@@ -115,6 +115,7 @@ const props = defineProps<{
   id: string
 }>()
 const picture = ref<API.PictureVO>({})
+const loading = ref(true)
 
 // 审核状态：0 待审核、1 已通过、2 已拒绝
 const reviewStatus = computed(() => picture.value.reviewStatus ?? 1)
@@ -139,6 +140,7 @@ const reviewDescription = computed(() => {
 
 // 获取图片详情
 const fetchPictureDetail = async () => {
+  loading.value = true
   try {
     const res = await getPictureVoById({
       id: props.id,
@@ -158,6 +160,8 @@ const fetchPictureDetail = async () => {
     setTimeout(() => {
       router.push('/')
     }, 3000)
+  } finally {
+    loading.value = false
   }
 }
 

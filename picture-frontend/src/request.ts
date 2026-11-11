@@ -41,8 +41,11 @@ myAxios.interceptors.response.use(
     return response
   },
   function (error) {
-    // Any status code that falls outside the range of 2xx cause this function to trigger
-    // Do something with response error
+    // 统一把后端返回的错误信息挂到 error.message，页面 catch 后可直接提示
+    const backendMessage = error?.response?.data?.message
+    if (backendMessage) {
+      error.message = backendMessage
+    }
     return Promise.reject(error)
   },
 )

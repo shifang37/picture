@@ -54,7 +54,9 @@
         <RouterLink to="/user/login">去登录</RouterLink>
       </div>
       <a-form-item>
-        <a-button type="primary" html-type="submit" style="width: 100%">注册</a-button>
+        <a-button type="primary" html-type="submit" style="width: 100%" :loading="loading">
+          注册
+        </a-button>
       </a-form-item>
     </a-form>
   </div>
@@ -63,7 +65,7 @@
 <script setup lang="ts">
 import { userRegister } from '@/api/userController'
 import { message } from 'ant-design-vue'
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 const formState = reactive<API.UserRegisterRequest>({
   userAccount: '',
@@ -71,6 +73,7 @@ const formState = reactive<API.UserRegisterRequest>({
   checkPassword: '',
 })
 const router = useRouter()
+const loading = ref(false)
 
 // 与后端 DTO 的密码上限保持一致
 const validateConfirmPassword = (_rule: any, value: string) => {
@@ -90,16 +93,23 @@ const handleSubmit = async (values: any) => {
     message.error('二次输入的密码不一致')
     return
   }
-  const res = await userRegister(values)
-  // 注册成功，跳转到登录页面
-  if (res.data.code === 0 && res.data.data) {
-    message.success('注册成功')
-    router.push({
-      path: '/user/login',
-      replace: true,
-    })
-  } else {
-    message.error('注册失败，' + res.data.message)
+  loading.value = true
+  try {
+    const res = await userRegister(values)
+    // 注册成功，跳转到登录页面
+    if (res.data.code === 0 && res.data.data) {
+      message.success('注册成功')
+      router.push({
+        path: '/user/login',
+        replace: true,
+      })
+    } else {
+      message.error('注册失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('注册失败：' + (e.message || '系统错误'))
+  } finally {
+    loading.value = false
   }
 }
 </script>
