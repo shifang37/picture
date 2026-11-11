@@ -491,7 +491,93 @@ class PictureServiceImplTest {
         }
     }
 
+    // ==================== 字段长度校验 ====================
+
+    @Test
+    @DisplayName("校验：名称超过 128 个字符应拒绝")
+    void validPicture_rejectsTooLongName() {
+        Picture picture = validPictureEntity();
+        picture.setName("a".repeat(129));
+
+        BusinessException e = assertThrows(BusinessException.class, () -> pictureService.validPicture(picture));
+        assertEquals("图片名称不能超过 128 个字符", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("校验：名称刚好 128 个字符可以通过")
+    void validPicture_acceptsNameAtLimit() {
+        Picture picture = validPictureEntity();
+        picture.setName("a".repeat(128));
+
+        assertDoesNotThrow(() -> pictureService.validPicture(picture));
+    }
+
+    @Test
+    @DisplayName("校验：分类超过 64 个字符应拒绝")
+    void validPicture_rejectsTooLongCategory() {
+        Picture picture = validPictureEntity();
+        picture.setCategory("c".repeat(65));
+
+        BusinessException e = assertThrows(BusinessException.class, () -> pictureService.validPicture(picture));
+        assertEquals("分类不能超过 64 个字符", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("校验：简介超过 512 个字符应拒绝")
+    void validPicture_rejectsTooLongIntroduction() {
+        Picture picture = validPictureEntity();
+        picture.setIntroduction("i".repeat(513));
+
+        BusinessException e = assertThrows(BusinessException.class, () -> pictureService.validPicture(picture));
+        assertEquals("简介不能超过 512 个字符", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("校验：标签 JSON 总长度超过 512 应拒绝")
+    void validPicture_rejectsTooLongTagsJson() {
+        Picture picture = validPictureEntity();
+        picture.setTags("[\"" + "t".repeat(510) + "\"]");
+
+        BusinessException e = assertThrows(BusinessException.class, () -> pictureService.validPicture(picture));
+        assertEquals("标签总长度不能超过 512 个字符", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("校验：url 超过 512 个字符应拒绝")
+    void validPicture_rejectsTooLongUrl() {
+        Picture picture = validPictureEntity();
+        picture.setUrl("https://example.com/" + "u".repeat(500));
+
+        BusinessException e = assertThrows(BusinessException.class, () -> pictureService.validPicture(picture));
+        assertEquals("url 不能超过 512 个字符", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("审核：审核意见超过 512 个字符应拒绝")
+    void doPictureReview_rejectsTooLongMessage() {
+        PictureReviewRequest request = new PictureReviewRequest();
+        request.setId(1L);
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        request.setReviewMessage("m".repeat(513));
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> pictureService.doPictureReview(request, admin()));
+        assertEquals("审核意见不能超过 512 个字符", e.getMessage());
+    }
+
     // ==================== 辅助方法 ====================
+
+    private Picture validPictureEntity() {
+        Picture picture = new Picture();
+        picture.setId(1L);
+        picture.setUrl("https://example.com/public/1/a.jpg");
+        picture.setName("图片");
+        picture.setCategory("分类");
+        picture.setIntroduction("简介");
+        picture.setTags("[\"标签\"]");
+        picture.setPicFormat("jpg");
+        return picture;
+    }
 
     private PictureUploadRequest uploadRequest(Long id) {
         PictureUploadRequest request = new PictureUploadRequest();

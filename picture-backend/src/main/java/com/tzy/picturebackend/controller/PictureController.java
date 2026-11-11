@@ -20,6 +20,7 @@ import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.http.MediaType;
@@ -63,7 +64,7 @@ public class PictureController {
      * 删除图片
      */
     @PostMapping("/delete")
-    public BaseResponse<Boolean> deletePicture(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
+    public BaseResponse<Boolean> deletePicture(@Valid @RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
@@ -78,7 +79,7 @@ public class PictureController {
      */
     @PostMapping("/update")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Boolean> updatePicture(@RequestBody PictureUpdateRequest pictureUpdateRequest) {
+    public BaseResponse<Boolean> updatePicture(@Valid @RequestBody PictureUpdateRequest pictureUpdateRequest) {
         if (pictureUpdateRequest == null || pictureUpdateRequest.getId() == null
                 || pictureUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -134,7 +135,7 @@ public class PictureController {
      */
     @PostMapping("/list/page")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Page<Picture>> listPictureByPage(@RequestBody PictureQueryRequest pictureQueryRequest) {
+    public BaseResponse<Page<Picture>> listPictureByPage(@Valid @RequestBody PictureQueryRequest pictureQueryRequest) {
         ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
@@ -149,7 +150,7 @@ public class PictureController {
      * 分页获取图片列表（封装类）
      */
     @PostMapping("/list/page/vo")
-    public BaseResponse<Page<PictureVO>> listPictureVOByPage(@RequestBody PictureQueryRequest pictureQueryRequest,
+    public BaseResponse<Page<PictureVO>> listPictureVOByPage(@Valid @RequestBody PictureQueryRequest pictureQueryRequest,
                                                              HttpServletRequest request) {
         ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long current = pictureQueryRequest.getCurrent();
@@ -171,7 +172,7 @@ public class PictureController {
      * 用于普通用户在「我的图片」里管理自己上传的内容，不要求管理员权限。
      */
     @PostMapping("/my/page/vo")
-    public BaseResponse<Page<PictureVO>> listMyPictureVOByPage(@RequestBody PictureQueryRequest pictureQueryRequest,
+    public BaseResponse<Page<PictureVO>> listMyPictureVOByPage(@Valid @RequestBody PictureQueryRequest pictureQueryRequest,
                                                                HttpServletRequest request) {
         ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long size = pictureQueryRequest.getPageSize();
@@ -190,7 +191,7 @@ public class PictureController {
      * 编辑图片（给用户使用）
      */
     @PostMapping("/edit")
-    public BaseResponse<Boolean> editPicture(@RequestBody PictureEditRequest pictureEditRequest, HttpServletRequest request) {
+    public BaseResponse<Boolean> editPicture(@Valid @RequestBody PictureEditRequest pictureEditRequest, HttpServletRequest request) {
         if (pictureEditRequest == null || pictureEditRequest.getId() == null
                 || pictureEditRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -231,7 +232,7 @@ public class PictureController {
 
     @PostMapping("/review")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Boolean> doPictureReview(@RequestBody PictureReviewRequest pictureReviewRequest,
+    public BaseResponse<Boolean> doPictureReview(@Valid @RequestBody PictureReviewRequest pictureReviewRequest,
                                                  HttpServletRequest request) {
         ThrowUtils.throwIf(pictureReviewRequest == null, ErrorCode.PARAMS_ERROR);
         User loginUser = userService.getLoginUser(request);

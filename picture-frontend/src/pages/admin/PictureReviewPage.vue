@@ -78,7 +78,9 @@
           <a-textarea
             v-model:value="reviewForm.reviewMessage"
             :rows="3"
-            placeholder="通过可留空，拒绝建议填写原因"
+            :maxlength="512"
+            show-count
+            placeholder="通过可留空，拒绝建议填写原因（最多 512 字）"
             allow-clear
           />
         </a-form-item>
@@ -197,6 +199,10 @@ const openReview = (record: API.Picture, reviewStatus: number) => {
 const submitReview = async () => {
   const id = currentRecord.value?.id
   if (!id) {
+    return
+  }
+  if (reviewForm.reviewMessage.length > 512) {
+    message.error('审核意见不能超过 512 个字符')
     return
   }
   submitting.value = true

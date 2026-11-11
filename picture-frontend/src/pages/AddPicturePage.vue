@@ -77,9 +77,26 @@ const isEdit = computed(() => typeof route.query?.id === 'string')
 const picture = ref<API.PictureVO>()
 const pictureForm = reactive<API.PictureEditRequest>({})
 
-// 表单校验规则：名称会作为数据库中的非空字段，必须填写
+// 标签逐个校验长度，避免总长度或单个标签过长被后端拒绝
+const validateTags = (_rule: any, value?: string[]) => {
+  if (value?.some((tag) => tag.length > 32)) {
+    return Promise.reject('单个标签不能超过 32 个字符')
+  }
+  return Promise.resolve()
+}
+
+// 表单校验规则：与后端 DTO / 数据库字段长度保持一致
 const formRules = {
-  name: [{ required: true, message: '请输入图片名称', trigger: 'blur' }],
+  name: [
+    { required: true, message: '请输入图片名称', trigger: 'blur' },
+    { max: 128, message: '图片名称不能超过 128 个字符', trigger: 'blur' },
+  ],
+  introduction: [{ max: 512, message: '简介不能超过 512 个字符', trigger: 'blur' }],
+  category: [{ max: 64, message: '分类不能超过 64 个字符', trigger: 'blur' }],
+  tags: [
+    { type: 'array', max: 20, message: '标签最多 20 个', trigger: 'change' },
+    { validator: validateTags, trigger: 'change' },
+  ],
 }
 
 // 未通过审核时给用户的说明

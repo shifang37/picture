@@ -286,14 +286,33 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 从对象中取值
         Long id = picture.getId();
         String url = picture.getUrl();
+        String name = picture.getName();
         String introduction = picture.getIntroduction();
+        String category = picture.getCategory();
+        String tags = picture.getTags();
+        String picFormat = picture.getPicFormat();
         // 修改数据时，id 不能为空，有参数则校验
         ThrowUtils.throwIf(ObjUtil.isNull(id), ErrorCode.PARAMS_ERROR, "id 不能为空");
+        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR, "id 必须为正数");
+        // 以下长度均对应数据库字段长度，避免超长时才由数据库报错
         if (StrUtil.isNotBlank(url)) {
-            ThrowUtils.throwIf(url.length() > 1024, ErrorCode.PARAMS_ERROR, "url 过长");
+            ThrowUtils.throwIf(url.length() > 512, ErrorCode.PARAMS_ERROR, "url 不能超过 512 个字符");
+        }
+        if (StrUtil.isNotBlank(name)) {
+            ThrowUtils.throwIf(name.length() > 128, ErrorCode.PARAMS_ERROR, "图片名称不能超过 128 个字符");
         }
         if (StrUtil.isNotBlank(introduction)) {
-            ThrowUtils.throwIf(introduction.length() > 800, ErrorCode.PARAMS_ERROR, "简介过长");
+            ThrowUtils.throwIf(introduction.length() > 512, ErrorCode.PARAMS_ERROR, "简介不能超过 512 个字符");
+        }
+        if (StrUtil.isNotBlank(category)) {
+            ThrowUtils.throwIf(category.length() > 64, ErrorCode.PARAMS_ERROR, "分类不能超过 64 个字符");
+        }
+        if (StrUtil.isNotBlank(tags)) {
+            // tags 是 JSON 数组字符串，每个标签长度之和也可能超过数据库字段长度
+            ThrowUtils.throwIf(tags.length() > 512, ErrorCode.PARAMS_ERROR, "标签总长度不能超过 512 个字符");
+        }
+        if (StrUtil.isNotBlank(picFormat)) {
+            ThrowUtils.throwIf(picFormat.length() > 32, ErrorCode.PARAMS_ERROR, "图片格式不能超过 32 个字符");
         }
     }
 
@@ -326,6 +345,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 审核的目标状态必须是通过或拒绝，不能是待审核
         if (id == null || reviewStatusEnum == null || PictureReviewStatusEnum.REVIEWING.equals(reviewStatusEnum)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        String reviewMessage = pictureReviewRequest.getReviewMessage();
+        if (reviewMessage != null && reviewMessage.length() > 512) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "审核意见不能超过 512 个字符");
         }
 
         Picture oldPicture = this.getById(id);
