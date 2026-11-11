@@ -1,4 +1,4 @@
-FROM maven:3.9-eclipse-temurin-21 AS build
+FROM maven:3.9-eclipse-temurin-26 AS build
 WORKDIR /app
 COPY pom.xml .
 # 先只解析依赖：源码改动不会让这一层缓存失效，避免每次构建都重新下载全部依赖
@@ -8,7 +8,7 @@ COPY src src
 RUN mvn -B --no-transfer-progress -Dmaven.artifact.threads=16 \
     -Dmaven.test.skip=true package
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 WORKDIR /app
 # 升级基础镜像中已修复的 OS 包，避免 Trivy 因可修复高危漏洞让流水线失败
 RUN apt-get update \
