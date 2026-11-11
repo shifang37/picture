@@ -70,6 +70,11 @@ const originItems = [
     title: '创建图片',
   },
   {
+    key: '/batch_upload',
+    label: '批量上传',
+    title: '批量上传',
+  },
+  {
     key: '/my_pictures',
     label: '我的图片',
     title: '我的图片',
@@ -109,7 +114,10 @@ const filterMenus = (menus = [] as MenuProps['items']) => {
       return false
     }
     // 上传和「我的图片」需要登录
-    if ((menuKey === '/add_picture' || menuKey === '/my_pictures') && !loginUser?.id) {
+    if (
+      (menuKey === '/add_picture' || menuKey === '/batch_upload' || menuKey === '/my_pictures') &&
+      !loginUser?.id
+    ) {
       return false
     }
     return true

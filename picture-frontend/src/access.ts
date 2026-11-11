@@ -26,7 +26,10 @@ router.beforeEach(async (to, from) => {
   }
   // 普通用户上传、查看自己的图片、个人中心需要登录
   const requiresLogin =
-    to.path === '/add_picture' || to.path === '/my_pictures' || to.path === '/user/profile'
+    to.path === '/add_picture' ||
+    to.path === '/batch_upload' ||
+    to.path === '/my_pictures' ||
+    to.path === '/user/profile'
   if (requiresLogin && !loginUser?.id) {
     message.warning('请先登录')
     return `/user/login?redirect=${encodeURIComponent(to.fullPath)}`

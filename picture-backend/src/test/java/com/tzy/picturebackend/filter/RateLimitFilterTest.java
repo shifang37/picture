@@ -55,7 +55,7 @@ class RateLimitFilterTest {
     }
 
     @Test
-    @DisplayName("上传：同一用户超过 20 次/分钟返回 42900")
+    @DisplayName("上传：同一用户超过 60 次/分钟返回 42900")
     void upload_blocksAfterLimit() throws Exception {
         MockHttpSession session = new MockHttpSession();
         User user = new User();
@@ -64,7 +64,7 @@ class RateLimitFilterTest {
 
         MockHttpServletResponse lastResponse = null;
         MockFilterChain lastChain = null;
-        for (int i = 0; i < 21; i++) {
+        for (int i = 0; i < 61; i++) {
             MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/picture/upload");
             request.setContextPath("/api");
             request.setSession(session);

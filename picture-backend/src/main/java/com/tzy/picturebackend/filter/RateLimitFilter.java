@@ -30,7 +30,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final int LOGIN_LIMIT_PER_MINUTE = 10;
 
-    private static final int UPLOAD_LIMIT_PER_MINUTE = 20;
+    private static final int UPLOAD_LIMIT_PER_MINUTE = 60;
 
     @Resource
     private RateLimitManager rateLimitManager;
