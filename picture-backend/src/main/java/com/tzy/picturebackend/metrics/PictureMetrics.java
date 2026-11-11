@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import org.springframework.stereotype.Component;
@@ -146,9 +147,15 @@ public class PictureMetrics {
     }
 
     /**
-     * 把 Caffeine 本地缓存的命中率接入 Micrometer（cache_gets_total 等）
+     * 把 Caffeine 本地缓存的命中率接入 Micrometer（cache_gets_total 等）。
+     * <p>
+     * 必须显式补上 {@code cache.manager} 与 {@code name} 两个标签：Spring Boot 为
+     * RedisCacheManager 注册的 {@code cache.gets} 带有这两个标签，而 Caffeine 默认只带
+     * {@code cache}。同一个 Prometheus registry 中同名指标的标签键集合必须一致，
+     * 否则其中一方会注册失败，表现为缓存命中率指标缺失并打印 registration failed 警告。
      */
     public void registerCaffeineCache(String cacheName, Cache<?, ?> cache) {
-        CaffeineCacheMetrics.monitor(registry, cache, cacheName);
+        CaffeineCacheMetrics.monitor(registry, cache, cacheName,
+                Tags.of("cache.manager", "caffeine", "name", cacheName));
     }
 }

@@ -2,6 +2,7 @@ package com.tzy.picturebackend.metrics;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -108,5 +110,32 @@ class PictureMetricsTest {
         String scrape = registry.scrape();
         assertTrue(scrape.contains("cache_gets_total"));
         assertTrue(scrape.contains("cache=\"test.cache\""));
+        // 与 Spring Boot 的 Redis CacheMetrics 保持同一组标签键
+        assertTrue(scrape.contains("cache_manager=\"caffeine\""));
+        assertTrue(scrape.contains("name=\"test.cache\""));
+    }
+
+    @Test
+    @DisplayName("缓存指标：Caffeine 与 Spring Cache 的标签键一致时不会互相覆盖")
+    void caffeineCache_tagsMatchSpringCache() {
+        Cache<String, String> cache = Caffeine.newBuilder().recordStats().build();
+        pictureMetrics.registerCaffeineCache("picture.list.local", cache);
+
+        // Spring Boot 为 RedisCacheManager 注册的 cache.gets 带有这些标签；
+        // 若 Caffeine 的标签键不一致，Prometheus registry 会拒绝第二个同名指标。
+        Counter springCacheCounter = Counter.builder("cache.gets")
+                .tag("cache", "tagCategory")
+                .tag("cache.manager", "cacheManager")
+                .tag("name", "tagCategory")
+                .tag("result", "hit")
+                .register(registry);
+        springCacheCounter.increment();
+
+        assertNotNull(registry.get("cache.gets")
+                .tag("cache", "tagCategory")
+                .tag("cache.manager", "cacheManager")
+                .tag("name", "tagCategory")
+                .tag("result", "hit")
+                .counter());
     }
 }
