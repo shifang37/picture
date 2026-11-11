@@ -11,10 +11,10 @@ import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
-import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
+import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
@@ -156,6 +156,7 @@ class PictureServiceImplTest {
         assertNull(saved.getReviewTime());
         assertEquals(Long.valueOf(100L), saved.getUserId());
         assertEquals(Integer.valueOf(PictureReviewStatusEnum.REVIEWING.getValue()), pictureVO.getReviewStatus());
+        verifyNoInteractions(pictureReviewLogService);
     }
 
     @Test
@@ -164,7 +165,11 @@ class PictureServiceImplTest {
         User admin = admin();
         when(userService.isAdmin(admin)).thenReturn(true);
         when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
-        when(pictureMapper.insert(any(Picture.class))).thenReturn(1);
+        when(pictureMapper.insert(any(Picture.class))).thenAnswer(invocation -> {
+            Picture saved = invocation.getArgument(0);
+            saved.setId(1L);
+            return 1;
+        });
 
         pictureService.uploadPicture(jpegFile(), null, admin);
 
@@ -174,6 +179,8 @@ class PictureServiceImplTest {
         assertEquals(Integer.valueOf(PictureReviewStatusEnum.PASS.getValue()), saved.getReviewStatus());
         assertEquals(admin.getId(), saved.getReviewerId());
         assertNotNull(saved.getReviewTime());
+        verify(pictureReviewLogService).record(1L, admin.getId(),
+                PictureReviewStatusEnum.PASS.getValue(), "管理员上传，自动通过");
     }
 
     @Test
@@ -202,6 +209,7 @@ class PictureServiceImplTest {
         assertTrue(sqlSet.contains("reviewMessage"), "实际 SET: " + sqlSet);
         assertTrue(sqlSet.contains("reviewerId"), "实际 SET: " + sqlSet);
         assertTrue(sqlSet.contains("reviewTime"), "实际 SET: " + sqlSet);
+        verifyNoInteractions(pictureReviewLogService);
     }
 
     @Test
@@ -222,6 +230,8 @@ class PictureServiceImplTest {
         assertEquals(Long.valueOf(100L), updated.getUserId(), "不能把作者改成管理员");
         assertEquals(Integer.valueOf(PictureReviewStatusEnum.PASS.getValue()), updated.getReviewStatus());
         assertEquals(admin.getId(), updated.getReviewerId());
+        verify(pictureReviewLogService).record(1L, admin.getId(),
+                PictureReviewStatusEnum.PASS.getValue(), "管理员上传，自动通过");
     }
 
     @Test
@@ -452,17 +462,19 @@ class PictureServiceImplTest {
     }
 
     @Test
-    @DisplayName("审核历史：按图片 id 查询审核记录")
+    @DisplayName("审核历史：按图片 id 查询审核记录并返回审核人字段")
     void listPictureReviewLogs_returnsLogs() {
-        PictureReviewLog reviewLog = new PictureReviewLog();
+        PictureReviewLogVO reviewLog = new PictureReviewLogVO();
         reviewLog.setId(1L);
         reviewLog.setPictureId(2L);
-        when(pictureReviewLogService.listByPictureId(2L)).thenReturn(List.of(reviewLog));
+        reviewLog.setReviewerName("管理员");
+        when(pictureReviewLogService.listVOByPictureId(2L)).thenReturn(List.of(reviewLog));
 
-        List<PictureReviewLog> logs = pictureService.listPictureReviewLogs(2L);
+        List<PictureReviewLogVO> logs = pictureService.listPictureReviewLogs(2L);
 
         assertEquals(1, logs.size());
         assertEquals(Long.valueOf(1L), logs.get(0).getId());
+        assertEquals("管理员", logs.get(0).getReviewerName());
     }
 
     // ==================== 排序 ====================

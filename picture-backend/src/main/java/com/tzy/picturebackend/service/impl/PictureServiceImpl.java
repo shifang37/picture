@@ -18,10 +18,10 @@ import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
-import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
+import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.model.vo.UserVO;
@@ -162,6 +162,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 deletePictureFile(newUrl);
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片上传失败");
             }
+        }
+        // 管理员上传/重传会自动通过，补一条审核历史（best-effort，失败不影响上传结果）
+        if (isAdmin) {
+            pictureReviewLogService.record(picture.getId(), loginUser.getId(),
+                    PictureReviewStatusEnum.PASS.getValue(), ADMIN_AUTO_REVIEW_MESSAGE);
         }
         return PictureVO.objToVo(picture);
     }
@@ -383,10 +388,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     }
 
     @Override
-    public List<PictureReviewLog> listPictureReviewLogs(Long pictureId) {
+    public List<PictureReviewLogVO> listPictureReviewLogs(Long pictureId) {
         ThrowUtils.throwIf(pictureId == null || pictureId <= 0,
                 ErrorCode.PARAMS_ERROR, "图片 id 不能为空");
-        return pictureReviewLogService.listByPictureId(pictureId);
+        return pictureReviewLogService.listVOByPictureId(pictureId);
     }
 
     @Override

@@ -6,9 +6,9 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
-import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
+import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureService;
@@ -214,17 +214,22 @@ class PictureControllerTest {
     }
 
     @Test
-    @DisplayName("审核历史：管理员可以按图片 id 查询记录")
+    @DisplayName("审核历史：管理员可以按图片 id 查询记录，响应包含审核人昵称")
     void listPictureReviewLogs_returnsLogs() throws Exception {
-        PictureReviewLog reviewLog = new PictureReviewLog();
+        PictureReviewLogVO reviewLog = new PictureReviewLogVO();
         reviewLog.setId(1L);
         reviewLog.setReviewStatus(1);
+        reviewLog.setReviewerId(99L);
+        reviewLog.setReviewerName("管理员");
+        reviewLog.setReviewerAccount("admin");
         when(pictureService.listPictureReviewLogs(2L)).thenReturn(List.of(reviewLog));
 
         mockMvc.perform(get("/picture/review/log").param("pictureId", "2"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.length()").value(1));
+                .andExpect(jsonPath("$.data.length()").value(1))
+                .andExpect(jsonPath("$.data[0].reviewerName").value("管理员"))
+                .andExpect(jsonPath("$.data[0].reviewerAccount").value("admin"));
     }
 
     private User user(Long id, String role) {

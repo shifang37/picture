@@ -120,6 +120,7 @@
               {{ reviewLog.reviewStatus === 1 ? '通过' : '拒绝' }} ·
               {{ formatTime(reviewLog.createTime) }}
             </div>
+            <div class="history-reviewer">审核人：{{ reviewerText(reviewLog) }}</div>
             <div v-if="reviewLog.reviewMessage" class="history-message">
               审核意见：{{ reviewLog.reviewMessage }}
             </div>
@@ -350,6 +351,11 @@ const formatTime = (value?: string) => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
 }
 
+// 审核人展示：昵称 > 账号 > id，后端删除用户时会回退为「用户#id」
+const reviewerText = (reviewLog: PictureReviewLog) => {
+  return reviewLog.reviewerName || reviewLog.reviewerAccount || reviewLog.reviewerId || '未知'
+}
+
 const openHistory = async (record: API.Picture) => {
   if (!record.id) {
     return
@@ -383,6 +389,12 @@ onMounted(() => {
 
 .history-title {
   font-weight: 500;
+}
+
+.history-reviewer {
+  color: #666;
+  font-size: 13px;
+  margin-top: 4px;
 }
 
 .history-message {

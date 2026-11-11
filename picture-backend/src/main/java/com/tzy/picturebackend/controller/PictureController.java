@@ -12,10 +12,10 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.model.dto.picture.*;
 import com.tzy.picturebackend.model.entity.Picture;
-import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
+import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureService;
@@ -249,7 +249,7 @@ public class PictureController {
      */
     @GetMapping("/review/log")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<List<PictureReviewLog>> listPictureReviewLogs(@RequestParam Long pictureId) {
+    public BaseResponse<List<PictureReviewLogVO>> listPictureReviewLogs(@RequestParam Long pictureId) {
         return ResultUtils.success(pictureService.listPictureReviewLogs(pictureId));
     }
 

@@ -38,6 +38,8 @@ export interface PictureReviewLog {
   id?: string
   pictureId?: string
   reviewerId?: string
+  reviewerName?: string
+  reviewerAccount?: string
   reviewStatus?: number
   reviewMessage?: string
   createTime?: string

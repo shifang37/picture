@@ -8,9 +8,9 @@ import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.baomidou.mybatisplus.spring.service.IService;
-import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
+import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -82,9 +82,9 @@ public interface PictureService extends IService<Picture> {
      * 查询某张图片的审核历史
      *
      * @param pictureId 图片 id
-     * @return 审核记录，按时间倒序
+     * @return 审核记录（含审核人信息），按时间倒序
      */
-    List<PictureReviewLog> listPictureReviewLogs(Long pictureId);
+    List<PictureReviewLogVO> listPictureReviewLogs(Long pictureId);
 
     /**
      * 从已通过审核的图片中动态汇总标签和分类
