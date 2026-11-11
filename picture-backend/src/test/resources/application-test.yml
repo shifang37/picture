@@ -1,0 +1,40 @@
+# 集成测试专用配置：只启动应用上下文，外部依赖由 Testcontainers 注入。
+# 不加载 application-local.yml，避免使用本机 COS 密钥。
+spring:
+  rabbitmq:
+    # 集成测试不启动 RabbitMQ：关闭 RabbitAdmin 和监听容器，避免无意义的连接重试
+    dynamic: false
+    listener:
+      simple:
+        auto-startup: false
+  elasticsearch:
+    uris: http://localhost:9200
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  main:
+    banner-mode: off
+app:
+  # 搜索走 MySQL，避免测试环境依赖 Elasticsearch
+  search:
+    engine: mysql
+  review:
+    machine:
+      enabled: false
+  ai:
+    enabled: false
+# COS 只用于创建客户端 Bean，测试不会真正发起请求
+cos:
+  client:
+    host: https://test-1410438387.cos.ap-beijing.myqcloud.com
+    secretId: test-secret-id
+    secretKey: test-secret-key
+    region: ap-beijing
+    bucket: test-1410438387
+logging:
+  level:
+    root: INFO
+    org.testcontainers: INFO
+    com.tzy.picturebackend: INFO
+    # 容器停止后 Lettuce 仍会尝试重连，关闭这条日志避免 CI 里出现误导性的堆栈
+    io.lettuce.core.protocol.ConnectionWatchdog: 'OFF'

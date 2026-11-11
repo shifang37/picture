@@ -483,6 +483,7 @@ docker compose -f docker-compose.infra.yml down
 # 后端
 cd picture-backend
 ./mvnw test                    # 运行单元测试
+./mvnw verify                  # 单元测试 + 集成测试（需要 Docker）
 ./mvnw clean package           # 打包
 ./mvnw spring-boot:run         # 本地启动
 
@@ -506,8 +507,11 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ```bash
 cd picture-backend
-./mvnw test
+./mvnw test     # 单元测试，不依赖 Docker
+./mvnw verify   # 单元测试 + Testcontainers 集成测试，需要本机 Docker
 ```
+
+集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、重传后审核/机审字段确实被置空、逻辑删除与账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
 ## 注意事项
 
