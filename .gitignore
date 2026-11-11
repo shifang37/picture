@@ -39,6 +39,9 @@ Thumbs.db
 /picture-frontend/dist/
 /picture-frontend/dist-ssr/
 /picture-frontend/coverage/
+/picture-frontend/test-results/
+/picture-frontend/playwright-report/
+/picture-frontend/blob-report/
 /picture-frontend/*.tsbuildinfo
 /picture-frontend/.eslintcache
 /picture-frontend/*.local

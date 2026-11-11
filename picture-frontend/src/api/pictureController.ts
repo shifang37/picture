@@ -30,7 +30,7 @@ export async function editPicture(body: API.PictureEditRequest, options?: { [key
 export async function getPictureById(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.getPictureByIdParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePicture>('/picture/get', {
     method: 'GET',
@@ -45,7 +45,7 @@ export async function getPictureById(
 export async function getPictureVoById(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.getPictureVOByIdParams,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePictureVO>('/picture/get/vo', {
     method: 'GET',
@@ -59,7 +59,7 @@ export async function getPictureVoById(
 /** 此处后端没有提供注释 POST /picture/list/page */
 export async function listPictureByPage(
   body: API.PictureQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePagePicture>('/picture/list/page', {
     method: 'POST',
@@ -74,7 +74,7 @@ export async function listPictureByPage(
 /** 此处后端没有提供注释 POST /picture/list/page/vo */
 export async function listPictureVoByPage(
   body: API.PictureQueryRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePagePictureVO>('/picture/list/page/vo', {
     method: 'POST',
@@ -89,7 +89,7 @@ export async function listPictureVoByPage(
 /** 此处后端没有提供注释 POST /picture/review */
 export async function doPictureReview(
   body: API.PictureReviewRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseBoolean>('/picture/review', {
     method: 'POST',
@@ -112,7 +112,7 @@ export async function listPictureTagCategory(options?: { [key: string]: any }) {
 /** 此处后端没有提供注释 POST /picture/update */
 export async function updatePicture(
   body: API.PictureUpdateRequest,
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponseBoolean>('/picture/update', {
     method: 'POST',
@@ -129,7 +129,7 @@ export async function uploadPicture(
   // 叠加生成的Param类型 (非body参数swagger默认没有生成对象)
   params: API.uploadPictureParams,
   body: {},
-  options?: { [key: string]: any }
+  options?: { [key: string]: any },
 ) {
   return request<API.BaseResponsePictureVO>('/picture/upload', {
     method: 'POST',
