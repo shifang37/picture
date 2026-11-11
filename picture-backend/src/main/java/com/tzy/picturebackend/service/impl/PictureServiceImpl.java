@@ -3,6 +3,7 @@ package com.tzy.picturebackend.service.impl;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -12,6 +13,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
+import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
@@ -32,6 +34,7 @@ import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -170,6 +173,111 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                     PictureReviewStatusEnum.PASS.getValue(), ADMIN_AUTO_REVIEW_MESSAGE);
         }
         return PictureVO.objToVo(picture);
+    }
+
+    @Override
+    public boolean editPicture(PictureEditRequest pictureEditRequest, User loginUser) {
+        ThrowUtils.throwIf(pictureEditRequest == null || pictureEditRequest.getId() == null
+                || pictureEditRequest.getId() <= 0, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+        long id = pictureEditRequest.getId();
+        Picture oldPicture = this.getById(id);
+        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        boolean isAdmin = userService.isAdmin(loginUser);
+        // 仅本人或管理员可编辑
+        if (!Objects.equals(oldPicture.getUserId(), loginUser.getId()) && !isAdmin) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+        }
+        // 只更新请求中出现的字段：updateById 会忽略 null，未传的字段保持原值
+        Picture picture = new Picture();
+        BeanUtils.copyProperties(pictureEditRequest, picture);
+        // 显式判空，避免 JSONUtil.toJsonStr(null) 把标签写成字符串 "null"
+        if (pictureEditRequest.getTags() != null) {
+            picture.setTags(JSONUtil.toJsonStr(pictureEditRequest.getTags()));
+        }
+        picture.setEditTime(new Date());
+        validPicture(picture);
+        // 普通用户改动已审核图片的内容后必须重新审核，否则过审后改文字就能绕过审核
+        boolean needReviewAgain = !isAdmin && isReviewed(oldPicture)
+                && hasContentChanged(pictureEditRequest, oldPicture);
+        boolean result;
+        if (needReviewAgain) {
+            // updateById 会忽略 null，清空审核信息必须用 UpdateWrapper.set 显式置空
+            UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
+                    .eq("id", id)
+                    .set("reviewStatus", PictureReviewStatusEnum.REVIEWING.getValue())
+                    .set("reviewMessage", null)
+                    .set("reviewerId", null)
+                    .set("reviewTime", null);
+            result = this.update(picture, updateWrapper);
+        } else {
+            result = this.updateById(picture);
+        }
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "编辑失败");
+        return true;
+    }
+
+    /**
+     * 图片是否已经过审（通过或拒绝）：只有这两种状态才需要「改内容后重新审核」
+     */
+    private boolean isReviewed(Picture picture) {
+        Integer reviewStatus = picture.getReviewStatus();
+        return reviewStatus != null
+                && (reviewStatus == PictureReviewStatusEnum.PASS.getValue()
+                || reviewStatus == PictureReviewStatusEnum.REJECT.getValue());
+    }
+
+    /**
+     * 判断本次编辑是否真的改动了展示内容。
+     * <p>
+     * 未传的字段（null）表示保留原值，按原值参与比较，避免「打开弹窗直接保存」被误判为改动；
+     * 标签按集合比较，忽略顺序和首尾空格差异。
+     */
+    private boolean hasContentChanged(PictureEditRequest request, Picture oldPicture) {
+        String newName = request.getName() != null ? request.getName() : oldPicture.getName();
+        String newIntroduction = request.getIntroduction() != null
+                ? request.getIntroduction() : oldPicture.getIntroduction();
+        String newCategory = request.getCategory() != null
+                ? request.getCategory() : oldPicture.getCategory();
+        if (!Objects.equals(normalizeText(newName), normalizeText(oldPicture.getName()))
+                || !Objects.equals(normalizeText(newIntroduction), normalizeText(oldPicture.getIntroduction()))
+                || !Objects.equals(normalizeText(newCategory), normalizeText(oldPicture.getCategory()))) {
+            return true;
+        }
+        List<String> newTags = request.getTags() != null ? request.getTags() : parseTags(oldPicture.getTags());
+        return !toTagSet(newTags).equals(toTagSet(parseTags(oldPicture.getTags())));
+    }
+
+    /**
+     * 比较用的文本归一化：首尾空白不影响判断，空串与 null 等价
+     */
+    private static String normalizeText(String value) {
+        String trimmed = StrUtil.trim(value);
+        return StrUtil.isEmpty(trimmed) ? null : trimmed;
+    }
+
+    private static List<String> parseTags(String tagsJson) {
+        if (StrUtil.isBlank(tagsJson)) {
+            return List.of();
+        }
+        try {
+            List<String> tags = JSONUtil.toList(tagsJson, String.class);
+            return tags == null ? List.of() : tags;
+        } catch (RuntimeException e) {
+            log.warn("解析图片标签失败, tags = {}", tagsJson, e);
+            return List.of();
+        }
+    }
+
+    private static Set<String> toTagSet(List<String> tags) {
+        if (CollUtil.isEmpty(tags)) {
+            return Set.of();
+        }
+        return tags.stream()
+                .filter(Objects::nonNull)
+                .map(StrUtil::trim)
+                .filter(StrUtil::isNotEmpty)
+                .collect(Collectors.toSet());
     }
 
     @Override

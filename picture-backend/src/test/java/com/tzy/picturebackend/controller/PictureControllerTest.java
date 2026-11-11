@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
+import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.User;
@@ -166,6 +167,29 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.code").value(40100));
 
         verify(pictureService, never()).deletePicture(any(), any());
+    }
+
+    // ==================== 编辑 ====================
+
+    @Test
+    @DisplayName("编辑：委托给 service，并传入当前登录用户")
+    void editPicture_delegatesToService() throws Exception {
+        User normalUser = user(100L, "user");
+        when(userService.getLoginUser(any())).thenReturn(normalUser);
+        when(pictureService.editPicture(any(), eq(normalUser))).thenReturn(true);
+
+        mockMvc.perform(post("/picture/edit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"name\":\"新名称\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+
+        ArgumentCaptor<PictureEditRequest> requestCaptor =
+                ArgumentCaptor.forClass(PictureEditRequest.class);
+        verify(pictureService).editPicture(requestCaptor.capture(), eq(normalUser));
+        assertEquals(Long.valueOf(1L), requestCaptor.getValue().getId());
+        assertEquals("新名称", requestCaptor.getValue().getName());
     }
 
     @Test

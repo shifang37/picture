@@ -6,6 +6,7 @@ import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
+import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
@@ -28,6 +29,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Date;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -394,6 +396,120 @@ class PictureServiceImplTest {
         verify(fileManager, never()).deletePicture("https://example.com/old.jpg");
     }
 
+    // ==================== 编辑 ====================
+
+    @Test
+    @DisplayName("编辑：普通用户修改已通过图片的名称后重新进入待审核并清空审核信息")
+    void editPicture_normalUserContentChangeResetsReview() {
+        User owner = user(100L, "user");
+        when(userService.isAdmin(owner)).thenReturn(false);
+        Picture oldPicture = editablePicture(PictureReviewStatusEnum.PASS.getValue());
+        oldPicture.setReviewMessage("审核通过");
+        oldPicture.setReviewerId(1L);
+        oldPicture.setReviewTime(new Date());
+        when(pictureMapper.selectById(1L)).thenReturn(oldPicture);
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
+
+        PictureEditRequest request = editRequest("新名称");
+        assertTrue(pictureService.editPicture(request, owner));
+
+        ArgumentCaptor<Picture> entityCaptor = ArgumentCaptor.forClass(Picture.class);
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper).update(entityCaptor.capture(), wrapperCaptor.capture());
+        assertEquals("新名称", entityCaptor.getValue().getName());
+        assertNotNull(entityCaptor.getValue().getEditTime(), "编辑时间应被刷新");
+        UpdateWrapper<Picture> wrapper = (UpdateWrapper<Picture>) wrapperCaptor.getValue();
+        String sqlSet = wrapper.getSqlSet();
+        assertTrue(sqlSet.contains("reviewStatus"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewMessage"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewerId"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewTime"), "实际 SET: " + sqlSet);
+        assertTrue(wrapper.getParamNameValuePairs()
+                        .containsValue(PictureReviewStatusEnum.REVIEWING.getValue()),
+                "reviewStatus 应被置为待审核，实际参数: " + wrapper.getParamNameValuePairs());
+        verify(pictureMapper, never()).updateById(any(Picture.class));
+    }
+
+    @Test
+    @DisplayName("编辑：内容没有变化（含标签顺序不同）时不动审核状态")
+    void editPicture_noContentChangeKeepsReviewStatus() {
+        User owner = user(100L, "user");
+        when(userService.isAdmin(owner)).thenReturn(false);
+        Picture oldPicture = editablePicture(PictureReviewStatusEnum.PASS.getValue());
+        when(pictureMapper.selectById(1L)).thenReturn(oldPicture);
+        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+
+        PictureEditRequest request = editRequest("旧名称");
+        // 只调整标签顺序，语义上没有变化
+        request.setTags(List.of("标签B", "标签A"));
+        assertTrue(pictureService.editPicture(request, owner));
+
+        ArgumentCaptor<Picture> entityCaptor = ArgumentCaptor.forClass(Picture.class);
+        verify(pictureMapper).updateById(entityCaptor.capture());
+        assertNull(entityCaptor.getValue().getReviewStatus(), "内容未变化时不得改动审核状态");
+        verify(pictureMapper, never()).update(any(Picture.class), any(Wrapper.class));
+    }
+
+    @Test
+    @DisplayName("编辑：管理员修改他人图片内容不改变审核状态")
+    void editPicture_adminContentChangeKeepsReviewStatus() {
+        User admin = admin();
+        when(userService.isAdmin(admin)).thenReturn(true);
+        when(pictureMapper.selectById(1L))
+                .thenReturn(editablePicture(PictureReviewStatusEnum.PASS.getValue()));
+        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+
+        PictureEditRequest request = editRequest("管理员改名");
+        assertTrue(pictureService.editPicture(request, admin));
+
+        ArgumentCaptor<Picture> entityCaptor = ArgumentCaptor.forClass(Picture.class);
+        verify(pictureMapper).updateById(entityCaptor.capture());
+        assertNull(entityCaptor.getValue().getReviewStatus(), "管理员编辑不应改动审核状态");
+        verify(pictureMapper, never()).update(any(Picture.class), any(Wrapper.class));
+    }
+
+    @Test
+    @DisplayName("编辑：已拒绝的图片修改内容后重新进入待审核")
+    void editPicture_rejectedPictureChangeResetsReview() {
+        User owner = user(100L, "user");
+        when(userService.isAdmin(owner)).thenReturn(false);
+        when(pictureMapper.selectById(1L))
+                .thenReturn(editablePicture(PictureReviewStatusEnum.REJECT.getValue()));
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
+
+        assertTrue(pictureService.editPicture(editRequest("申诉后改名"), owner));
+
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper).update(any(Picture.class), wrapperCaptor.capture());
+        UpdateWrapper<Picture> wrapper = (UpdateWrapper<Picture>) wrapperCaptor.getValue();
+        assertTrue(wrapper.getParamNameValuePairs()
+                        .containsValue(PictureReviewStatusEnum.REVIEWING.getValue()),
+                "已拒绝的图片改内容后应回到待审核");
+    }
+
+    @Test
+    @DisplayName("编辑：普通用户不能编辑他人图片，且不写数据库")
+    void editPicture_rejectsOtherUser() {
+        User other = user(200L, "user");
+        when(userService.isAdmin(other)).thenReturn(false);
+        when(pictureMapper.selectById(1L))
+                .thenReturn(editablePicture(PictureReviewStatusEnum.PASS.getValue()));
+
+        assertThrows(BusinessException.class,
+                () -> pictureService.editPicture(editRequest("越权改名"), other));
+
+        verify(pictureMapper, never()).updateById(any(Picture.class));
+        verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+    }
+
+    @Test
+    @DisplayName("编辑：未登录用户不能编辑图片")
+    void editPicture_rejectsAnonymous() {
+        assertThrows(BusinessException.class,
+                () -> pictureService.editPicture(editRequest("匿名改名"), null));
+        verify(pictureMapper, never()).selectById(any());
+    }
+
     // ==================== 审核 ====================
 
     @Test
@@ -711,6 +827,25 @@ class PictureServiceImplTest {
         PictureQueryRequest request = new PictureQueryRequest();
         request.setSortField(sortField);
         request.setSortOrder(sortOrder);
+        return request;
+    }
+
+    private Picture editablePicture(int reviewStatus) {
+        Picture picture = picture(1L, 100L, reviewStatus);
+        picture.setName("旧名称");
+        picture.setIntroduction("旧简介");
+        picture.setCategory("风景");
+        picture.setTags("[\"标签A\",\"标签B\"]");
+        return picture;
+    }
+
+    private PictureEditRequest editRequest(String name) {
+        PictureEditRequest request = new PictureEditRequest();
+        request.setId(1L);
+        request.setName(name);
+        request.setIntroduction("旧简介");
+        request.setCategory("风景");
+        request.setTags(List.of("标签A", "标签B"));
         return request;
     }
 

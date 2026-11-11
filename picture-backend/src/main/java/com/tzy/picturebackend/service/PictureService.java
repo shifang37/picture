@@ -2,6 +2,7 @@ package com.tzy.picturebackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
@@ -36,6 +37,18 @@ public interface PictureService extends IService<Picture> {
     PictureVO uploadPicture(MultipartFile multipartFile,
                             PictureUploadRequest pictureUploadRequest,
                             User loginUser);
+
+    /**
+     * 编辑图片信息（名称、简介、分类、标签）
+     * <p>
+     * 普通用户修改已通过或已拒绝图片的内容后，图片会重新进入待审核并清空上一次的审核信息；
+     * 内容没有变化时不动审核状态。管理员编辑不改变审核状态。
+     *
+     * @param pictureEditRequest 编辑请求
+     * @param loginUser          当前登录用户
+     * @return 是否编辑成功
+     */
+    boolean editPicture(PictureEditRequest pictureEditRequest, User loginUser);
 
     /**
      * 删除图片：先做数据库逻辑删除，成功后 best-effort 清理 COS 对象

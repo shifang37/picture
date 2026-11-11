@@ -15,6 +15,15 @@
       style="margin: 16px 0"
     />
 
+    <a-alert
+      v-if="showReReviewHint"
+      type="warning"
+      show-icon
+      message="修改后需要重新审核"
+      description="修改名称、简介、分类或标签后，图片会重新进入待审核，审核通过前不会出现在首页。内容没有变化则不会触发重新审核。"
+      style="margin: 16px 0"
+    />
+
     <a-form
       v-if="picture"
       layout="vertical"
@@ -67,9 +76,11 @@ import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import PictureUpload from '@/components/PictureUpload.vue'
 import { editPicture, listPictureTagCategory, getPictureVoById } from '@/api/pictureController'
+import { useLoginUserStore } from '@/stores/useLoginUserStore'
 
 const router = useRouter()
 const route = useRoute()
+const loginUserStore = useLoginUserStore()
 
 // 是否是编辑已有图片
 const isEdit = computed(() => typeof route.query?.id === 'string')
@@ -109,6 +120,14 @@ const reviewDescription = computed(() => {
   }
   return '审核通过后才会出现在首页列表中，审核期间可以在「我的图片」中查看。'
 })
+
+// 管理员编辑不会改变审核状态，只有普通用户编辑已通过图片时才提示需要重新审核
+const showReReviewHint = computed(
+  () =>
+    isEdit.value &&
+    picture.value?.reviewStatus === 1 &&
+    loginUserStore.loginUser.userRole !== 'admin',
+)
 
 const onSuccess = (newPicture: API.PictureVO) => {
   const isFirstUpload = !picture.value?.id
