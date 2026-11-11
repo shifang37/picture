@@ -75,6 +75,13 @@
       destroy-on-close
       @ok="handleSubmit"
     >
+      <a-alert
+        v-if="!isEdit"
+        type="info"
+        show-icon
+        :message="`新用户默认密码为 ${DEFAULT_PASSWORD}，请提醒用户登录后及时修改。`"
+        style="margin-bottom: 16px"
+      />
       <a-form ref="formRef" :model="formState" :rules="formRules" layout="vertical">
         <a-form-item label="账号" name="userAccount">
           <a-input
@@ -163,6 +170,9 @@ const roleOptions = [
   { value: 'user', label: '普通用户' },
   { value: 'admin', label: '管理员' },
 ]
+
+// 与后端 UserController.DEFAULT_PASSWORD 保持一致
+const DEFAULT_PASSWORD = '12345678'
 
 // 数据
 const dataList = ref<API.UserVO[]>([])
@@ -298,7 +308,7 @@ const handleSubmit = async () => {
           userRole: formState.userRole,
         })
     if (res.data.code === 0) {
-      message.success(isEdit.value ? '保存成功' : '新增成功')
+      message.success(isEdit.value ? '保存成功' : `新增成功，默认密码 ${DEFAULT_PASSWORD}`)
       modalOpen.value = false
       if (!isEdit.value) {
         searchParams.current = 1
