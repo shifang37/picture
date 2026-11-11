@@ -14,8 +14,8 @@ export const useLoginUserStore = defineStore('loginUser', () => {
         loginUser.value = res.data.data
       }
     } catch (error) {
-      // 后端接口暂未实现，忽略错误
-      console.log('获取登录用户信息失败，后端接口可能未实现')
+      // 未登录或会话过期时保持默认状态即可，页面会按未登录处理
+      console.warn('获取登录用户信息失败，按未登录处理')
     }
   }
 

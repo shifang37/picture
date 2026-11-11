@@ -29,7 +29,7 @@ picture/
 │       └── exception/               # 统一异常与错误码
 ├── picture-frontend/                # Vue 前端
 │   └── src/
-│       ├── api/                     # OpenAPI 生成的前端请求客户端 + pictureExtra.ts 手工封装
+│       ├── api/                     # OpenAPI 生成的前端请求客户端 + pictureExtra.ts / userExtra.ts 手工封装
 │       ├── pages/                   # 页面（含「我的图片」与 admin 下的管理页）
 │       ├── components/              # 公共组件
 │       ├── router/  stores/  utils/
@@ -151,7 +151,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 ```
 
 > `npm run openapi` 需要后端已启动，它从 `http://localhost:8123/api/v3/api-docs` 拉取接口定义。
-> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传与「我的图片」封装不会被覆盖。
+> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传与「我的图片」封装、以及 `src/api/userExtra.ts` 中的个人中心/修改密码封装不会被覆盖。
 
 ## 测试
 
