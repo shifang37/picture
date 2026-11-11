@@ -15,6 +15,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureService;
@@ -250,6 +251,19 @@ public class PictureController {
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<List<PictureReviewLog>> listPictureReviewLogs(@RequestParam Long pictureId) {
         return ResultUtils.success(pictureService.listPictureReviewLogs(pictureId));
+    }
+
+    /**
+     * 批量审核图片（仅管理员可用）
+     */
+    @PostMapping("/review/batch")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<PictureReviewBatchResult> batchReview(
+            @Valid @RequestBody PictureReviewBatchRequest pictureReviewBatchRequest,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureReviewBatchRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(pictureService.batchReview(pictureReviewBatchRequest, loginUser));
     }
 
     /**

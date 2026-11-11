@@ -30,6 +30,16 @@
           <a-radio-button :value="2">已拒绝</a-radio-button>
         </a-radio-group>
         <a-button @click="fetchData">刷新</a-button>
+        <a-button
+          type="primary"
+          :disabled="selectedRowKeys.length === 0"
+          @click="openBatchReview(1)"
+        >
+          批量通过
+        </a-button>
+        <a-button danger :disabled="selectedRowKeys.length === 0" @click="openBatchReview(2)">
+          批量拒绝
+        </a-button>
       </a-space>
     </a-flex>
 
@@ -38,6 +48,8 @@
       :data-source="dataList"
       :pagination="pagination"
       :loading="loading"
+      :row-selection="rowSelection"
+      row-key="id"
       @change="doTableChange"
     >
       <template #bodyCell="{ column, record }">
@@ -123,7 +135,11 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { listPictureByPage, doPictureReview } from '@/api/pictureController'
-import { listPictureReviewLogs, type PictureReviewLog } from '@/api/pictureExtra'
+import {
+  batchReviewPicture,
+  listPictureReviewLogs,
+  type PictureReviewLog,
+} from '@/api/pictureExtra'
 import { getThumbnailUrl } from '@/utils'
 
 const columns = [
@@ -143,6 +159,19 @@ const columns = [
 const dataList = ref<API.Picture[]>([])
 const total = ref(0)
 const loading = ref(false)
+
+// 批量审核多选
+const selectedRowKeys = ref<string[]>([])
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedRowKeys.value,
+  onChange: (keys: any[]) => {
+    selectedRowKeys.value = keys as string[]
+  },
+  getCheckboxProps: (record: API.Picture) => ({
+    // 只有待审核图片可以批量选择
+    disabled: record.reviewStatus !== 0,
+  }),
+}))
 
 // 搜索条件，默认只看待审核
 const searchParams = reactive<API.PictureQueryRequest>({
@@ -170,6 +199,8 @@ const fetchData = async () => {
     if (res.data.code === 0 && res.data.data) {
       dataList.value = res.data.data.records ?? []
       total.value = Number(res.data.data.total) || 0
+      // 刷新后清空选择，避免选中已被过滤掉的行
+      selectedRowKeys.value = []
     } else {
       message.error('获取数据失败，' + res.data.message)
     }
@@ -212,13 +243,17 @@ const statusColor = (status?: number) => {
 // 审核弹窗
 const reviewModalOpen = ref(false)
 const submitting = ref(false)
+const batchMode = ref(false)
 const currentRecord = ref<API.Picture>()
 const reviewForm = reactive({
   reviewStatus: 1,
   reviewMessage: '',
 })
 
-const reviewTitle = computed(() => (reviewForm.reviewStatus === 1 ? '通过审核' : '拒绝审核'))
+const reviewTitle = computed(() => {
+  const action = reviewForm.reviewStatus === 1 ? '通过' : '拒绝'
+  return batchMode.value ? `批量${action}审核` : `${action}审核`
+})
 
 const openReview = (record: API.Picture, reviewStatus: number) => {
   // 已审核的图片不允许重复操作，避免无效请求
@@ -226,23 +261,67 @@ const openReview = (record: API.Picture, reviewStatus: number) => {
     message.info('该图片已审核，无需重复操作')
     return
   }
+  batchMode.value = false
   currentRecord.value = record
   reviewForm.reviewStatus = reviewStatus
   reviewForm.reviewMessage = ''
   reviewModalOpen.value = true
 }
 
-const submitReview = async () => {
-  const id = currentRecord.value?.id
-  if (!id) {
+const openBatchReview = (reviewStatus: number) => {
+  if (selectedRowKeys.value.length === 0) {
     return
   }
+  batchMode.value = true
+  currentRecord.value = undefined
+  reviewForm.reviewStatus = reviewStatus
+  reviewForm.reviewMessage = ''
+  reviewModalOpen.value = true
+}
+
+const submitReview = async () => {
   if (reviewForm.reviewMessage.length > 512) {
     message.error('审核意见不能超过 512 个字符')
     return
   }
   submitting.value = true
   try {
+    if (batchMode.value) {
+      if (selectedRowKeys.value.length === 0) {
+        message.warning('请先选择要审核的图片')
+        return
+      }
+      const res = await batchReviewPicture({
+        ids: selectedRowKeys.value,
+        reviewStatus: reviewForm.reviewStatus,
+        reviewMessage: reviewForm.reviewMessage,
+      })
+      if (res.data.code === 0 && res.data.data) {
+        const result = res.data.data
+        const successCount = result.successCount ?? 0
+        const failCount = result.failCount ?? 0
+        if (failCount > 0) {
+          message.warning(
+            `批量审核完成：成功 ${successCount} 张，失败 ${failCount} 张${
+              result.errors?.length ? `（${result.errors[0]}）` : ''
+            }`,
+          )
+        } else {
+          message.success(`批量审核完成：成功 ${successCount} 张`)
+        }
+        reviewModalOpen.value = false
+        selectedRowKeys.value = []
+        fetchData()
+      } else {
+        message.error('批量审核失败：' + (res.data.message || '未知错误'))
+      }
+      return
+    }
+
+    const id = currentRecord.value?.id
+    if (!id) {
+      return
+    }
     const res = await doPictureReview({
       id,
       reviewStatus: reviewForm.reviewStatus,
@@ -253,7 +332,7 @@ const submitReview = async () => {
       reviewModalOpen.value = false
       fetchData()
     } else {
-      message.error('审核失败：' + res.data.message)
+      message.error('审核失败：' + (res.data.message || '未知错误'))
     }
   } catch (e: any) {
     message.error('审核失败：' + (e.message || '系统错误'))

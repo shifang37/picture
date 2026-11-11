@@ -8,6 +8,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureService;
@@ -165,6 +166,25 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.code").value(40100));
 
         verify(pictureService, never()).deletePicture(any(), any());
+    }
+
+    @Test
+    @DisplayName("批量审核：返回成功与失败统计")
+    void batchReview_returnsResult() throws Exception {
+        User admin = user(1L, "admin");
+        when(userService.getLoginUser(any())).thenReturn(admin);
+        PictureReviewBatchResult result = new PictureReviewBatchResult();
+        result.setSuccessCount(2);
+        result.setFailCount(1);
+        when(pictureService.batchReview(any(), eq(admin))).thenReturn(result);
+
+        mockMvc.perform(post("/picture/review/batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[\"1\",\"2\",\"3\"],\"reviewStatus\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.successCount").value(2))
+                .andExpect(jsonPath("$.data.failCount").value(1));
     }
 
     @Test

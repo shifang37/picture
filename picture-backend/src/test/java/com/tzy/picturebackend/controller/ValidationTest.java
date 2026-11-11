@@ -143,6 +143,17 @@ class ValidationTest {
     }
 
     @Test
+    @DisplayName("批量审核：id 列表为空返回 40000")
+    void batchReview_rejectsEmptyIds() throws Exception {
+        mockMvc.perform(post("/picture/review/batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[],\"reviewStatus\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("请选择要审核的图片"));
+    }
+
+    @Test
     @DisplayName("审核状态：不允许待审核 0")
     void reviewPicture_rejectsReviewingStatus() throws Exception {
         mockMvc.perform(post("/picture/review")

@@ -7,12 +7,14 @@ import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
@@ -555,6 +557,26 @@ class PictureServiceImplTest {
                 () -> pictureService.incrementDownloadCount(1L, new MockHttpServletRequest()));
 
         verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+    }
+
+    @Test
+    @DisplayName("批量审核：单张失败不影响其他图片，并返回失败明细")
+    void batchReview_continuesAfterFailure() {
+        when(pictureMapper.selectById(1L))
+                .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()));
+        when(pictureMapper.selectById(2L)).thenReturn(null);
+        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+
+        PictureReviewBatchRequest request = new PictureReviewBatchRequest();
+        request.setIds(List.of(1L, 2L));
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        PictureReviewBatchResult result = pictureService.batchReview(request, admin());
+
+        assertEquals(1, result.getSuccessCount());
+        assertEquals(1, result.getFailCount());
+        assertEquals(1, result.getErrors().size());
+        assertTrue(result.getErrors().get(0).contains("图片 2"));
     }
 
     // ==================== 字段长度校验 ====================

@@ -3,12 +3,14 @@ package com.tzy.picturebackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -99,5 +101,14 @@ public interface PictureService extends IService<Picture> {
      * @return 是否记录成功
      */
     boolean incrementDownloadCount(Long id, HttpServletRequest request);
+
+    /**
+     * 批量审核，单张失败不影响其他图片
+     *
+     * @param request   批量审核请求
+     * @param loginUser 当前管理员
+     * @return 成功/失败统计
+     */
+    PictureReviewBatchResult batchReview(PictureReviewBatchRequest request, User loginUser);
 
 }

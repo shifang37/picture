@@ -2,6 +2,38 @@
 // 生成式客户端（pictureController.ts）由 npm run openapi 重新生成，这里的内容不会被覆盖。
 import request from '@/request'
 
+export interface PictureReviewBatchResult {
+  successCount?: number
+  failCount?: number
+  errors?: string[]
+}
+
+export interface PictureReviewBatchParams {
+  ids: string[]
+  reviewStatus: number
+  reviewMessage?: string
+}
+
+/**
+ * 批量审核图片（管理员）
+ */
+export async function batchReviewPicture(
+  body: PictureReviewBatchParams,
+  options?: { [key: string]: any },
+) {
+  return request<{ code?: number; data?: PictureReviewBatchResult; message?: string }>(
+    '/picture/review/batch',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      data: body,
+      ...(options || {}),
+    },
+  )
+}
+
 export interface PictureReviewLog {
   id?: string
   pictureId?: string

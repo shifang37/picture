@@ -14,12 +14,14 @@ import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.model.vo.UserVO;
@@ -397,6 +399,34 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         return this.update(new UpdateWrapper<Picture>()
                 .eq("id", id)
                 .setSql("downloadCount = downloadCount + 1"));
+    }
+
+    @Override
+    public PictureReviewBatchResult batchReview(PictureReviewBatchRequest request, User loginUser) {
+        ThrowUtils.throwIf(request == null || CollUtil.isEmpty(request.getIds()),
+                ErrorCode.PARAMS_ERROR, "请选择要审核的图片");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        PictureReviewBatchResult result = new PictureReviewBatchResult();
+        for (Long id : request.getIds()) {
+            if (id == null || id <= 0) {
+                result.setFailCount(result.getFailCount() + 1);
+                result.getErrors().add("存在非法图片 id");
+                continue;
+            }
+            PictureReviewRequest singleRequest = new PictureReviewRequest();
+            singleRequest.setId(id);
+            singleRequest.setReviewStatus(request.getReviewStatus());
+            singleRequest.setReviewMessage(request.getReviewMessage());
+            try {
+                doPictureReview(singleRequest, loginUser);
+                result.setSuccessCount(result.getSuccessCount() + 1);
+            } catch (BusinessException e) {
+                // 单张失败不阻断其他图片，前端展示失败明细
+                result.setFailCount(result.getFailCount() + 1);
+                result.getErrors().add("图片 " + id + "：" + e.getMessage());
+            }
+        }
+        return result;
     }
 
     @Override
