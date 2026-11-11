@@ -50,6 +50,8 @@ public class CacheConfig {
         RedisCacheConfiguration analyzeConfig = defaults.entryTtl(ANALYZE_TTL);
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaults)
+                // 打开 RedisCache 的命中/未命中统计：否则 cache_gets_total 等指标恒为 0
+                .enableStatistics()
                 .withInitialCacheConfigurations(Map.of(
                         TAG_CATEGORY_CACHE, defaults,
                         ANALYZE_CACHE, analyzeConfig))
