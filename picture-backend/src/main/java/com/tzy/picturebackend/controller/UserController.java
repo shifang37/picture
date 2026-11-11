@@ -11,6 +11,7 @@ import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
+import com.tzy.picturebackend.manager.SessionInvalidationManager;
 import com.tzy.picturebackend.model.dto.user.*;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -41,6 +42,9 @@ public class UserController {
 
     @Resource
     private PictureService pictureService;
+
+    @Resource
+    private SessionInvalidationManager sessionInvalidationManager;
 
     @PostMapping("/register")
     public BaseResponse<Long> userRegister(@Valid @RequestBody UserRegisterRequest userRegisterRequest) {
@@ -88,6 +92,9 @@ public class UserController {
                 userUpdatePasswordRequest.getOldPassword(),
                 userUpdatePasswordRequest.getNewPassword());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 修改密码会让其他设备的旧会话失效；当前会话刷新到最新版本，保持登录
+        request.getSession().setAttribute(UserConstant.USER_LOGIN_VERSION,
+                sessionInvalidationManager.currentVersion());
         return ResultUtils.success(true);
     }
 
@@ -182,6 +189,7 @@ public class UserController {
         ThrowUtils.throwIf(pictureCount > 0, ErrorCode.PARAMS_ERROR, "该用户还有图片，请先处理该用户的图片");
         boolean result = userService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除用户失败");
+        sessionInvalidationManager.forget(deleteRequest.getId());
         return ResultUtils.success(true);
     }
 

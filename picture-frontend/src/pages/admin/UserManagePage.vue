@@ -446,7 +446,7 @@ const handleReset = async () => {
       newPassword: resetPasswordForm.newPassword,
     })
     if (res.data.code === 0) {
-      message.success('密码已重置，请通知用户使用新密码登录')
+      message.success('密码已重置，该用户已有登录会话已失效，请通知用户使用新密码登录')
       resetModalOpen.value = false
     } else {
       message.error('重置密码失败：' + (res.data.message || '未知错误'))

@@ -91,7 +91,7 @@
         <a-alert
           type="info"
           show-icon
-          message="修改密码后，当前登录状态仍然有效；下次登录请使用新密码。"
+          message="修改密码后，其他设备上的登录会话会失效；当前页面保持登录状态。"
           style="margin-bottom: 16px"
         />
         <a-form-item>

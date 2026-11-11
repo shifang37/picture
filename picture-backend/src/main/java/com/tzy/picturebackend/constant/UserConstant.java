@@ -7,6 +7,11 @@ public interface UserConstant {
      */
     String USER_LOGIN_STATE = "user_login";
 
+    /**
+     * 登录会话版本键：密码变更后旧版本会话失效
+     */
+    String USER_LOGIN_VERSION = "user_login_version";
+
     //  region 权限
 
     /**

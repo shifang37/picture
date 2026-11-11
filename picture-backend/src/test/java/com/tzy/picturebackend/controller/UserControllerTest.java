@@ -5,6 +5,7 @@ import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
+import com.tzy.picturebackend.manager.SessionInvalidationManager;
 import com.tzy.picturebackend.model.dto.user.UserResetPasswordRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.service.PictureService;
@@ -51,6 +52,8 @@ class UserControllerTest {
         UserController userController = new UserController();
         ReflectionTestUtils.setField(userController, "userService", userService);
         ReflectionTestUtils.setField(userController, "pictureService", pictureService);
+        ReflectionTestUtils.setField(userController, "sessionInvalidationManager",
+                new SessionInvalidationManager());
 
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
@@ -279,16 +282,20 @@ class UserControllerTest {
     // ==================== 修改密码 ====================
 
     @Test
-    @DisplayName("修改密码：成功返回 true")
+    @DisplayName("修改密码：成功返回 true，并刷新当前会话版本")
     void updatePassword_success() throws Exception {
         when(userService.getLoginUser(any())).thenReturn(user(100L, "user"));
         when(userService.updatePassword(any(User.class), any(), any())).thenReturn(true);
 
-        mockMvc.perform(post("/user/update/password")
+        var mvcResult = mockMvc.perform(post("/user/update/password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"oldPassword\":\"123456\",\"newPassword\":\"abcdef\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0));
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+
+        assertNotNull(mvcResult.getRequest().getSession(false)
+                .getAttribute(UserConstant.USER_LOGIN_VERSION));
     }
 
     @Test

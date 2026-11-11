@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
+import com.tzy.picturebackend.manager.SessionInvalidationManager;
 import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
 import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
@@ -15,6 +16,7 @@ import com.tzy.picturebackend.model.vo.LoginUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.mapper.UserMapper;
+import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.BeanUtils;
@@ -31,6 +33,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
+import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_VERSION;
 
 /**
 * @author shifang37
@@ -40,6 +43,9 @@ import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     implements UserService{
+
+    @Resource
+    private SessionInvalidationManager sessionInvalidationManager;
 
     /**
      * 密码编码器：BCrypt 自带随机盐，同一明文每次加密结果不同
@@ -164,6 +170,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         HttpSession session = request.getSession(true);
         request.changeSessionId();
         session.setAttribute(USER_LOGIN_STATE, user);
+        session.setAttribute(USER_LOGIN_VERSION, sessionInvalidationManager.currentVersion());
         return this.getLoginUserVO(user);
     }
 
@@ -179,12 +186,20 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Override
     public User getLoginUser(HttpServletRequest request) {
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
+        HttpSession session = request.getSession();
+        Object userObj = session.getAttribute(USER_LOGIN_STATE);
         User currentUser = (User) userObj;
         if(currentUser==null){
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
         long userId = currentUser.getId();
+        // 密码被修改/重置后，旧版本会话直接按未登录处理
+        if (sessionInvalidationManager.isInvalidated(userId,
+                (Long) session.getAttribute(USER_LOGIN_VERSION))) {
+            session.removeAttribute(USER_LOGIN_STATE);
+            session.removeAttribute(USER_LOGIN_VERSION);
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+        }
         currentUser = this.getById(userId);
         if(currentUser==null){
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
@@ -205,6 +220,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (currentUser == null || currentUser.getId() == null) {
             return null;
         }
+        if (sessionInvalidationManager.isInvalidated(currentUser.getId(),
+                (Long) session.getAttribute(USER_LOGIN_VERSION))) {
+            session.removeAttribute(USER_LOGIN_STATE);
+            session.removeAttribute(USER_LOGIN_VERSION);
+            return null;
+        }
         return this.getById(currentUser.getId());
     }
 
@@ -216,6 +237,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             throw new BusinessException(ErrorCode.OPERATION_ERROR,"未登录");
         }
         request.getSession().removeAttribute(USER_LOGIN_STATE);
+        request.getSession().removeAttribute(USER_LOGIN_VERSION);
         return true;
     }
 
@@ -243,7 +265,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         User update = new User();
         update.setId(user.getId());
         update.setUserPassword(getEncryptPassword(newPassword));
-        return this.updateById(update);
+        boolean result = this.updateById(update);
+        if (result) {
+            // 让该用户在其他设备上的旧会话失效；当前会话由 Controller 刷新版本
+            sessionInvalidationManager.invalidate(user.getId());
+        }
+        return result;
     }
 
     @Override
@@ -268,6 +295,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (!result) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "重置密码失败");
         }
+        // 管理员重置密码后，目标用户的所有已有会话立即失效
+        sessionInvalidationManager.invalidate(userId);
         return true;
     }
 
