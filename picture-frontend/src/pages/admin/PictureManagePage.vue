@@ -22,6 +22,15 @@
             allow-clear
           />
         </a-form-item>
+        <a-form-item label="审核状态" name="reviewStatus">
+          <a-select
+            v-model:value="searchParams.reviewStatus"
+            :options="reviewStatusOptions"
+            placeholder="全部状态"
+            style="min-width: 140px"
+            allow-clear
+          />
+        </a-form-item>
         <a-form-item>
           <a-button type="primary" html-type="submit">搜索</a-button>
         </a-form-item>
@@ -45,6 +54,12 @@
           <a-space wrap>
             <a-tag v-for="tag in JSON.parse(record.tags || '[]')" :key="tag">{{ tag }}</a-tag>
           </a-space>
+        </template>
+        <!-- 审核状态 -->
+        <template v-if="column.dataIndex === 'reviewStatus'">
+          <a-tag :color="statusColor(record.reviewStatus)">
+            {{ statusText(record.reviewStatus) }}
+          </a-tag>
         </template>
         <!-- 图片信息 -->
         <template v-if="column.dataIndex === 'picInfo'">
@@ -122,6 +137,11 @@ const columns = [
     width: 80,
   },
   {
+    title: '审核状态',
+    dataIndex: 'reviewStatus',
+    width: 110,
+  },
+  {
     title: '创建时间',
     dataIndex: 'createTime',
   },
@@ -134,6 +154,22 @@ const columns = [
     key: 'action',
   },
 ]
+
+const reviewStatusOptions = [
+  { value: 0, label: '待审核' },
+  { value: 1, label: '已通过' },
+  { value: 2, label: '已拒绝' },
+]
+
+const statusText = (status?: number) => {
+  const map: Record<number, string> = { 0: '待审核', 1: '已通过', 2: '已拒绝' }
+  return map[status ?? 0] ?? '未知'
+}
+
+const statusColor = (status?: number) => {
+  const map: Record<number, string> = { 0: 'orange', 1: 'green', 2: 'red' }
+  return map[status ?? 0] ?? 'default'
+}
 
 // 数据
 const dataList = ref<API.Picture[]>([])
