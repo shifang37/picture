@@ -13,7 +13,7 @@ export const useLoginUserStore = defineStore('loginUser', () => {
       if (res.data.code === 0 && res.data.data) {
         loginUser.value = res.data.data
       }
-    } catch (error) {
+    } catch {
       // 未登录或会话过期时保持默认状态即可，页面会按未登录处理
       console.warn('获取登录用户信息失败，按未登录处理')
     }

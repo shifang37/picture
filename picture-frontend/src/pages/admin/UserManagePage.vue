@@ -161,7 +161,7 @@
 
 <script lang="ts" setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { message, type FormInstance } from 'ant-design-vue'
+import { message, type FormInstance, type FormProps } from 'ant-design-vue'
 import { SmileOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { addUser, deleteUser, listUserVoByPage, updateUser } from '@/api/userController'
@@ -289,7 +289,7 @@ const formState = reactive({
   userRole: 'user',
 })
 
-const formRules = {
+const formRules: FormProps['rules'] = {
   userAccount: [
     { required: true, message: '请输入账号', trigger: 'blur' },
     { min: 4, max: 256, message: '账号长度需在 4 到 256 个字符之间', trigger: 'blur' },
@@ -412,7 +412,7 @@ const validateConfirmPassword = async (_rule: any, value: string) => {
   return Promise.resolve()
 }
 
-const resetRules = {
+const resetRules: FormProps['rules'] = {
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
     { min: 6, max: 72, message: '新密码长度需在 6 到 72 个字符之间', trigger: 'blur' },

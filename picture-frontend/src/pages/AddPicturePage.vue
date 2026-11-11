@@ -73,7 +73,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, type FormProps } from 'ant-design-vue'
 import PictureUpload from '@/components/PictureUpload.vue'
 import { editPicture, listPictureTagCategory, getPictureVoById } from '@/api/pictureController'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
@@ -98,7 +98,7 @@ const validateTags = (_rule: any, value?: string[]) => {
 }
 
 // 表单校验规则：与后端 DTO / 数据库字段长度保持一致
-const formRules = {
+const formRules: FormProps['rules'] = {
   name: [
     { required: true, message: '请输入图片名称', trigger: 'blur' },
     { max: 128, message: '图片名称不能超过 128 个字符', trigger: 'blur' },

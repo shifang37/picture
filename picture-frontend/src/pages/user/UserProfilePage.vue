@@ -106,7 +106,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, type FormProps } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { updatePassword, updateProfile } from '@/api/userExtra'
@@ -130,7 +130,7 @@ const passwordForm = reactive({
   confirmPassword: '',
 })
 
-const profileRules = {
+const profileRules: FormProps['rules'] = {
   userName: [{ max: 256, message: '昵称不能超过 256 个字符', trigger: 'blur' }],
   userAvatar: [{ max: 1024, message: '头像地址不能超过 1024 个字符', trigger: 'blur' }],
   userProfile: [{ max: 512, message: '简介不能超过 512 个字符', trigger: 'blur' }],
@@ -143,7 +143,7 @@ const validateConfirmPassword = (_rule: any, value: string) => {
   return Promise.resolve()
 }
 
-const passwordRules = {
+const passwordRules: FormProps['rules'] = {
   oldPassword: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },

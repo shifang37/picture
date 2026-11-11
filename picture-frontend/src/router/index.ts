@@ -1,17 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
+// 首页保持静态导入，保证首屏不额外多一次请求；其余页面全部按需加载
 import HomePage from '@/pages/HomePage.vue'
-import UserLoginPage from '@/pages/user/UserLoginPage.vue'
-import UserRegisterPage from '@/pages/user/UserRegisterPage.vue'
-import UserProfilePage from '@/pages/user/UserProfilePage.vue'
-import UserManagePage from '@/pages/admin/UserManagePage.vue'
-import AddPicturePage from '@/pages/AddPicturePage.vue'
-import BatchUploadPage from '@/pages/BatchUploadPage.vue'
-import MyPicturesPage from '@/pages/MyPicturesPage.vue'
-import PictureManagePage from '@/pages/admin/PictureManagePage.vue'
-import PictureReviewPage from '@/pages/admin/PictureReviewPage.vue'
-import TagCategoryManagePage from '@/pages/admin/TagCategoryManagePage.vue'
-import PictureDetailPage from '@/pages/PictureDetailPage.vue'
-import NotFoundPage from '@/pages/NotFoundPage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -24,64 +13,72 @@ const router = createRouter({
     {
       path: '/user/login',
       name: '用户登录',
-      component: UserLoginPage,
+      component: () => import('@/pages/user/UserLoginPage.vue'),
     },
     {
       path: '/user/register',
       name: '用户注册',
-      component: UserRegisterPage,
+      component: () => import('@/pages/user/UserRegisterPage.vue'),
     },
     {
       path: '/user/profile',
       name: '个人中心',
-      component: UserProfilePage,
+      component: () => import('@/pages/user/UserProfilePage.vue'),
+      meta: { requiresLogin: true },
     },
     {
       path: '/admin/pictureReview',
       name: '图片审核',
-      component: PictureReviewPage,
+      component: () => import('@/pages/admin/PictureReviewPage.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/admin/pictureManage',
       name: '图片管理',
-      component: PictureManagePage,
+      component: () => import('@/pages/admin/PictureManagePage.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/admin/userManage',
       name: '用户管理',
-      component: UserManagePage,
+      component: () => import('@/pages/admin/UserManagePage.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/admin/tagCategoryManage',
       name: '标签分类管理',
-      component: TagCategoryManagePage,
+      component: () => import('@/pages/admin/TagCategoryManagePage.vue'),
+      meta: { requiresAdmin: true },
     },
     {
       path: '/add_picture',
       name: '创建图片',
-      component: AddPicturePage,
+      component: () => import('@/pages/AddPicturePage.vue'),
+      meta: { requiresLogin: true },
     },
     {
       path: '/batch_upload',
       name: '批量上传',
-      component: BatchUploadPage,
+      component: () => import('@/pages/BatchUploadPage.vue'),
+      meta: { requiresLogin: true },
     },
     {
       path: '/my_pictures',
       name: '我的图片',
-      component: MyPicturesPage,
+      component: () => import('@/pages/MyPicturesPage.vue'),
+      meta: { requiresLogin: true },
     },
     {
       path: '/picture/:id',
       name: '图片详情',
-      component: PictureDetailPage,
+      component: () => import('@/pages/PictureDetailPage.vue'),
       props: true,
     },
     {
       // 兜底路由：未匹配的站内地址统一显示 404 页面
       path: '/:pathMatch(.*)*',
       name: 'notFound',
-      component: NotFoundPage,
+      component: () => import('@/pages/NotFoundPage.vue'),
     },
   ],
 })

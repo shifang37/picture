@@ -6,9 +6,9 @@ import router from '@/router'
 let firstFetchLoginUser = true
 
 /**
- * 全局权限校验
+ * 全局权限校验：具体规则由路由的 meta 声明，新增页面时只改路由表即可
  */
-router.beforeEach(async (to, from) => {
+router.beforeEach(async (to) => {
   const loginUserStore = useLoginUserStore()
   let loginUser = loginUserStore.loginUser
   // 确保页面刷新，首次加载时，能够等后端返回用户信息后再校验权限
@@ -17,20 +17,13 @@ router.beforeEach(async (to, from) => {
     loginUser = loginUserStore.loginUser
     firstFetchLoginUser = false
   }
-  const toUrl = to.fullPath
-  if (toUrl.startsWith('/admin')) {
+  if (to.meta.requiresAdmin) {
     if (!loginUser || loginUser.userRole !== 'admin') {
       message.error('没有权限')
       return `/user/login?redirect=${encodeURIComponent(to.fullPath)}`
     }
   }
-  // 普通用户上传、查看自己的图片、个人中心需要登录
-  const requiresLogin =
-    to.path === '/add_picture' ||
-    to.path === '/batch_upload' ||
-    to.path === '/my_pictures' ||
-    to.path === '/user/profile'
-  if (requiresLogin && !loginUser?.id) {
+  if (to.meta.requiresLogin && !loginUser?.id) {
     message.warning('请先登录')
     return `/user/login?redirect=${encodeURIComponent(to.fullPath)}`
   }

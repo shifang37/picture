@@ -9,7 +9,7 @@
 | 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
-| 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router |
+| 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、ESLint |
 | 构建 | Maven Wrapper 3.9.16、npm |
 
 ## 目录结构
@@ -191,6 +191,15 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - **降级**：缓存只保存公开可见的数据；Redis 读写异常时直接回源数据库，列表接口不受影响。
 - 实测（300 张图片、50 次请求）：公开列表热缓存 p95 约 8.5 ms，每次失效回源 p95 约 19 ms。
 
+## 前端构建与代码检查
+
+- **路由懒加载**：只有首页静态导入，其余页面（含全部管理端页面）按路由拆包，首屏不再加载管理端代码；
+- **组件按需引入**：Ant Design Vue 由 `unplugin-vue-components` 按需解析，`main.ts` 不再 `app.use(Antd)`；生成的 `components.d.ts` 已提交，模板里的 `a-xxx` 有完整类型；
+- **路由元信息**：权限写在路由 `meta.requiresLogin` / `meta.requiresAdmin`，`access.ts` 只读 `to.meta`，新增页面不用再改权限判断；
+- **ESLint**：扁平配置 `eslint.config.js`，`npm run lint` 检查，CI 在格式检查之后执行；
+- **构建体积**：入口 chunk 从改造前的 1,664 kB（gzip 518 kB）降到 740 kB（gzip 238 kB），管理端页面均为独立 chunk；
+- 前端测试：10 个 Vitest 用例 + 5 个 Playwright 用例。
+
 ## 生产部署（Docker / 反向代理 / 监控）
 
 1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码和腾讯云 COS 配置
@@ -223,8 +232,11 @@ cd picture-backend
 # 前端
 cd picture-frontend
 npm run dev                    # 开发服务器
+npm run lint                   # ESLint 检查
 npm run type-check             # 类型检查
 npm run build                  # 生产构建
+npm run test                   # Vitest 单元测试
+npm run test:e2e               # Playwright 端到端测试
 npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户端
 ```
 

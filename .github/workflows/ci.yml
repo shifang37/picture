@@ -52,6 +52,9 @@ jobs:
       - name: 代码格式检查
         run: npm run format:check
 
+      - name: 代码检查
+        run: npm run lint
+
       - name: 类型检查与构建
         run: npm run build
 

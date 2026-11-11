@@ -226,7 +226,7 @@ const parseTags = (tags?: string) => {
   if (!tags) return []
   try {
     return JSON.parse(tags) as string[]
-  } catch (e) {
+  } catch {
     return []
   }
 }
