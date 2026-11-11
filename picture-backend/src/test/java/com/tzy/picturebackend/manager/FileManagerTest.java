@@ -4,10 +4,18 @@ import com.tzy.picturebackend.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * FileManager 图片校验测试：普通用户也能上传，因此上传入口需要挡住非图片和超大文件
@@ -92,6 +100,59 @@ class FileManagerTest {
     @DisplayName("校验：带 charset 参数的 MIME 类型可以识别")
     void validPicture_acceptsContentTypeWithParameters() {
         assertDoesNotThrow(() -> fileManager.validPicture(file("a.png", "image/png; charset=binary", PNG_HEADER)));
+    }
+
+    // ==================== 删除 COS 对象 ====================
+
+    @Test
+    @DisplayName("删除文件：本桶地址解析出 key 后调用 COS 删除")
+    void deletePicture_deletesOwnObject() {
+        FileManager manager = new FileManager();
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(manager, "cosManager", cosManager);
+        String url = "https://example.cos.myqcloud.com/public/1/a.jpg";
+        when(cosManager.parseObjectKey(url)).thenReturn("public/1/a.jpg");
+
+        assertTrue(manager.deletePicture(url));
+        verify(cosManager).deleteObject("public/1/a.jpg");
+    }
+
+    @Test
+    @DisplayName("删除文件：非本桶地址跳过删除且不抛异常")
+    void deletePicture_skipsForeignUrl() {
+        FileManager manager = new FileManager();
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(manager, "cosManager", cosManager);
+        String url = "https://other.com/a.jpg";
+        when(cosManager.parseObjectKey(url)).thenReturn(null);
+
+        assertFalse(manager.deletePicture(url));
+        verify(cosManager, never()).deleteObject(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("删除文件：空地址跳过删除且不抛异常")
+    void deletePicture_skipsBlankUrl() {
+        FileManager manager = new FileManager();
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(manager, "cosManager", cosManager);
+
+        assertFalse(manager.deletePicture(null));
+        assertFalse(manager.deletePicture(""));
+        verify(cosManager, never()).deleteObject(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("删除文件：COS 删除异常只记录日志，不影响调用方")
+    void deletePicture_swallowsCosException() {
+        FileManager manager = new FileManager();
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(manager, "cosManager", cosManager);
+        String url = "https://example.cos.myqcloud.com/public/1/a.jpg";
+        when(cosManager.parseObjectKey(url)).thenReturn("public/1/a.jpg");
+        doThrow(new RuntimeException("cos down")).when(cosManager).deleteObject("public/1/a.jpg");
+
+        assertFalse(assertDoesNotThrow(() -> manager.deletePicture(url)));
     }
 
     private MockMultipartFile file(String name, String contentType, byte[] content) {

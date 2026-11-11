@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -235,6 +236,139 @@ class PictureServiceImplTest {
         verifyNoInteractions(fileManager);
     }
 
+    // ==================== 删除 ====================
+
+    @Test
+    @DisplayName("删除：本人删除成功时同时清理 COS")
+    void deletePicture_ownerDeletesAndCleansCos() {
+        User owner = user(100L, "user");
+        Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        existing.setUrl("https://example.com/public/100/2026-11-11_old.jpg");
+        when(pictureMapper.selectById(1L)).thenReturn(existing);
+        when(pictureMapper.deleteById(1L)).thenReturn(1);
+
+        assertTrue(pictureService.deletePicture(1L, owner));
+
+        verify(pictureMapper).deleteById(1L);
+        verify(fileManager).deletePicture(existing.getUrl());
+    }
+
+    @Test
+    @DisplayName("删除：管理员可以删除他人图片并清理 COS")
+    void deletePicture_adminDeletesOthersPicture() {
+        User admin = admin();
+        when(userService.isAdmin(admin)).thenReturn(true);
+        Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        existing.setUrl("https://example.com/public/100/a.jpg");
+        when(pictureMapper.selectById(1L)).thenReturn(existing);
+        when(pictureMapper.deleteById(1L)).thenReturn(1);
+
+        assertTrue(pictureService.deletePicture(1L, admin));
+
+        verify(pictureMapper).deleteById(1L);
+        verify(fileManager).deletePicture(existing.getUrl());
+    }
+
+    @Test
+    @DisplayName("删除：图片不存在时不删数据库、不删 COS")
+    void deletePicture_missingPictureDoesNothing() {
+        when(pictureMapper.selectById(1L)).thenReturn(null);
+
+        assertThrows(BusinessException.class, () -> pictureService.deletePicture(1L, user(100L, "user")));
+
+        verify(pictureMapper, never()).deleteById(any());
+        verifyNoInteractions(fileManager);
+    }
+
+    @Test
+    @DisplayName("删除：普通用户不能删除他人图片，也不清理 COS")
+    void deletePicture_rejectsOtherUser() {
+        User other = user(200L, "user");
+        when(userService.isAdmin(other)).thenReturn(false);
+        when(pictureMapper.selectById(1L)).thenReturn(picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()));
+
+        assertThrows(BusinessException.class, () -> pictureService.deletePicture(1L, other));
+
+        verify(pictureMapper, never()).deleteById(any());
+        verifyNoInteractions(fileManager);
+    }
+
+    @Test
+    @DisplayName("删除：数据库删除失败时不清理 COS（避免数据库仍有记录但对象已丢失）")
+    void deletePicture_dbFailureKeepsCos() {
+        User owner = user(100L, "user");
+        Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        existing.setUrl("https://example.com/public/100/a.jpg");
+        when(pictureMapper.selectById(1L)).thenReturn(existing);
+        when(pictureMapper.deleteById(1L)).thenReturn(0);
+
+        assertThrows(BusinessException.class, () -> pictureService.deletePicture(1L, owner));
+
+        verifyNoInteractions(fileManager);
+    }
+
+    @Test
+    @DisplayName("上传补偿：数据库保存返回 false 时删除刚上传的 COS 对象")
+    void uploadPicture_saveReturnsFalseCompensatesCos() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        when(pictureMapper.insert(any(Picture.class))).thenReturn(0);
+
+        assertThrows(BusinessException.class,
+                () -> pictureService.uploadPicture(jpegFile(), null, normalUser));
+
+        verify(fileManager).deletePicture("https://example.com/new.jpg");
+    }
+
+    @Test
+    @DisplayName("上传补偿：数据库保存抛异常时删除刚上传的 COS 对象并继续抛错")
+    void uploadPicture_saveThrowsCompensatesCos() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        when(pictureMapper.insert(any(Picture.class))).thenThrow(new RuntimeException("db down"));
+
+        assertThrows(RuntimeException.class,
+                () -> pictureService.uploadPicture(jpegFile(), null, normalUser));
+
+        verify(fileManager).deletePicture("https://example.com/new.jpg");
+    }
+
+    @Test
+    @DisplayName("重传：更新成功后删除旧 URL")
+    void uploadPicture_reuploadDeletesOldUrl() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        Picture oldPicture = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        oldPicture.setUrl("https://example.com/old.jpg");
+        when(pictureMapper.selectById(1L)).thenReturn(oldPicture);
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
+
+        pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser);
+
+        verify(fileManager).deletePicture("https://example.com/old.jpg");
+    }
+
+    @Test
+    @DisplayName("重传：更新失败时删除新 URL，保留旧 URL")
+    void uploadPicture_reuploadFailureDeletesNewUrl() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        Picture oldPicture = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        oldPicture.setUrl("https://example.com/old.jpg");
+        when(pictureMapper.selectById(1L)).thenReturn(oldPicture);
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(0);
+
+        assertThrows(BusinessException.class,
+                () -> pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser));
+
+        verify(fileManager).deletePicture("https://example.com/new.jpg");
+        verify(fileManager, never()).deletePicture("https://example.com/old.jpg");
+    }
+
     // ==================== 审核 ====================
 
     @Test
@@ -366,8 +500,12 @@ class PictureServiceImplTest {
     }
 
     private UploadPictureResult uploadResult() {
+        return uploadResult("https://example.com/public/100/2026-11-11_test.jpg");
+    }
+
+    private UploadPictureResult uploadResult(String url) {
         UploadPictureResult result = new UploadPictureResult();
-        result.setUrl("https://example.com/public/100/2026-11-11_test.jpg");
+        result.setUrl(url);
         result.setPicName("test");
         result.setPicSize(1024L);
         result.setPicWidth(100);

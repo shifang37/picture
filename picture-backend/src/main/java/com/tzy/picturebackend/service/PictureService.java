@@ -31,6 +31,21 @@ public interface PictureService extends IService<Picture> {
                             PictureUploadRequest pictureUploadRequest,
                             User loginUser);
 
+    /**
+     * 删除图片：先做数据库逻辑删除，成功后 best-effort 清理 COS 对象
+     *
+     * @param id        图片 id
+     * @param loginUser 当前登录用户
+     * @return 是否删除成功
+     */
+    boolean deletePicture(Long id, User loginUser);
+
+    /**
+     * 清理图片文件（best-effort，失败只记录日志，不抛异常）
+     *
+     * @param url 图片访问地址
+     */
+    void deletePictureFile(String url);
 
     QueryWrapper<Picture> getQueryWrapper(PictureQueryRequest pictureQueryRequest);
 

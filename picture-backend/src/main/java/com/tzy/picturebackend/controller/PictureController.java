@@ -64,21 +64,12 @@ public class PictureController {
      */
     @PostMapping("/delete")
     public BaseResponse<Boolean> deletePicture(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
-        if (deleteRequest == null || deleteRequest.getId() <= 0) {
+        if (deleteRequest == null || deleteRequest.getId() == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
         User loginUser = userService.getLoginUser(request);
-        long id = deleteRequest.getId();
-        // 判断是否存在
-        Picture oldPicture = pictureService.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可删除
-        if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
-        // 操作数据库
-        boolean result = pictureService.removeById(id);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 权限校验、数据库逻辑删除、COS 清理统一收敛到 service
+        pictureService.deletePicture(deleteRequest.getId(), loginUser);
         return ResultUtils.success(true);
     }
 
@@ -88,7 +79,8 @@ public class PictureController {
     @PostMapping("/update")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Boolean> updatePicture(@RequestBody PictureUpdateRequest pictureUpdateRequest) {
-        if (pictureUpdateRequest == null || pictureUpdateRequest.getId() <= 0) {
+        if (pictureUpdateRequest == null || pictureUpdateRequest.getId() == null
+                || pictureUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
         // 将实体类和 DTO 进行转换
@@ -143,8 +135,10 @@ public class PictureController {
     @PostMapping("/list/page")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<Picture>> listPictureByPage(@RequestBody PictureQueryRequest pictureQueryRequest) {
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
+        validPage(current, size, 100);
         // 查询数据库
         Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
                 pictureService.getQueryWrapper(pictureQueryRequest));
@@ -157,10 +151,11 @@ public class PictureController {
     @PostMapping("/list/page/vo")
     public BaseResponse<Page<PictureVO>> listPictureVOByPage(@RequestBody PictureQueryRequest pictureQueryRequest,
                                                              HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
-        // 限制爬虫
-        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
+        // 公开列表限制爬虫：每页最多 20 条
+        validPage(current, size, 20);
         // 公开列表只展示审核通过的图片，避免未审核 / 被拒绝的内容外泄
         pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
         // 查询数据库
@@ -180,7 +175,7 @@ public class PictureController {
                                                                HttpServletRequest request) {
         ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long size = pictureQueryRequest.getPageSize();
-        ThrowUtils.throwIf(size <= 0 || size > 20, ErrorCode.PARAMS_ERROR);
+        validPage(pictureQueryRequest.getCurrent(), size, 20);
         User loginUser = userService.getLoginUser(request);
         // 强制只查本人图片，忽略客户端传入的 userId，避免越权查看他人待审核内容
         pictureQueryRequest.setUserId(loginUser.getId());
@@ -196,7 +191,8 @@ public class PictureController {
      */
     @PostMapping("/edit")
     public BaseResponse<Boolean> editPicture(@RequestBody PictureEditRequest pictureEditRequest, HttpServletRequest request) {
-        if (pictureEditRequest == null || pictureEditRequest.getId() <= 0) {
+        if (pictureEditRequest == null || pictureEditRequest.getId() == null
+                || pictureEditRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
         // 在此处将实体类和 DTO 进行转换
@@ -241,6 +237,15 @@ public class PictureController {
         User loginUser = userService.getLoginUser(request);
         pictureService.doPictureReview(pictureReviewRequest, loginUser);
         return ResultUtils.success(true);
+    }
+
+    /**
+     * 统一校验分页参数，避免 pageSize 过大拖垮数据库
+     */
+    private void validPage(long current, long size, long maxSize) {
+        ThrowUtils.throwIf(current < 1 || size < 1, ErrorCode.PARAMS_ERROR, "分页参数不合法");
+        ThrowUtils.throwIf(size > maxSize, ErrorCode.PARAMS_ERROR,
+                String.format("分页大小不能超过 %d", maxSize));
     }
 
 }

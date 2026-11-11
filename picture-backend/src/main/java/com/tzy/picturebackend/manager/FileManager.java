@@ -157,6 +157,35 @@ public class FileManager {
     }
 
     /**
+     * 删除图片文件（best-effort）
+     * <p>
+     * 只有 url 属于当前配置的 COS host 时才会真正删除；删除失败只记录日志，
+     * 由调用方决定是否忽略，避免影响数据库操作结果。
+     *
+     * @param url 图片访问地址
+     * @return 是否真正删除了 COS 对象
+     */
+    public boolean deletePicture(String url) {
+        if (StrUtil.isBlank(url)) {
+            log.warn("跳过删除图片文件：url 为空");
+            return false;
+        }
+        String key = cosManager.parseObjectKey(url);
+        if (StrUtil.isBlank(key)) {
+            log.warn("跳过删除图片文件：url 不属于当前存储桶, url = {}", url);
+            return false;
+        }
+        try {
+            cosManager.deleteObject(key);
+            log.info("已删除图片文件, key = {}", key);
+            return true;
+        } catch (Exception e) {
+            log.error("删除图片文件失败, key = {}", key, e);
+            return false;
+        }
+    }
+
+    /**
      * 删除临时文件
      */
     public void deleteTempFile(File file) {

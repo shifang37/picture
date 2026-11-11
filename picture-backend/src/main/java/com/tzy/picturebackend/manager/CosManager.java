@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.manager;
 
+import cn.hutool.core.util.StrUtil;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.GetObjectRequest;
@@ -53,5 +54,54 @@ public class CosManager {
         return cosClient.putObject(putObjectRequest);
     }
 
+    /**
+     * 删除对象
+     *
+     * @param key 唯一键
+     */
+    public void deleteObject(String key) {
+        cosClient.deleteObject(cosClientConfig.getBucket(), key);
+    }
+
+    /**
+     * 从图片访问地址中解析出 COS 对象键
+     * <p>
+     * 只有地址以当前配置的 host 开头时才认为是本桶对象；其他域名、空地址一律返回 null，
+     * 避免误删历史桶、CDN 或其他站点的对象。
+     *
+     * @param url 图片访问地址
+     * @return 对象键；无法解析时返回 null
+     */
+    public String parseObjectKey(String url) {
+        if (StrUtil.isBlank(url) || cosClientConfig == null || StrUtil.isBlank(cosClientConfig.getHost())) {
+            return null;
+        }
+        // 配置项可能带结尾斜杠，统一去掉后再比较
+        String host = StrUtil.removeSuffix(cosClientConfig.getHost().trim(), "/");
+        if (StrUtil.isBlank(host)) {
+            return null;
+        }
+        // 去掉 query 和 fragment，例如图片处理参数、防盗链参数
+        String cleanUrl = url.trim();
+        int end = cleanUrl.length();
+        int queryIndex = cleanUrl.indexOf('?');
+        if (queryIndex >= 0) {
+            end = queryIndex;
+        }
+        int fragmentIndex = cleanUrl.indexOf('#');
+        if (fragmentIndex >= 0 && fragmentIndex < end) {
+            end = fragmentIndex;
+        }
+        cleanUrl = cleanUrl.substring(0, end);
+        // host 比较忽略大小写，但必须完整匹配，防止 host.evil.com 之类的地址通过
+        if (cleanUrl.length() <= host.length() || !cleanUrl.regionMatches(true, 0, host, 0, host.length())) {
+            return null;
+        }
+        if (cleanUrl.charAt(host.length()) != '/') {
+            return null;
+        }
+        String key = cleanUrl.substring(host.length() + 1);
+        return StrUtil.isBlank(key) ? null : key;
+    }
 
 }

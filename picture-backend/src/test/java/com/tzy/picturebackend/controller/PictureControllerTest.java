@@ -1,6 +1,8 @@
 package com.tzy.picturebackend.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
@@ -23,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -112,6 +115,51 @@ class PictureControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40000))
                 .andExpect(jsonPath("$.message").value("文件大小不能超过 2M"));
+    }
+
+    // ==================== 删除 ====================
+
+    @Test
+    @DisplayName("删除：登录用户可以删除自己的图片")
+    void deletePicture_delegatesToService() throws Exception {
+        User normalUser = user(100L, "user");
+        when(userService.getLoginUser(any())).thenReturn(normalUser);
+        when(pictureService.deletePicture(1L, normalUser)).thenReturn(true);
+
+        mockMvc.perform(post("/picture/delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+
+        verify(pictureService).deletePicture(1L, normalUser);
+    }
+
+    @Test
+    @DisplayName("删除：空 body 返回参数错误，不触发空指针")
+    void deletePicture_rejectsEmptyBody() throws Exception {
+        mockMvc.perform(post("/picture/delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(pictureService, never()).deletePicture(any(), any());
+    }
+
+    @Test
+    @DisplayName("删除：未登录返回未登录业务码")
+    void deletePicture_requiresLogin() throws Exception {
+        when(userService.getLoginUser(any())).thenThrow(new BusinessException(ErrorCode.NOT_LOGIN_ERROR));
+
+        mockMvc.perform(post("/picture/delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40100));
+
+        verify(pictureService, never()).deletePicture(any(), any());
     }
 
     private User user(Long id, String role) {

@@ -25,12 +25,14 @@ import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -40,6 +42,7 @@ import java.util.stream.Collectors;
 * @createDate 2026-03-11 16:30:50
 */
 @Service
+@Slf4j
 public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     implements PictureService{
 
@@ -85,9 +88,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 按照用户 id 划分目录
         String uploadPathPrefix = String.format("public/%s", loginUser.getId());
         UploadPictureResult uploadPictureResult = fileManager.uploadPicture(multipartFile, uploadPathPrefix);
+        String newUrl = uploadPictureResult.getUrl();
         // 构造要入库的图片信息
         Picture picture = new Picture();
-        picture.setUrl(uploadPictureResult.getUrl());
+        picture.setUrl(newUrl);
         picture.setName(uploadPictureResult.getPicName());
         picture.setPicSize(uploadPictureResult.getPicSize());
         picture.setPicWidth(uploadPictureResult.getPicWidth());
@@ -118,13 +122,64 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                     .set("reviewMessage", picture.getReviewMessage())
                     .set("reviewerId", picture.getReviewerId())
                     .set("reviewTime", picture.getReviewTime());
-            boolean result = this.update(picture, updateWrapper);
-            ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
+            boolean result;
+            try {
+                result = this.update(picture, updateWrapper);
+            } catch (RuntimeException e) {
+                // 数据库更新失败：删除刚上传的新对象，避免产生孤儿文件
+                deletePictureFile(newUrl);
+                throw e;
+            }
+            if (!result) {
+                deletePictureFile(newUrl);
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片上传失败");
+            }
+            // 更新成功后再清理旧对象；旧对象清理失败不影响新图片
+            if (!Objects.equals(newUrl, oldPicture.getUrl())) {
+                deletePictureFile(oldPicture.getUrl());
+            }
         } else {
-            boolean result = this.save(picture);
-            ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
+            boolean result;
+            try {
+                result = this.save(picture);
+            } catch (RuntimeException e) {
+                // 数据库保存失败：删除刚上传的对象，避免产生孤儿文件
+                deletePictureFile(newUrl);
+                throw e;
+            }
+            if (!result) {
+                deletePictureFile(newUrl);
+                throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片上传失败");
+            }
         }
         return PictureVO.objToVo(picture);
+    }
+
+    @Override
+    public boolean deletePicture(Long id, User loginUser) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "id 不能为空");
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+        Picture oldPicture = this.getById(id);
+        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        // 仅本人或管理员可删除
+        if (!Objects.equals(oldPicture.getUserId(), loginUser.getId()) && !userService.isAdmin(loginUser)) {
+            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+        }
+        // 先做数据库逻辑删除，成功后再清理 COS，避免数据库回滚但对象已被删除
+        boolean result = this.removeById(id);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
+        deletePictureFile(oldPicture.getUrl());
+        return true;
+    }
+
+    @Override
+    public void deletePictureFile(String url) {
+        try {
+            fileManager.deletePicture(url);
+        } catch (Exception e) {
+            // COS 清理是 best-effort，不能影响数据库结果，但要留可检索日志
+            log.error("清理图片文件失败, url = {}", url, e);
+        }
     }
 
     @Override
