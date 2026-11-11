@@ -4,11 +4,20 @@ import HomePage from '@/pages/HomePage.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
+  // 首页自己恢复滚动位置（keep-alive + sessionStorage），其余页面沿用浏览器前进后退的位置
+  scrollBehavior(to, from, savedPosition) {
+    if (to.meta.keepAlive) {
+      return false
+    }
+    return savedPosition ?? { top: 0 }
+  },
   routes: [
     {
       path: '/',
       name: 'home',
       component: HomePage,
+      // 首页使用 keep-alive，从详情页返回时保留已加载的列表和筛选条件
+      meta: { keepAlive: true },
     },
     {
       path: '/user/login',

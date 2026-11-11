@@ -5,7 +5,13 @@
         <GlobalHeader />
       </a-layout-header>
       <a-layout-content class="content">
-        <router-view />
+        <!-- 只缓存声明了 meta.keepAlive 的页面（当前仅首页），其余页面每次进入都重新创建 -->
+        <router-view v-slot="{ Component }">
+          <keep-alive>
+            <component :is="Component" v-if="$route.meta.keepAlive" />
+          </keep-alive>
+          <component :is="Component" v-if="!$route.meta.keepAlive" />
+        </router-view>
       </a-layout-content>
       <a-layout-footer class="footer"> tzy </a-layout-footer>
     </a-layout>

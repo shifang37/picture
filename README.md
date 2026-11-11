@@ -9,7 +9,7 @@
 | 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ、Elasticsearch、数据万象内容审核、DeepSeek |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理与内容审核） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
-| 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、ESLint |
+| 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、VueUse、ESLint |
 | 构建 | Maven Wrapper 3.9.16、npm |
 
 ## 目录结构
@@ -349,14 +349,24 @@ $env:SEARCH_ENGINE = 'es'
 
 > 单节点开发堆内存 512MB。生产 compose 开启基础认证（`ES_USERNAME` / `ES_PASSWORD`），只在内网可达，不映射 9200 到宿主机。
 
+## 首页瀑布流与无限滚动
+
+首页不再是固定栅格分页，改为按图片比例排布的瀑布流：
+
+- **布局**：用接口返回的 `picWidth` / `picHeight` 计算高宽比，按「放入当前最矮的一列」分配到 1–6 列，列数随容器宽度变化；封面用 `aspect-ratio` 在图片加载前占位，横图、竖图都不裁切，滚动时没有布局跳动；
+- **加载**：VueUse `useInfiniteScroll` 监听窗口滚动，距底部 400px 时请求下一页（每页 20 条），按 id 去重，避免滚动期间有新图过审导致重复；加载失败显示重试按钮，全部加载完显示「没有更多了」；
+- **图片**：`loading="lazy"`、`decoding="async"`，缩略图尺寸按列宽 × 设备像素比取 300–600 的档位，减少列表流量；
+- **状态进 URL**：搜索词、分类、标签写入查询参数，刷新或分享链接都能还原；切换条件时回到页面顶部；
+- **返回恢复**：首页通过路由 `meta.keepAlive` 缓存，从详情页返回时恢复原来的滚动位置；其他页面仍沿用浏览器前进后退的滚动位置。
+
 ## 前端构建与代码检查
 
 - **路由懒加载**：只有首页静态导入，其余页面（含全部管理端页面）按路由拆包，首屏不再加载管理端代码；
 - **组件按需引入**：Ant Design Vue 由 `unplugin-vue-components` 按需解析，`main.ts` 不再 `app.use(Antd)`；生成的 `components.d.ts` 已提交，模板里的 `a-xxx` 有完整类型；
 - **路由元信息**：权限写在路由 `meta.requiresLogin` / `meta.requiresAdmin`，`access.ts` 只读 `to.meta`，新增页面不用再改权限判断；
 - **ESLint**：扁平配置 `eslint.config.js`，`npm run lint` 检查，CI 在格式检查之后执行；
-- **构建体积**：入口 chunk 从改造前的 1,664 kB（gzip 518 kB）降到 740 kB（gzip 238 kB），管理端页面均为独立 chunk；
-- 前端测试：10 个 Vitest 用例 + 5 个 Playwright 用例。
+- **构建体积**：入口 chunk 从改造前的 1,664 kB（gzip 518 kB）降到约 643 kB（gzip 212 kB），管理端页面均为独立 chunk；
+- 前端测试：20 个 Vitest 用例 + 9 个 Playwright 用例。
 
 ## 并发模型（虚拟线程评估）
 
