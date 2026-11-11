@@ -24,10 +24,10 @@ describe('getThumbnailUrl', () => {
 
   it('为 COS 地址追加缩略图参数', () => {
     expect(getThumbnailUrl('https://example.com/a.jpg')).toBe(
-      'https://example.com/a.jpg?imageMogr2/thumbnail/300x',
+      'https://example.com/a.jpg?imageMogr2/thumbnail/300x/format/webp/quality/80',
     )
     expect(getThumbnailUrl('https://example.com/a.jpg?v=1')).toBe(
-      'https://example.com/a.jpg?v=1&imageMogr2/thumbnail/300x',
+      'https://example.com/a.jpg?v=1&imageMogr2/thumbnail/300x/format/webp/quality/80',
     )
   })
 

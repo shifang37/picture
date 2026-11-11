@@ -27,7 +27,8 @@ export function getThumbnailUrl(url?: string, size = 300) {
   if (url.includes('imageMogr2')) {
     return url
   }
-  return `${url}${url.includes('?') ? '&' : '?'}imageMogr2/thumbnail/${size}x`
+  // 缩略图同时转 WebP 并压缩质量，进一步减少列表页流量
+  return `${url}${url.includes('?') ? '&' : '?'}imageMogr2/thumbnail/${size}x/format/webp/quality/80`
 }
 
 /**
