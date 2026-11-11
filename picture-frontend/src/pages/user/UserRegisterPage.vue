@@ -9,26 +9,45 @@
       autocomplete="off"
       @finish="handleSubmit"
     >
-      <a-form-item name="userAccount" :rules="[{ required: true, message: '请输入账号' }]">
-        <a-input v-model:value="formState.userAccount" placeholder="请输入账号" />
+      <a-form-item
+        name="userAccount"
+        :rules="[
+          { required: true, message: '请输入账号' },
+          { min: 4, max: 256, message: '账号长度需在 4 到 256 个字符之间' },
+        ]"
+      >
+        <a-input
+          v-model:value="formState.userAccount"
+          placeholder="请输入账号（4-256 个字符）"
+          :maxlength="256"
+        />
       </a-form-item>
       <a-form-item
         name="userPassword"
         :rules="[
           { required: true, message: '请输入密码' },
-          { min: 6, message: '密码不能小于 6 位' },
+          { min: 6, max: 72, message: '密码长度需在 6 到 72 个字符之间' },
         ]"
       >
-        <a-input-password v-model:value="formState.userPassword" placeholder="请输入密码" />
+        <a-input-password
+          v-model:value="formState.userPassword"
+          placeholder="请输入密码（6-72 个字符）"
+          :maxlength="72"
+        />
       </a-form-item>
       <a-form-item
         name="checkPassword"
         :rules="[
           { required: true, message: '请输入确认密码' },
-          { min: 6, message: '确认密码不能小于 6 位' },
+          { min: 6, max: 72, message: '确认密码长度需在 6 到 72 个字符之间' },
+          { validator: validateConfirmPassword, trigger: 'blur' },
         ]"
       >
-        <a-input-password v-model:value="formState.checkPassword" placeholder="请输入确认密码" />
+        <a-input-password
+          v-model:value="formState.checkPassword"
+          placeholder="请再次输入密码"
+          :maxlength="72"
+        />
       </a-form-item>
       <div class="tips">
         已有账号？
@@ -52,6 +71,14 @@ const formState = reactive<API.UserRegisterRequest>({
   checkPassword: '',
 })
 const router = useRouter()
+
+// 与后端 DTO 的密码上限保持一致
+const validateConfirmPassword = (_rule: any, value: string) => {
+  if (value && value !== formState.userPassword) {
+    return Promise.reject('两次输入的密码不一致')
+  }
+  return Promise.resolve()
+}
 
 /**
  * 提交表单
