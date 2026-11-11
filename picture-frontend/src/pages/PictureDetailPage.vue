@@ -54,7 +54,7 @@
             <a-descriptions-item label="大小">
               {{ formatSize(picture.picSize) }}
             </a-descriptions-item>
-            <a-descriptions-item label="下载次数">
+            <a-descriptions-item label="下载次数（按点击统计）">
               {{ picture.downloadCount ?? 0 }}
             </a-descriptions-item>
           </a-descriptions>
@@ -216,7 +216,7 @@ const doShare = async () => {
   }
 }
 
-// 处理下载：先记录统计，统计失败不影响实际下载
+// 处理下载：下载次数按「下载按钮点击次数」统计，点击后 best-effort 自增，统计失败不影响实际下载
 const doDownload = async () => {
   const id = picture.value.id
   if (id) {
