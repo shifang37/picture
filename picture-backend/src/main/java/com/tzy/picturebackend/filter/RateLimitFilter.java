@@ -3,7 +3,6 @@ package com.tzy.picturebackend.filter;
 import cn.hutool.core.util.StrUtil;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.RateLimitManager;
-import com.tzy.picturebackend.model.entity.User;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -19,13 +18,16 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
-import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
+import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_ID;
 
 /**
  * 登录与上传接口限流，避免暴力破解和恶意刷上传。
+ * <p>
+ * 顺序必须晚于 Spring Session 的 SessionRepositoryFilter（Integer.MIN_VALUE + 50）：
+ * 否则这里读到的还是 Tomcat 的空会话，上传限流会静悄悄地从「按用户」退化成「按 IP」。
  */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 20)
+@Order(Ordered.HIGHEST_PRECEDENCE + 60)
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final int LOGIN_LIMIT_PER_MINUTE = 10;
@@ -60,9 +62,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private String uploadKey(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
         if (session != null) {
-            Object loginUser = session.getAttribute(USER_LOGIN_STATE);
-            if (loginUser instanceof User user && user.getId() != null) {
-                return "upload:user:" + user.getId();
+            Object userId = session.getAttribute(USER_LOGIN_ID);
+            if (userId instanceof Long id) {
+                return "upload:user:" + id;
             }
         }
         return "upload:ip:" + clientIp(request);

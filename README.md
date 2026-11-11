@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway |
+| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
 | 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router |
@@ -44,6 +44,7 @@ picture/
 - JDK 21
 - Node.js `^20.19.0 || >=22.12.0`
 - MySQL 8.x
+- Redis 7（本地用 `docker-compose.infra.yml` 启动）
 - 一个腾讯云 COS 存储桶（用于图片存储）
 
 ### 1. 初始化数据库
@@ -71,7 +72,17 @@ cp application-local.yml.example application-local.yml
 >
 > 存储桶需要开启**公有读**（前端直接以 URL 展示图片）并**绑定数据万象**（上传时用于获取图片宽高信息）。
 
-### 3. 启动后端
+### 3. 启动本地基础设施
+
+登录态、会话失效版本和接口限流都依赖 Redis：
+
+```bash
+docker compose -f docker-compose.infra.yml up -d
+```
+
+本地 Redis 只绑定 `127.0.0.1:6379` 且默认无密码，与 `application.yml` 中的默认配置一致。
+
+### 4. 启动后端
 
 ```bash
 cd picture-backend
@@ -80,7 +91,7 @@ cd picture-backend
 
 服务地址 `http://localhost:8123/api`。
 
-### 4. 启动前端
+### 5. 启动前端
 
 ```bash
 cd picture-frontend
@@ -164,9 +175,17 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 
 详情页的「下载次数」按**下载按钮点击次数**统计：点击后前端请求 `POST /api/picture/download/{id}` 自增，然后由浏览器直接下载 COS 原图。因此重复点击、统计请求成功但用户取消保存等情况都会被计入，它不代表「实际完成的下载次数」。如果后续需要精确统计，可改为后端下载代理后再自增。
 
+## 登录态与会话（Redis）
+
+- 登录态存放在 Redis（Spring Session），键前缀 `picture:session:`，**重启后端不会掉线**；
+- 会话 Cookie 名为 `SESSION`，有效期 7 天（`spring.session.timeout`）；
+- 修改或重置密码会让该用户的其他会话立即失效；失效版本同样在 Redis 中，重启后依旧有效；
+- 限流计数在 `picture:ratelimit:` 下：登录按 IP 10 次/分钟，上传按用户 60 次/分钟（未登录时按 IP）；
+- Redis 是硬依赖：没有 Redis 时登录与鉴权不可用，本地开发请先执行 `docker compose -f docker-compose.infra.yml up -d`。
+
 ## 生产部署（Docker / 反向代理 / 监控）
 
-1. 复制 `.env.example` 为 `.env`，填写数据库密码和腾讯云 COS 配置
+1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码和腾讯云 COS 配置
 2. 执行 `docker compose up -d --build`
 3. 访问 `http://localhost:8080`；前端 nginx 会把 `/api` 反向代理到后端 `8123`
 
@@ -177,11 +196,16 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/metrics` 不再可访问；确需 metrics 时使用独立管理端口（例如 `management.server.port: 8124`），该端口不要经过 nginx，只在内网/监控网络开放
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
 - **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增 `V2__xxx.sql`
+- **Redis 与会话**：compose 内置 `redis` 服务（AOF 持久化 + 密码认证，密码由 `REDIS_PASSWORD` 指定，务必改掉默认值）；`redis-data` 卷保存会话与失效版本，删除该卷会让所有用户重新登录
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
 ## 常用命令
 
 ```bash
+# 本地基础设施（Redis）
+docker compose -f docker-compose.infra.yml up -d
+docker compose -f docker-compose.infra.yml down
+
 # 后端
 cd picture-backend
 ./mvnw test                    # 运行单元测试
@@ -201,7 +225,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **206 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **219 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，以及 Redis 限流降级、会话失效版本和过滤器顺序，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

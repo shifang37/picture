@@ -32,7 +32,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
+import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_ID;
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_VERSION;
 
 /**
@@ -167,9 +167,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         }
 
         //4.记录登录状态：登录成功后更换 session id，防止会话固定攻击
+        // Session 里只存用户 id：User 实体没有实现 Serializable，而且不应该把密码哈希写进 Redis
         HttpSession session = request.getSession(true);
         request.changeSessionId();
-        session.setAttribute(USER_LOGIN_STATE, user);
+        session.setAttribute(USER_LOGIN_ID, user.getId());
         session.setAttribute(USER_LOGIN_VERSION, sessionInvalidationManager.currentVersion());
         return this.getLoginUserVO(user);
     }
@@ -186,21 +187,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Override
     public User getLoginUser(HttpServletRequest request) {
-        HttpSession session = request.getSession();
-        Object userObj = session.getAttribute(USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if(currentUser==null){
+        HttpSession session = request.getSession(false);
+        if (session == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
-        long userId = currentUser.getId();
+        Object userIdObj = session.getAttribute(USER_LOGIN_ID);
+        if (!(userIdObj instanceof Long userId)) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+        }
         // 密码被修改/重置后，旧版本会话直接按未登录处理
         if (sessionInvalidationManager.isInvalidated(userId,
                 (Long) session.getAttribute(USER_LOGIN_VERSION))) {
-            session.removeAttribute(USER_LOGIN_STATE);
-            session.removeAttribute(USER_LOGIN_VERSION);
+            clearLoginState(session);
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
-        currentUser = this.getById(userId);
+        // 登录态只存 id，用户信息每次按 id 重新查库，保证权限和昵称等信息即时生效
+        User currentUser = this.getById(userId);
         if(currentUser==null){
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
@@ -216,29 +218,34 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (session == null) {
             return null;
         }
-        User currentUser = (User) session.getAttribute(USER_LOGIN_STATE);
-        if (currentUser == null || currentUser.getId() == null) {
+        Object userIdObj = session.getAttribute(USER_LOGIN_ID);
+        if (!(userIdObj instanceof Long userId)) {
             return null;
         }
-        if (sessionInvalidationManager.isInvalidated(currentUser.getId(),
+        if (sessionInvalidationManager.isInvalidated(userId,
                 (Long) session.getAttribute(USER_LOGIN_VERSION))) {
-            session.removeAttribute(USER_LOGIN_STATE);
-            session.removeAttribute(USER_LOGIN_VERSION);
+            clearLoginState(session);
             return null;
         }
-        return this.getById(currentUser.getId());
+        return this.getById(userId);
     }
 
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if(currentUser==null){
+        HttpSession session = request.getSession(false);
+        if (session == null || !(session.getAttribute(USER_LOGIN_ID) instanceof Long)) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR,"未登录");
         }
-        request.getSession().removeAttribute(USER_LOGIN_STATE);
-        request.getSession().removeAttribute(USER_LOGIN_VERSION);
+        clearLoginState(session);
         return true;
+    }
+
+    /**
+     * 清除 Session 中的登录态与登录版本
+     */
+    private void clearLoginState(HttpSession session) {
+        session.removeAttribute(USER_LOGIN_ID);
+        session.removeAttribute(USER_LOGIN_VERSION);
     }
 
     @Override

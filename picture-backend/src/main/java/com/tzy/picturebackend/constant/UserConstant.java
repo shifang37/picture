@@ -3,9 +3,9 @@ package com.tzy.picturebackend.constant;
 public interface UserConstant {
 
     /**
-     * 用户登录态键
+     * 用户登录态键：Session 中只保存用户 id（Long），不再保存整个 User 实体
      */
-    String USER_LOGIN_STATE = "user_login";
+    String USER_LOGIN_ID = "user_login_id";
 
     /**
      * 登录会话版本键：密码变更后旧版本会话失效

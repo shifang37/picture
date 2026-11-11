@@ -10,6 +10,7 @@ import com.tzy.picturebackend.model.dto.user.UserResetPasswordRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
+import com.tzy.picturebackend.support.InMemoryRedis;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
+
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -53,7 +56,7 @@ class UserControllerTest {
         ReflectionTestUtils.setField(userController, "userService", userService);
         ReflectionTestUtils.setField(userController, "pictureService", pictureService);
         ReflectionTestUtils.setField(userController, "sessionInvalidationManager",
-                new SessionInvalidationManager());
+                new SessionInvalidationManager(InMemoryRedis.createTemplate(new ConcurrentHashMap<>())));
 
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();

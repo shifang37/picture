@@ -1,15 +1,17 @@
 package com.tzy.picturebackend.filter;
 
 import com.tzy.picturebackend.constant.UserConstant;
+import com.tzy.picturebackend.manager.InMemoryRateLimitCounter;
 import com.tzy.picturebackend.manager.RateLimitManager;
-import com.tzy.picturebackend.model.entity.User;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.annotation.Order;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.session.web.http.SessionRepositoryFilter;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,9 +30,18 @@ class RateLimitFilterTest {
 
     @BeforeEach
     void setUp() {
-        rateLimitManager = new RateLimitManager();
+        rateLimitManager = new RateLimitManager(new InMemoryRateLimitCounter());
         rateLimitFilter = new RateLimitFilter();
         ReflectionTestUtils.setField(rateLimitFilter, "rateLimitManager", rateLimitManager);
+    }
+
+    @Test
+    @DisplayName("过滤器顺序：必须晚于 Spring Session，否则上传限流会退化为按 IP")
+    void order_isAfterSpringSessionFilter() {
+        Order order = RateLimitFilter.class.getAnnotation(Order.class);
+        assertNotNull(order, "RateLimitFilter 必须显式声明 @Order");
+        assertTrue(order.value() > SessionRepositoryFilter.DEFAULT_ORDER,
+                "RateLimitFilter 必须排在 SessionRepositoryFilter 之后，实际 order=" + order.value());
     }
 
     @Test
@@ -58,9 +69,7 @@ class RateLimitFilterTest {
     @DisplayName("上传：同一用户超过 60 次/分钟返回 42900")
     void upload_blocksAfterLimit() throws Exception {
         MockHttpSession session = new MockHttpSession();
-        User user = new User();
-        user.setId(100L);
-        session.setAttribute(UserConstant.USER_LOGIN_STATE, user);
+        session.setAttribute(UserConstant.USER_LOGIN_ID, 100L);
 
         MockHttpServletResponse lastResponse = null;
         MockFilterChain lastChain = null;

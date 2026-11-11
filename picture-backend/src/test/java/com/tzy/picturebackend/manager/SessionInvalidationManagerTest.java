@@ -1,22 +1,29 @@
 package com.tzy.picturebackend.manager;
 
+import com.tzy.picturebackend.support.InMemoryRedis;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 会话失效版本管理器测试
+ * 会话失效版本管理器测试（用内存版 StringRedisTemplate 模拟 Redis）
  */
 class SessionInvalidationManagerTest {
 
     private SessionInvalidationManager manager;
 
+    private Map<String, String> store;
+
     @BeforeEach
     void setUp() {
-        manager = new SessionInvalidationManager();
+        store = new ConcurrentHashMap<>();
+        manager = new SessionInvalidationManager(InMemoryRedis.createTemplate(store));
     }
 
     @Test
@@ -58,5 +65,14 @@ class SessionInvalidationManagerTest {
         manager.forget(1L);
 
         assertFalse(manager.isInvalidated(1L, oldVersion));
+    }
+
+    @Test
+    @DisplayName("失效记录带过期时间，且全局版本与用户记录都写入 picture:session 前缀")
+    void invalidate_writesNamespacedKeys() {
+        manager.invalidate(7L);
+
+        assertTrue(store.containsKey("picture:session:version"), "实际 keys: " + store.keySet());
+        assertTrue(store.containsKey("picture:session:invalidated:7"), "实际 keys: " + store.keySet());
     }
 }

@@ -1,18 +1,18 @@
 package com.tzy.picturebackend.manager;
 
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
+import java.time.Duration;
 
 /**
- * 登录会话失效管理。
+ * 登录会话失效管理（Redis 版）。
  * <p>
- * 密码被修改或重置后，旧会话不能继续访问：每次登录把当前的版本号写入 Session，
- * 修改密码时递增该用户的失效版本；{@code getLoginUser} 发现 Session 版本落后时按未登录处理。
+ * 密码被修改或重置后，旧会话不能继续访问：每次登录把当前的全局版本号写入 Session，
+ * 修改密码时递增全局版本并记录该用户「使其旧会话失效的最低版本」；
+ * {@code getLoginUser} 发现 Session 版本落后时按未登录处理。
  * <p>
- * 当前部署为单实例，内存版本足够；多实例部署时应替换为 Redis 等共享存储。
+ * 版本号与限流、会话一起放在 Redis，重启后端后失效记录仍然有效，避免旧会话在重启后「复活」。
  */
 @Component
 public class SessionInvalidationManager {
@@ -20,18 +20,30 @@ public class SessionInvalidationManager {
     /**
      * 全局递增版本号，保证同一毫秒内发生的登录和改密也能正确比较
      */
-    private final AtomicLong version = new AtomicLong();
+    private static final String VERSION_KEY = "picture:session:version";
 
     /**
      * 用户 id -> 使其旧会话失效的最低版本
      */
-    private final Map<Long, Long> invalidatedVersions = new ConcurrentHashMap<>();
+    private static final String INVALIDATED_KEY_PREFIX = "picture:session:invalidated:";
 
     /**
-     * 登录时写入 Session 的版本
+     * 失效记录的保留时间。必须明显长于会话有效期（7 天），否则记录先过期会让旧会话复活。
+     */
+    private static final Duration INVALIDATED_TTL = Duration.ofDays(30);
+
+    private final StringRedisTemplate redisTemplate;
+
+    public SessionInvalidationManager(StringRedisTemplate redisTemplate) {
+        this.redisTemplate = redisTemplate;
+    }
+
+    /**
+     * 登录时写入 Session 的全局版本号
      */
     public long currentVersion() {
-        return version.get();
+        String value = redisTemplate.opsForValue().get(VERSION_KEY);
+        return value == null ? 0L : Long.parseLong(value);
     }
 
     /**
@@ -43,7 +55,11 @@ public class SessionInvalidationManager {
         if (userId == null) {
             return;
         }
-        invalidatedVersions.put(userId, version.incrementAndGet());
+        Long version = redisTemplate.opsForValue().increment(VERSION_KEY);
+        if (version != null) {
+            redisTemplate.opsForValue().set(INVALIDATED_KEY_PREFIX + userId,
+                    String.valueOf(version), INVALIDATED_TTL);
+        }
     }
 
     /**
@@ -57,19 +73,20 @@ public class SessionInvalidationManager {
         if (userId == null) {
             return true;
         }
-        Long invalidatedAt = invalidatedVersions.get(userId);
-        if (invalidatedAt == null) {
+        String value = redisTemplate.opsForValue().get(INVALIDATED_KEY_PREFIX + userId);
+        if (value == null) {
             return false;
         }
+        long invalidatedAt = Long.parseLong(value);
         return loginVersion == null || loginVersion < invalidatedAt;
     }
 
     /**
-     * 用户被删除时清理记录，避免 Map 长期保留无效用户
+     * 用户被删除时清理记录
      */
     public void forget(Long userId) {
         if (userId != null) {
-            invalidatedVersions.remove(userId);
+            redisTemplate.delete(INVALIDATED_KEY_PREFIX + userId);
         }
     }
 }

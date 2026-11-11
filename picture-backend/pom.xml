@@ -81,6 +81,17 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Redis：Spring Session 会话存储、会话失效版本、限流计数 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-data-redis</artifactId>
+        </dependency>
+
         <!-- 仅用于密码哈希（BCrypt），不引入完整的 Spring Security -->
         <dependency>
             <groupId>org.springframework.security</groupId>

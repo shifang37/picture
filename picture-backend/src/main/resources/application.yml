@@ -14,6 +14,18 @@ spring:
     url: ${DB_URL:jdbc:mysql://localhost:3306/picture}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:root}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+  # 登录态存放在 Redis，重启后端不会丢会话
+  session:
+    # 决策 D2：显式设置为 7 天
+    timeout: 7d
+    redis:
+      namespace: picture:session
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -37,6 +49,8 @@ server:
         # 生产环境使用 HTTPS 时通过环境变量设为 true
         secure: ${SESSION_COOKIE_SECURE:false}
         same-site: lax
+      # 与 spring.session.timeout 保持一致，避免两个配置项给出不同有效期
+      timeout: 7d
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: false

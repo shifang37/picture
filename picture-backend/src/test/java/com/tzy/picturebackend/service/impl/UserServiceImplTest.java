@@ -7,6 +7,7 @@ import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
 import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.support.InMemoryRedis;
 import jakarta.servlet.http.HttpSession;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -19,8 +20,9 @@ import org.springframework.util.DigestUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
-import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
+import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_ID;
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_VERSION;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,7 +58,8 @@ class UserServiceImplTest {
     void setUp() {
         userService = new UserServiceImpl();
         userMapper = mock(UserMapper.class);
-        sessionInvalidationManager = new SessionInvalidationManager();
+        sessionInvalidationManager = new SessionInvalidationManager(
+                InMemoryRedis.createTemplate(new ConcurrentHashMap<>()));
         // baseMapper 定义在 MyBatis-Plus 的 CrudRepository 中
         ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
         ReflectionTestUtils.setField(userService, "sessionInvalidationManager", sessionInvalidationManager);
@@ -175,7 +178,7 @@ class UserServiceImplTest {
         userService.userLogin("tzyy", "123456", request);
 
         assertNotEquals(oldSessionId, request.getSession().getId());
-        assertNotNull(request.getSession().getAttribute(USER_LOGIN_STATE));
+        assertNotNull(request.getSession().getAttribute(USER_LOGIN_ID), "登录后应写入用户 id");
         assertNotNull(request.getSession().getAttribute(USER_LOGIN_VERSION), "登录后应写入会话版本");
     }
 
@@ -189,7 +192,7 @@ class UserServiceImplTest {
         LoginUserVO vo = userService.userLogin("tzyy", "123456", request);
 
         assertNotNull(vo);
-        assertNotNull(request.getSession().getAttribute("user_login"), "登录后应写入 Session");
+        assertNotNull(request.getSession().getAttribute(USER_LOGIN_ID), "登录后应只写入用户 id");
         assertNotNull(request.getSession().getAttribute(USER_LOGIN_VERSION), "登录后应写入会话版本");
         // 已是 BCrypt，不应触发升级
         verify(userMapper, never()).updateById(any(User.class));
@@ -201,7 +204,7 @@ class UserServiceImplTest {
         User user = userWithPassword(encoder.encode("123456"));
         MockHttpServletRequest request = new MockHttpServletRequest();
         HttpSession session = request.getSession(true);
-        session.setAttribute(USER_LOGIN_STATE, user);
+        session.setAttribute(USER_LOGIN_ID, user.getId());
         session.setAttribute(USER_LOGIN_VERSION, sessionInvalidationManager.currentVersion());
         when(userMapper.selectById(1L)).thenReturn(user);
 
@@ -210,7 +213,7 @@ class UserServiceImplTest {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> userService.getLoginUser(request));
         assertEquals(40100, e.getCode());
-        assertNull(session.getAttribute(USER_LOGIN_STATE));
+        assertNull(session.getAttribute(USER_LOGIN_ID));
     }
 
     @Test
@@ -219,13 +222,13 @@ class UserServiceImplTest {
         User user = userWithPassword(encoder.encode("123456"));
         MockHttpServletRequest request = new MockHttpServletRequest();
         HttpSession session = request.getSession(true);
-        session.setAttribute(USER_LOGIN_STATE, user);
+        session.setAttribute(USER_LOGIN_ID, user.getId());
         session.setAttribute(USER_LOGIN_VERSION, sessionInvalidationManager.currentVersion());
 
         sessionInvalidationManager.invalidate(1L);
 
         assertNull(userService.getLoginUserOrNull(request));
-        assertNull(session.getAttribute(USER_LOGIN_STATE));
+        assertNull(session.getAttribute(USER_LOGIN_ID));
     }
 
     @Test
@@ -234,7 +237,7 @@ class UserServiceImplTest {
         User user = userWithPassword(encoder.encode("123456"));
         MockHttpServletRequest request = new MockHttpServletRequest();
         HttpSession session = request.getSession(true);
-        session.setAttribute(USER_LOGIN_STATE, user);
+        session.setAttribute(USER_LOGIN_ID, user.getId());
         session.setAttribute(USER_LOGIN_VERSION, sessionInvalidationManager.currentVersion());
         when(userMapper.selectById(1L)).thenReturn(user);
 
