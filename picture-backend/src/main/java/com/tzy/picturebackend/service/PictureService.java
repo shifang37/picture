@@ -9,6 +9,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.multipart.MultipartFile;
@@ -82,5 +83,12 @@ public interface PictureService extends IService<Picture> {
      * @return 审核记录，按时间倒序
      */
     List<PictureReviewLog> listPictureReviewLogs(Long pictureId);
+
+    /**
+     * 从已通过审核的图片中动态汇总标签和分类
+     *
+     * @return 标签与分类列表
+     */
+    PictureTagCategory listTagCategory();
 
 }

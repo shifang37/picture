@@ -8,6 +8,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
@@ -164,6 +165,21 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.code").value(40100));
 
         verify(pictureService, never()).deletePicture(any(), any());
+    }
+
+    @Test
+    @DisplayName("标签分类：接口返回服务层动态汇总结果")
+    void listPictureTagCategory_returnsDynamicValues() throws Exception {
+        PictureTagCategory tagCategory = new PictureTagCategory();
+        tagCategory.setTagList(List.of("热门"));
+        tagCategory.setCategoryList(List.of("模板"));
+        when(pictureService.listTagCategory()).thenReturn(tagCategory);
+
+        mockMvc.perform(get("/picture/tag_category"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.tagList[0]").value("热门"))
+                .andExpect(jsonPath("$.data.categoryList[0]").value("模板"));
     }
 
     @Test

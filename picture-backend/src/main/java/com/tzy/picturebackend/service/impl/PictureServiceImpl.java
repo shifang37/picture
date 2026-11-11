@@ -3,6 +3,7 @@ package com.tzy.picturebackend.service.impl;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -19,6 +20,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
@@ -31,11 +33,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -381,6 +385,36 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(pictureId == null || pictureId <= 0,
                 ErrorCode.PARAMS_ERROR, "图片 id 不能为空");
         return pictureReviewLogService.listByPictureId(pictureId);
+    }
+
+    @Override
+    public PictureTagCategory listTagCategory() {
+        // 只汇总已通过审核的图片，保证首页能看到的标签/分类与图片列表一致
+        List<Picture> pictures = this.list(new QueryWrapper<Picture>()
+                .select("id", "category", "tags")
+                .eq("reviewStatus", PictureReviewStatusEnum.PASS.getValue()));
+        Set<String> categorySet = new TreeSet<>();
+        Set<String> tagSet = new TreeSet<>();
+        for (Picture picture : pictures) {
+            if (StrUtil.isNotBlank(picture.getCategory())) {
+                categorySet.add(picture.getCategory().trim());
+            }
+            if (StrUtil.isNotBlank(picture.getTags())) {
+                try {
+                    for (String tag : JSONUtil.toList(picture.getTags(), String.class)) {
+                        if (StrUtil.isNotBlank(tag)) {
+                            tagSet.add(tag.trim());
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("解析图片标签失败, pictureId = {}", picture.getId(), e);
+                }
+            }
+        }
+        PictureTagCategory pictureTagCategory = new PictureTagCategory();
+        pictureTagCategory.setCategoryList(new ArrayList<>(categorySet));
+        pictureTagCategory.setTagList(new ArrayList<>(tagSet));
+        return pictureTagCategory;
     }
 
 }

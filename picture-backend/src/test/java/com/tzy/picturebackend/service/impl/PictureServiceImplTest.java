@@ -13,6 +13,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
 import com.tzy.picturebackend.service.UserService;
@@ -511,6 +512,26 @@ class PictureServiceImplTest {
             assertDoesNotThrow(() -> Picture.class.getDeclaredField(sortField),
                     "白名单字段不是 Picture 的属性: " + sortField);
         }
+    }
+
+    @Test
+    @DisplayName("标签分类：只汇总已通过图片的标签和分类，并去重排序")
+    void listTagCategory_collectsDistinctValues() {
+        Picture first = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        first.setCategory("模板");
+        first.setTags("[\"热门\",\"高清\"]");
+        Picture second = picture(2L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        second.setCategory("电商");
+        second.setTags("[\"热门\",\"生活\"]");
+        Picture invalidTags = picture(3L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        invalidTags.setTags("not-a-json");
+        when(pictureMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(first, second, invalidTags));
+
+        PictureTagCategory result = pictureService.listTagCategory();
+
+        assertEquals(List.of("模板", "电商"), result.getCategoryList());
+        assertEquals(List.of("热门", "生活", "高清"), result.getTagList());
     }
 
     // ==================== 字段长度校验 ====================
