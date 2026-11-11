@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8 |
+| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
 | 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router |
@@ -17,7 +17,7 @@
 ```
 picture/
 ├── picture-backend/                 # Spring Boot 后端
-│   ├── sql/create_table.sql         # 建表脚本
+│   ├── sql/legacy/                  # 接入 Flyway 前旧库的升级脚本（仅历史库使用）
 │   └── src/main/java/com/tzy/picturebackend/
 │       ├── controller/              # 接口层
 │       ├── service/                 # 业务层（接口 + impl）
@@ -50,10 +50,11 @@ picture/
 
 ```bash
 mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS picture DEFAULT CHARACTER SET utf8mb4"
-mysql -uroot -p picture < picture-backend/sql/create_table.sql
 ```
 
-默认连接配置为 `localhost:3306/picture`，账号 `root` / `root`，如不一致请修改配置文件。
+只需建库，四张表由后端启动时通过 Flyway 自动创建（基线脚本为 `picture-backend/src/main/resources/db/migration/V1__baseline.sql`）。
+
+默认连接配置为 `localhost:3306/picture`，账号 `root` / `root`，如不一致请修改配置文件。旧库（Flyway 之前创建的库）的升级方式见「生产部署」一节。
 
 ### 2. 配置对象存储
 
@@ -157,7 +158,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
   - `POST /api/tag_category/sync`：把已通过审核图片中缺失的标签/分类补进字典，返回新增数量
   - `GET /api/tag_category/list`：返回带 id 的完整字典
 - 删除字典项不会修改已有图片的 `category` / `tags` 字段；图片仍在使用时只是不再作为新选项出现
-- 升级已有数据库时执行 `picture-backend/sql/upgrade_v3.sql`，会建表并初始化现有图片的标签/分类
+- 旧库升级到该结构：执行 `picture-backend/sql/legacy/upgrade_v3.sql`，会建表并初始化现有图片的标签/分类（新库无需执行，Flyway 会自动建表）
 
 ## 下载次数统计口径
 
@@ -175,7 +176,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）
 - **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/metrics` 不再可访问；确需 metrics 时使用独立管理端口（例如 `management.server.port: 8124`），该端口不要经过 nginx，只在内网/监控网络开放
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
-- 已有数据库升级时依次执行 `picture-backend/sql/upgrade_v2.sql`（审核记录与下载次数字段）和 `picture-backend/sql/upgrade_v3.sql`（标签/分类字典）
+- **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增 `V2__xxx.sql`
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
 ## 常用命令

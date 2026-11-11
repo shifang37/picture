@@ -1,4 +1,4 @@
--- 已有数据库升级脚本（新装数据库直接执行 create_table.sql 即可）
+-- 仅用于把 Flyway 之前的旧库升到基线；新库无需执行，启动应用时 Flyway 会自动建表。
 -- 注意：downloadCount 字段只会新增一次，重复执行会报 duplicate column，可忽略
 
 ALTER TABLE picture

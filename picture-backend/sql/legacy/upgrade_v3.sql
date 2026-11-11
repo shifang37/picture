@@ -1,5 +1,4 @@
--- 已有数据库升级脚本 v3：标签/分类从只读聚合升级为可管理字典
--- 新装数据库直接执行 create_table.sql 即可。
+-- 仅用于把 Flyway 之前的旧库升到基线；新库无需执行，启动应用时 Flyway 会自动建表。
 -- 本脚本可重复执行：建表使用 IF NOT EXISTS，初始化使用 INSERT IGNORE。
 
 CREATE TABLE IF NOT EXISTS tag_category

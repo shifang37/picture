@@ -14,6 +14,12 @@ spring:
     url: ${DB_URL:jdbc:mysql://localhost:3306/picture}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:root}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # 已有表但没有 Flyway 历史表的旧库直接标记为基线版本 1，不重复建表
+    baseline-on-migrate: true
+    baseline-version: 1
 server:
   port: 8123
   # 反向代理（nginx）下由 Tomcat RemoteIpValve 在受信代理场景解析转发头；

@@ -87,6 +87,17 @@
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
 
+        <!-- 数据库版本化迁移：启动时自动执行 classpath:db/migration 下未执行过的脚本 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>

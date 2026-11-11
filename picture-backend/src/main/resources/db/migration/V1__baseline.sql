@@ -1,3 +1,7 @@
+-- Flyway 基线 V1：与接入 Flyway 之前的建表脚本（upgrade_v3 之后的完整结构）保持一致。
+-- 空库首次启动时执行本文件；已有表但没有 Flyway 历史表的旧库会被 baseline 到版本 1，跳过本文件。
+-- 注意：迁移一旦执行过就不能再修改内容（校验和会变化），后续变更请新增 V2、V3……
+
 -- 用户表
 create table if not exists user
 (
@@ -17,7 +21,7 @@ create table if not exists user
     ) comment '用户' collate = utf8mb4_unicode_ci;
 
 
--- 图片表   
+-- 图片表
 create table if not exists picture
 (
     id           bigint auto_increment comment 'id' primary key,
