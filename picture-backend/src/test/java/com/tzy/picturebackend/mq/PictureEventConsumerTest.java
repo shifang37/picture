@@ -1,16 +1,22 @@
 package com.tzy.picturebackend.mq;
 
+import com.tzy.picturebackend.config.MachineReviewProperties;
 import com.tzy.picturebackend.event.PictureEvent;
 import com.tzy.picturebackend.event.PictureEventType;
+import com.tzy.picturebackend.manager.MachineReviewException;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.service.MachineReviewService;
 import com.tzy.picturebackend.service.PictureService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -23,6 +29,10 @@ class PictureEventConsumerTest {
 
     private PictureService pictureService;
 
+    private MachineReviewService machineReviewService;
+
+    private MachineReviewProperties machineReviewProperties;
+
     private PictureModerationConsumer moderationConsumer;
 
     private PictureAiConsumer aiConsumer;
@@ -32,7 +42,11 @@ class PictureEventConsumerTest {
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
-        moderationConsumer = new PictureModerationConsumer(pictureService);
+        machineReviewService = mock(MachineReviewService.class);
+        machineReviewProperties = new MachineReviewProperties();
+        machineReviewProperties.setEnabled(true);
+        moderationConsumer = new PictureModerationConsumer(
+                pictureService, machineReviewService, machineReviewProperties);
         aiConsumer = new PictureAiConsumer(pictureService);
         searchConsumer = new PictureSearchConsumer(pictureService);
     }
@@ -44,22 +58,34 @@ class PictureEventConsumerTest {
 
         assertFalse(moderationConsumer.handle(PictureEvent.of(PictureEventType.UPLOADED, 404L)));
         verify(pictureService).getById(404L);
+        verifyNoInteractions(machineReviewService);
     }
 
     @Test
     @DisplayName("机审：空事件直接确认，不查数据库")
     void moderation_invalidEventIsAcknowledged() {
         assertFalse(moderationConsumer.handle(null));
-        verifyNoInteractions(pictureService);
+        verifyNoInteractions(pictureService, machineReviewService);
     }
 
     @Test
-    @DisplayName("机审：仍待审核的图片需要处理")
+    @DisplayName("机审：开关关闭时不查库、不调用审核")
+    void moderation_disabledSkipsWithoutQuery() {
+        machineReviewProperties.setEnabled(false);
+
+        assertFalse(moderationConsumer.handle(PictureEvent.of(PictureEventType.UPLOADED, 1L)));
+        verifyNoInteractions(pictureService, machineReviewService);
+    }
+
+    @Test
+    @DisplayName("机审：仍待审核的图片交给机审服务处理")
     void moderation_pendingPictureIsHandled() {
-        when(pictureService.getById(1L))
-                .thenReturn(picture(1L, PictureReviewStatusEnum.REVIEWING.getValue()));
+        Picture picture = picture(1L, PictureReviewStatusEnum.REVIEWING.getValue());
+        when(pictureService.getById(1L)).thenReturn(picture);
 
         assertTrue(moderationConsumer.handle(PictureEvent.of(PictureEventType.UPLOADED, 1L)));
+
+        verify(machineReviewService).review(picture);
     }
 
     @Test
@@ -69,6 +95,29 @@ class PictureEventConsumerTest {
                 .thenReturn(picture(1L, PictureReviewStatusEnum.PASS.getValue()));
 
         assertFalse(moderationConsumer.handle(PictureEvent.of(PictureEventType.UPLOADED, 1L)));
+        verifyNoInteractions(machineReviewService);
+    }
+
+    @Test
+    @DisplayName("机审：机审字段已有值的重复消息直接确认")
+    void moderation_machineReviewedPictureIsSkipped() {
+        Picture picture = picture(1L, PictureReviewStatusEnum.REVIEWING.getValue());
+        picture.setMachineReviewStatus(0);
+        when(pictureService.getById(1L)).thenReturn(picture);
+
+        assertFalse(moderationConsumer.handle(PictureEvent.of(PictureEventType.UPLOADED, 1L)));
+        verifyNoInteractions(machineReviewService);
+    }
+
+    @Test
+    @DisplayName("机审：审核失败向上抛出，交给 RabbitMQ 重试与死信")
+    void moderation_failureIsPropagated() {
+        Picture picture = picture(1L, PictureReviewStatusEnum.REVIEWING.getValue());
+        when(pictureService.getById(1L)).thenReturn(picture);
+        doThrow(new MachineReviewException("api down")).when(machineReviewService).review(any());
+
+        assertThrows(MachineReviewException.class,
+                () -> moderationConsumer.handle(PictureEvent.of(PictureEventType.UPLOADED, 1L)));
     }
 
     @Test

@@ -137,6 +137,19 @@ class PictureReviewLogServiceImplTest {
     }
 
     @Test
+    @DisplayName("审核历史 VO：审核人 id 为 0 时显示「系统机审」，且不查询用户表")
+    void listVOByPictureId_showsSystemReviewer() {
+        when(reviewLogMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(reviewLog(1L, 0L, 2, "机审违规，自动拒绝")));
+
+        List<PictureReviewLogVO> result = reviewLogService.listVOByPictureId(1L);
+
+        assertEquals("系统机审", result.get(0).getReviewerName());
+        assertEquals("system", result.get(0).getReviewerAccount());
+        verify(userService, never()).listByIds(anyCollection());
+    }
+
+    @Test
     @DisplayName("审核历史 VO：无记录时不查询用户")
     void listVOByPictureId_returnsEmptyWithoutQueryingUsers() {
         when(reviewLogMapper.selectList(any(Wrapper.class))).thenReturn(List.of());

@@ -234,6 +234,10 @@ class PictureServiceImplTest {
         assertTrue(sqlSet.contains("reviewMessage"), "实际 SET: " + sqlSet);
         assertTrue(sqlSet.contains("reviewerId"), "实际 SET: " + sqlSet);
         assertTrue(sqlSet.contains("reviewTime"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("machineReviewStatus"), "重传必须清空机审状态: " + sqlSet);
+        assertTrue(sqlSet.contains("machineReviewLabel"), "重传必须清空机审标签: " + sqlSet);
+        assertTrue(sqlSet.contains("machineReviewScore"), "重传必须清空机审分数: " + sqlSet);
+        assertTrue(sqlSet.contains("machineReviewTime"), "重传必须清空机审时间: " + sqlSet);
         verifyNoInteractions(pictureReviewLogService);
         verify(pictureEventPublisher).pictureUploaded(1L);
     }
@@ -604,26 +608,52 @@ class PictureServiceImplTest {
         request.setReviewMessage("内容不合规");
         when(pictureMapper.selectById(1L)).thenReturn(
                 picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()));
-        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+        when(pictureMapper.update(any(), any(Wrapper.class))).thenReturn(1);
 
         User admin = admin();
         pictureService.doPictureReview(request, admin);
 
-        ArgumentCaptor<Picture> captor = ArgumentCaptor.forClass(Picture.class);
-        verify(pictureMapper).updateById(captor.capture());
-        Picture updated = captor.getValue();
-        assertEquals(Long.valueOf(1L), updated.getId());
-        assertEquals(Integer.valueOf(PictureReviewStatusEnum.REJECT.getValue()), updated.getReviewStatus());
-        assertEquals("内容不合规", updated.getReviewMessage());
-        assertEquals(admin.getId(), updated.getReviewerId());
-        assertNotNull(updated.getReviewTime());
-        assertNull(updated.getUrl(), "不应覆盖 url");
-        assertNull(updated.getName(), "不应覆盖 name");
-        assertNull(updated.getUserId(), "不应覆盖 userId");
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper).update(org.mockito.ArgumentMatchers.isNull(), wrapperCaptor.capture());
+        UpdateWrapper<Picture> wrapper = (UpdateWrapper<Picture>) wrapperCaptor.getValue();
+        String sqlSet = wrapper.getSqlSet();
+        assertTrue(sqlSet.contains("reviewStatus"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewMessage"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewerId"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewTime"), "实际 SET: " + sqlSet);
+        assertFalse(sqlSet.contains("url"), "不应覆盖 url: " + sqlSet);
+        assertFalse(sqlSet.contains("name"), "不应覆盖 name: " + sqlSet);
+        assertFalse(sqlSet.contains("userId"), "不应覆盖 userId: " + sqlSet);
+        assertTrue(wrapper.getParamNameValuePairs()
+                .containsValue(PictureReviewStatusEnum.REJECT.getValue()), "审核状态应写入参数");
+        assertTrue(wrapper.getParamNameValuePairs().containsValue("内容不合规"), "审核意见应写入参数");
+        assertTrue(wrapper.getParamNameValuePairs().containsValue(admin.getId()), "审核人应写入参数");
+        assertTrue(wrapper.getSqlSegment().contains("reviewStatus"), "条件更新必须带上原状态");
+        verify(pictureMapper, never()).updateById(any(Picture.class));
         verify(pictureReviewLogService).record(1L, admin.getId(),
                 PictureReviewStatusEnum.REJECT.getValue(), "内容不合规");
         verify(pictureListCache).invalidate();
         verify(pictureEventPublisher).pictureChanged(1L);
+    }
+
+    @Test
+    @DisplayName("审核：并发下状态已被其他操作改变时不写历史、不失效缓存")
+    void doPictureReview_rejectsConcurrentChange() {
+        PictureReviewRequest request = new PictureReviewRequest();
+        request.setId(1L);
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        when(pictureMapper.selectById(1L)).thenReturn(
+                picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()));
+        // 机审自动处置或另一位管理员已经先完成更新
+        when(pictureMapper.update(any(), any(Wrapper.class))).thenReturn(0);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> pictureService.doPictureReview(request, admin()));
+
+        assertEquals("图片已被其他操作处理，请刷新后重试", e.getMessage());
+        verify(pictureReviewLogService, never()).record(any(), any(), any(), any());
+        verify(pictureListCache, never()).invalidate();
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -652,6 +682,16 @@ class PictureServiceImplTest {
 
         assertTrue(descSql.contains("ORDER BY createTime DESC"), "实际 SQL 片段: " + descSql);
         assertTrue(ascSql.contains("ORDER BY picSize ASC"), "实际 SQL 片段: " + ascSql);
+    }
+
+    @Test
+    @DisplayName("排序：审核页按机审状态优先时，同状态再按创建时间倒序")
+    void getQueryWrapper_sortsByMachineReviewStatusThenCreateTime() {
+        String sql = pictureService.getQueryWrapper(queryRequest("machineReviewStatus", "descend"))
+                .getSqlSegment();
+
+        assertTrue(sql.contains("ORDER BY machineReviewStatus DESC"), "实际 SQL 片段: " + sql);
+        assertTrue(sql.contains("createTime DESC"), "实际 SQL 片段: " + sql);
     }
 
     @Test
@@ -736,7 +776,7 @@ class PictureServiceImplTest {
         when(pictureMapper.selectById(1L))
                 .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()));
         when(pictureMapper.selectById(2L)).thenReturn(null);
-        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+        when(pictureMapper.update(any(), any(Wrapper.class))).thenReturn(1);
 
         PictureReviewBatchRequest request = new PictureReviewBatchRequest();
         request.setIds(List.of(1L, 2L));

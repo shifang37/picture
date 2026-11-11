@@ -6,8 +6,8 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ |
-| 对象存储 | 腾讯云 COS（含数据万象图片处理） |
+| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ、数据万象内容审核 |
+| 对象存储 | 腾讯云 COS（含数据万象图片处理与内容审核） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
 | 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、ESLint |
 | 构建 | Maven Wrapper 3.9.16、npm |
@@ -22,7 +22,7 @@ picture/
 │       ├── controller/              # 接口层
 │       ├── service/                 # 业务层（接口 + impl）
 │       ├── mapper/                  # MyBatis-Plus Mapper
-│       ├── manager/                 # COS 文件上传封装
+│       ├── manager/                 # COS 上传、数据万象机审与限流封装
 │       ├── event/                   # 图片事件模型与 Spring 事件转发
 │       ├── mq/                      # RabbitMQ 拓扑与队列消费者
 │       ├── model/                   # entity / dto / vo / enums
@@ -73,6 +73,7 @@ cp application-local.yml.example application-local.yml
 > 该文件已被 `.gitignore` 排除，不会进入版本库。请勿把真实密钥提交到仓库。
 >
 > 存储桶需要开启**公有读**（前端直接以 URL 展示图片）并**绑定数据万象**（上传时用于获取图片宽高信息）。
+> 如需开启机审，还需在数据万象开通内容审核，并给访问密钥授予 `ci:CreateAuditingPictureJob` 权限。
 
 ### 3. 启动本地基础设施
 
@@ -158,6 +159,59 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 5. 管理员在「图片审核」页面（`/admin/pictureReview`）通过或拒绝，可填写审核意见
 6. 审核通过（`reviewStatus = 1`）后，图片才对所有访客可见；作者可在「我的图片」中看到拒绝原因
 7. 审核历史会记录审核人（昵称/账号，用户已删除时显示 `用户#id`）、动作、时间和意见；管理员上传/重传自动通过时也会写入一条「管理员上传，自动通过」记录
+8. 机审开启时，上传后几秒内会写回机审结果，审核页按机审疑似 / 违规优先展示；默认的 `assist` 模式不改变审核状态，详见下一节
+
+## 机审初筛（数据万象）
+
+图片上传成功后，`picture.moderation.q` 消费者会按 id 回查图片并调用数据万象图片审核，把结论写入 `picture` 表的四个机审字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `machineReviewStatus` | 0 正常、1 违规、2 疑似 |
+| `machineReviewLabel` | 命中标签，主标签与子标签用 `/` 拼接 |
+| `machineReviewScore` | 置信度 0-100（接口未返回时为 null） |
+| `machineReviewTime` | 机审完成时间 |
+
+### 开关与效力
+
+```yaml
+app:
+  review:
+    machine:
+      enabled: ${MACHINE_REVIEW_ENABLED:false}
+      mode: ${MACHINE_REVIEW_MODE:assist}
+```
+
+- **默认关闭**：关闭时消费者直接确认消息，不查库、不调用数据万象，上传与人工审核行为与接入前完全一致；
+- 决策 D3：默认 `assist`，机审只作为辅助标记，观察误判率后再考虑自动处置。
+
+| 模式 | 行为 |
+| --- | --- |
+| `assist`（默认） | 只记录机审结果，审核状态仍由人工决定 |
+| `auto-reject` | 违规自动拒绝；正常和疑似仍走人工 |
+| `auto` | 违规自动拒绝、正常自动通过；疑似走人工 |
+
+### 并发与安全
+
+- 写机审字段使用 `WHERE id = ? AND machineReviewStatus IS NULL`，重复投递或兜底任务并发时只处理一次；
+- 自动处置使用 `WHERE id = ? AND reviewStatus = 待审核`，管理员在机审返回前已手动审核的图片只写机审字段，**不会被覆盖**；`doPictureReview` 也改成了带原状态条件的更新，人工与机审同时操作时只有一方成功；
+- 机审自动处置会写一条审核历史，`reviewerId = 0`，展示为「系统机审」；
+- 重传新文件会清空四个机审字段，避免沿用旧文件的结论。
+
+### 兜底与失败处理
+
+- 机审开启时，`MachineReviewFallbackTask` 每 5 分钟扫描「创建超过 5 分钟、仍待审核、机审字段为空」的图片并重新发布上传事件；多实例用 Redis `SET NX EX` 互斥（`picture:machine-review:fallback:lock`，4 分钟过期）；
+- 数据万象调用失败或结果无法识别时，消费者抛异常交给 RabbitMQ 重试；重试耗尽进入 `picture.moderation.q.dlq`，兜底任务仍会重新补发；
+- 对象键无法从图片 URL 解析时只记录日志并确认消息，不会陷入重试循环。
+
+### 前置条件与费用
+
+- COS 桶必须已绑定数据万象（上传取图片宽高也依赖该绑定）；
+- 子账号调用审核接口需要 `ci:CreateAuditingPictureJob` 权限，仅有 COS 权限会返回 `AccessDenied`；
+- 图片审核**按张、按审核场景计费**，开启前请先在控制台确认价格。默认关闭就是为了避免误产生费用；
+- 文字内容（名称、简介）的文本审核尚未接入，作为后续可选扩展。
+
+审核页（`/admin/pictureReview`）新增「机审」列，标签悬浮可看命中标签、置信度与机审时间；默认按机审状态倒序（疑似 → 违规 → 正常 → 未机审），同状态内按创建时间倒序。
 
 ## 标签与分类字典
 
@@ -218,8 +272,8 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 
 - 生产者开启 `publisher-confirm-type: correlated` 与 `publisher-returns`，确认失败或无法路由只记录日志；RabbitMQ 停机时上传、审核等主流程仍然成功（发布失败只留错误日志，接口正常返回）；
 - 消费者失败最多尝试 3 次（首次后按 1s、2s 退避），仍失败则拒绝消息，由队列的 `x-dead-letter-exchange` 转入 `${queue}.dlq`；消息体无法解析等「毒消息」同样进死信，不会无限重入队；
-- 消费者按 id 回查并检查状态：图片已删除、已审核或状态已变化时直接确认消息，避免重复处理；
-- 当前三个消费者只完成状态校验与事件记录：机审（`picture.moderation.q`）、AI 标签（`picture.ai.q`）、搜索索引（`picture.search.q`）在此基础上接入。机审字段落地后，还会增加「扫描创建超过 5 分钟、仍待审核且机审字段为空」的兜底任务，重新发布遗漏事件。
+- 消费者按 id 回查并检查状态：图片已删除、已审核或机审字段已有值时直接确认消息，避免重复处理；
+- 机审消费者在开关开启时调用数据万象并写回机审字段，另有每 5 分钟的兜底扫描；AI 标签与搜索索引消费者目前仍只做状态校验与事件记录，后续接入对应能力。
 
 管理界面可以查看队列、绑定与死信：`http://127.0.0.1:15672`（本地默认 `guest / guest`）。生产环境不映射 15672 到宿主机。
 
@@ -257,7 +311,8 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 - **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增 `V2__xxx.sql`
 - **Redis 与会话**：compose 内置 `redis` 服务（AOF 持久化 + 密码认证，密码由 `REDIS_PASSWORD` 指定，务必改掉默认值）；`redis-data` 卷保存会话与失效版本，删除该卷会让所有用户重新登录
 - **RabbitMQ**：compose 内置 `rabbitmq` 服务（`rabbitmq:4-management`，持久化卷 `rabbitmq-data`，只在内网可达，不映射 5672/15672 到宿主机）。账号密码由 `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` 指定；**不要使用 `guest`**，RabbitMQ 的 guest 只允许本机回环地址登录，容器间连不上。账号只在数据卷首次初始化时生效，修改 `.env` 后需要删除 `rabbitmq-data` 卷（会丢失队列与死信）或进入容器手工改密码
-- **图片事件**：队列与交换机在应用启动时由 `RabbitAdmin` 幂等声明；RabbitMQ 不可用时上传与审核仍然成功，只是事件投递失败并记录日志。当前兜底扫描任务尚未接入，RabbitMQ 长时间中断期间产生的事件不会自动补发（随机审功能一起落地）
+- **图片事件**：队列与交换机在应用启动时由 `RabbitAdmin` 幂等声明；RabbitMQ 不可用时上传与审核仍然成功，只是事件投递失败并记录日志。机审开启时每 5 分钟兜底补发遗漏图片（Redis 互斥），可用 `MACHINE_REVIEW_ENABLED` / `MACHINE_REVIEW_MODE` 控制；关闭机审则不会有任何外部审核调用
+- **机审费用与权限**：开启机审前确认 COS 桶已绑定数据万象、账号具备 `ci:CreateAuditingPictureJob`；图片审核按张计费，默认关闭
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
 ## 常用命令
@@ -289,7 +344,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **246 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **280 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

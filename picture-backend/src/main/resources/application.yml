@@ -104,6 +104,12 @@ springdoc:
 app:
   cors:
     allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:5173,http://127.0.0.1:5173}
+  review:
+    machine:
+      # 数据万象图片审核：默认关闭，关闭时不发起任何外部调用
+      enabled: ${MACHINE_REVIEW_ENABLED:false}
+      # assist（只记录结果，默认）| auto-reject（违规自动拒绝）| auto（违规拒绝、正常通过）
+      mode: ${MACHINE_REVIEW_MODE:assist}
 
 # 对象存储配置：生产环境通过环境变量注入，禁止把真实密钥写入仓库
 cos:

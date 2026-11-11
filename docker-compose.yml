@@ -62,6 +62,8 @@ services:
       COS_BUCKET: ${COS_BUCKET}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       CORS_ALLOWED_ORIGIN_PATTERNS: http://localhost:${FRONTEND_PORT:-8080}
+      MACHINE_REVIEW_ENABLED: ${MACHINE_REVIEW_ENABLED:-false}
+      MACHINE_REVIEW_MODE: ${MACHINE_REVIEW_MODE:-assist}
     expose:
       - '8123'
     depends_on:

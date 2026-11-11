@@ -37,6 +37,16 @@ public class PictureReviewLogServiceImpl
      */
     private static final String DELETED_REVIEWER_PREFIX = "用户#";
 
+    /**
+     * 系统机审的展示名称
+     */
+    private static final String SYSTEM_REVIEWER_NAME = "系统机审";
+
+    /**
+     * 系统机审的展示账号
+     */
+    private static final String SYSTEM_REVIEWER_ACCOUNT = "system";
+
     @Resource
     private UserService userService;
 
@@ -73,10 +83,11 @@ public class PictureReviewLogServiceImpl
         if (CollUtil.isEmpty(reviewLogs)) {
             return new ArrayList<>();
         }
-        // 批量补全审核人，避免逐条查库
+        // 批量补全审核人，避免逐条查库；0 是系统机审，不对应真实用户
         Set<Long> reviewerIds = reviewLogs.stream()
                 .map(PictureReviewLog::getReviewerId)
                 .filter(Objects::nonNull)
+                .filter(reviewerId -> reviewerId > 0)
                 .collect(Collectors.toSet());
         Map<Long, User> reviewerMap = reviewerIds.isEmpty()
                 ? Map.of()
@@ -100,7 +111,10 @@ public class PictureReviewLogServiceImpl
         vo.setReviewStatus(reviewLog.getReviewStatus());
         vo.setReviewMessage(reviewLog.getReviewMessage());
         vo.setCreateTime(reviewLog.getCreateTime());
-        if (reviewer != null) {
+        if (Objects.equals(reviewLog.getReviewerId(), PictureReviewLogService.SYSTEM_REVIEWER_ID)) {
+            vo.setReviewerName(SYSTEM_REVIEWER_NAME);
+            vo.setReviewerAccount(SYSTEM_REVIEWER_ACCOUNT);
+        } else if (reviewer != null) {
             vo.setReviewerAccount(reviewer.getUserAccount());
             vo.setReviewerName(StrUtil.isNotBlank(reviewer.getUserName())
                     ? reviewer.getUserName()

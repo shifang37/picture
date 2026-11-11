@@ -55,6 +55,11 @@ cos:
 app:
   cors:
     allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost}
+  review:
+    machine:
+      # 默认关闭；开启后按张计费，需 COS 桶已绑定数据万象
+      enabled: ${MACHINE_REVIEW_ENABLED:false}
+      mode: ${MACHINE_REVIEW_MODE:assist}
 management:
   endpoints:
     web:

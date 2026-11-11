@@ -12,6 +12,13 @@ import java.util.List;
 public interface PictureReviewLogService extends IService<PictureReviewLog> {
 
     /**
+     * 系统机审写入审核历史时使用的审核人 id。
+     * <p>
+     * picture_review_log.reviewerId 非空，用 0 表示这条记录不是真人审核。
+     */
+    long SYSTEM_REVIEWER_ID = 0L;
+
+    /**
      * 记录一次审核，失败只记录日志，不影响审核结果
      */
     void record(Long pictureId, Long reviewerId, Integer reviewStatus, String reviewMessage);

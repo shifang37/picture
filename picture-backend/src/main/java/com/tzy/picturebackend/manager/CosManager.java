@@ -6,6 +6,8 @@ import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.GetObjectRequest;
 import com.qcloud.cos.model.PutObjectRequest;
 import com.qcloud.cos.model.PutObjectResult;
+import com.qcloud.cos.model.ciModel.auditing.ImageAuditingRequest;
+import com.qcloud.cos.model.ciModel.auditing.ImageAuditingResponse;
 import com.qcloud.cos.model.ciModel.persistence.PicOperations;
 import com.tzy.picturebackend.config.CosClientConfig;
 import jakarta.annotation.Resource;
@@ -52,6 +54,22 @@ public class CosManager {
         // 构造处理参数
         putObjectRequest.setPicOperations(picOperations);
         return cosClient.putObject(putObjectRequest);
+    }
+
+    /**
+     * 调用数据万象单次图片审核（同步）。
+     * <p>
+     * 不传 bizType 时使用控制台配置的默认审核策略。调用方负责处理审核失败与重试，
+     * 这里只做 SDK 请求封装。
+     *
+     * @param key COS 对象键
+     * @return 审核响应
+     */
+    public ImageAuditingResponse auditImage(String key) {
+        ImageAuditingRequest request = new ImageAuditingRequest();
+        request.setBucketName(cosClientConfig.getBucket());
+        request.setObjectKey(key);
+        return cosClient.imageAuditing(request);
     }
 
     /**

@@ -62,7 +62,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      */
     static final Set<String> SORT_FIELD_WHITELIST = Set.of(
             "id", "name", "category", "picSize", "picWidth", "picHeight", "picScale", "picFormat",
-            "userId", "createTime", "editTime", "updateTime", "reviewStatus", "reviewTime");
+            "userId", "createTime", "editTime", "updateTime", "reviewStatus", "reviewTime",
+            "machineReviewStatus");
 
     /**
      * 管理员上传自动通过时写入的审核意见
@@ -147,7 +148,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                     .eq("id", pictureId)
                     .set("reviewMessage", picture.getReviewMessage())
                     .set("reviewerId", picture.getReviewerId())
-                    .set("reviewTime", picture.getReviewTime());
+                    .set("reviewTime", picture.getReviewTime())
+                    // 重传的是新文件，上一次的机审结论必须清空，等待重新机审
+                    .set("machineReviewStatus", null)
+                    .set("machineReviewLabel", null)
+                    .set("machineReviewScore", null)
+                    .set("machineReviewTime", null);
             boolean result;
             try {
                 result = this.update(picture, updateWrapper);
@@ -382,6 +388,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (StrUtil.isNotEmpty(sortField)) {
             ThrowUtils.throwIf(!SORT_FIELD_WHITELIST.contains(sortField), ErrorCode.PARAMS_ERROR, "排序字段不合法");
             queryWrapper.orderBy(true, "ascend".equals(sortOrder), sortField);
+            // 审核页按机审状态优先排序时，同状态内再按创建时间倒序，保证分页顺序稳定
+            if ("machineReviewStatus".equals(sortField)) {
+                queryWrapper.orderByDesc("createTime");
+            }
         }
         return queryWrapper;
     }
@@ -508,14 +518,21 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "请勿重复审核");
         }
         // 只更新审核相关字段，避免整对象覆盖
-        Picture updatePicture = new Picture();
-        updatePicture.setId(id);
-        updatePicture.setReviewStatus(reviewStatus);
-        updatePicture.setReviewMessage(pictureReviewRequest.getReviewMessage());
-        updatePicture.setReviewerId(loginUser.getId());
-        updatePicture.setReviewTime(new Date());
-        boolean result = this.updateById(updatePicture);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "审核失败");
+        Date reviewTime = new Date();
+        UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
+                .eq("id", id)
+                .set("reviewStatus", reviewStatus)
+                .set("reviewMessage", reviewMessage)
+                .set("reviewerId", loginUser.getId())
+                .set("reviewTime", reviewTime);
+        // 条件更新：机审自动处置可能同时发生，只有仍处于读取时的状态才允许写入
+        if (currentStatus == null) {
+            updateWrapper.isNull("reviewStatus");
+        } else {
+            updateWrapper.eq("reviewStatus", currentStatus);
+        }
+        boolean result = this.update(updateWrapper);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片已被其他操作处理，请刷新后重试");
         // 审核结果落库成功后再记录历史，失败不影响本次审核
         pictureReviewLogService.record(id, loginUser.getId(), reviewStatus, reviewMessage);
         // 通过/拒绝都会改变公开列表（以及名称、简介等展示内容）

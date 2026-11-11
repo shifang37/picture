@@ -66,6 +66,25 @@
             {{ statusText(record.reviewStatus) }}
           </a-tag>
         </template>
+        <template v-else-if="column.dataIndex === 'machineReviewStatus'">
+          <a-tooltip>
+            <template #title>
+              <div>{{ machineStatusText(record.machineReviewStatus) }}</div>
+              <div v-if="record.machineReviewLabel">标签：{{ record.machineReviewLabel }}</div>
+              <div
+                v-if="record.machineReviewScore !== undefined && record.machineReviewScore !== null"
+              >
+                置信度：{{ record.machineReviewScore }}
+              </div>
+              <div v-if="record.machineReviewTime">
+                机审时间：{{ formatTime(record.machineReviewTime) }}
+              </div>
+            </template>
+            <a-tag :color="machineStatusColor(record.machineReviewStatus)">
+              {{ machineStatusText(record.machineReviewStatus) }}
+            </a-tag>
+          </a-tooltip>
+        </template>
         <template v-else-if="column.dataIndex === 'reviewTime'">
           {{ record.reviewTime ? dayjs(record.reviewTime).format('YYYY-MM-DD HH:mm:ss') : '-' }}
         </template>
@@ -151,6 +170,7 @@ const columns = [
   { title: '分类', dataIndex: 'category' },
   { title: '标签', dataIndex: 'tags' },
   { title: '状态', dataIndex: 'reviewStatus', width: 100 },
+  { title: '机审', dataIndex: 'machineReviewStatus', width: 120 },
   { title: '审核时间', dataIndex: 'reviewTime', width: 180 },
   { title: '创建时间', dataIndex: 'createTime', width: 180 },
   { title: '操作', key: 'action', width: 140 },
@@ -174,12 +194,12 @@ const rowSelection = computed(() => ({
   }),
 }))
 
-// 搜索条件，默认只看待审核
+// 搜索条件，默认只看待审核；机审疑似 / 违规排在前面，同状态按创建时间倒序
 const searchParams = reactive<API.PictureQueryRequest>({
   current: 1,
   pageSize: 10,
   reviewStatus: 0,
-  sortField: 'createTime',
+  sortField: 'machineReviewStatus',
   sortOrder: 'descend',
 })
 
@@ -239,6 +259,22 @@ const statusText = (status?: number) => {
 const statusColor = (status?: number) => {
   const map: Record<number, string> = { 0: 'orange', 1: 'green', 2: 'red' }
   return map[status ?? 0] ?? 'default'
+}
+
+const machineStatusText = (status?: number | null) => {
+  if (status === undefined || status === null) {
+    return '未机审'
+  }
+  const map: Record<number, string> = { 0: '机审正常', 1: '机审违规', 2: '机审疑似' }
+  return map[status] ?? '机审未知'
+}
+
+const machineStatusColor = (status?: number | null) => {
+  if (status === undefined || status === null) {
+    return 'default'
+  }
+  const map: Record<number, string> = { 0: 'green', 1: 'red', 2: 'orange' }
+  return map[status] ?? 'default'
 }
 
 // 审核弹窗
