@@ -18,6 +18,7 @@ import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.AiSuggestionService;
+import com.tzy.picturebackend.service.PictureSearchService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +40,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -63,6 +65,8 @@ class PictureControllerTest {
 
     private AiSuggestionService aiSuggestionService;
 
+    private PictureSearchService pictureSearchService;
+
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
@@ -70,12 +74,14 @@ class PictureControllerTest {
         pictureListCache = mock(PictureListCache.class);
         pictureEventPublisher = mock(PictureEventPublisher.class);
         aiSuggestionService = mock(AiSuggestionService.class);
+        pictureSearchService = mock(PictureSearchService.class);
         PictureController pictureController = new PictureController();
         ReflectionTestUtils.setField(pictureController, "pictureService", pictureService);
         ReflectionTestUtils.setField(pictureController, "userService", userService);
         ReflectionTestUtils.setField(pictureController, "pictureListCache", pictureListCache);
         ReflectionTestUtils.setField(pictureController, "pictureEventPublisher", pictureEventPublisher);
         ReflectionTestUtils.setField(pictureController, "aiSuggestionService", aiSuggestionService);
+        ReflectionTestUtils.setField(pictureController, "pictureSearchService", pictureSearchService);
         mockMvc = MockMvcBuilders.standaloneSetup(pictureController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -279,6 +285,7 @@ class PictureControllerTest {
 
         verify(pictureService, never()).page(any(), any());
         verify(pictureListCache, never()).put(any(), any());
+        verifyNoInteractions(pictureSearchService);
     }
 
     @Test
@@ -299,6 +306,81 @@ class PictureControllerTest {
         verify(pictureListCache).put(requestCaptor.capture(), any());
         assertEquals(Integer.valueOf(1), requestCaptor.getValue().getReviewStatus(),
                 "公开列表的缓存 key 必须带上已通过审核的状态");
+        // 搜索未启用时只检查开关，不调用索引
+        verify(pictureSearchService).enabled();
+    }
+
+    @Test
+    @DisplayName("公开列表：启用搜索时按 ES 返回的顺序回表，并再次过滤未过审图片")
+    @SuppressWarnings("unchecked")
+    void listPictureVOByPage_usesElasticsearchOrderAndFiltersUnreviewed() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 2);
+        // ES 按相关度返回 2、1；回表时数据库顺序可能是 1、2，必须保持索引顺序
+        idPage.setRecords(List.of(2L, 1L));
+        when(pictureSearchService.searchPictureIds(any())).thenReturn(idPage);
+        when(pictureService.listByIds(any()))
+                .thenReturn(List.of(picture(1L, "第一张", 1), picture(2L, "第二张", 2)));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10, 1));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"海边\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<Page<Picture>> pageCaptor = ArgumentCaptor.forClass(Page.class);
+        verify(pictureService).getPictureVOPage(pageCaptor.capture(), any());
+        assertEquals(List.of(1L), pageCaptor.getValue().getRecords().stream()
+                .map(Picture::getId).toList(),
+                "已拒绝的图片即使仍残留在索引里也不能展示");
+        assertEquals(1L, pageCaptor.getValue().getTotal(),
+                "被过滤掉的失效文档要从 total 中扣除");
+        // 搜索路径不再执行 MySQL 的模糊查询
+        verify(pictureService, never()).page(any(), any());
+        verify(pictureService, never()).getQueryWrapper(any());
+    }
+
+    @Test
+    @DisplayName("公开列表：ES 异常时自动回落到 MySQL 查询")
+    void listPictureVOByPage_fallsBackToMysqlWhenSearchFails() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureSearchService.enabled()).thenReturn(true);
+        when(pictureSearchService.searchPictureIds(any()))
+                .thenThrow(new IllegalStateException("elasticsearch down"));
+        when(pictureService.page(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"海边\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(pictureService).getQueryWrapper(any());
+        verify(pictureService).page(any(Page.class), any());
+        verify(pictureListCache).put(any(), any());
+    }
+
+    @Test
+    @DisplayName("公开列表：ES 返回空结果时直接返回空页，不查数据库")
+    void listPictureVOByPage_returnsEmptyPageWhenSearchHasNoHits() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 0);
+        idPage.setRecords(List.of());
+        when(pictureSearchService.searchPictureIds(any())).thenReturn(idPage);
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"不存在的词\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        verify(pictureService, never()).listByIds(any());
+        verify(pictureService, never()).page(any(), any());
     }
 
     @Test
@@ -370,5 +452,13 @@ class PictureControllerTest {
         user.setId(id);
         user.setUserRole(role);
         return user;
+    }
+
+    private Picture picture(Long id, String name, int reviewStatus) {
+        Picture picture = new Picture();
+        picture.setId(id);
+        picture.setName(name);
+        picture.setReviewStatus(reviewStatus);
+        return picture;
     }
 }

@@ -5,11 +5,13 @@ import com.tzy.picturebackend.config.MachineReviewProperties;
 import com.tzy.picturebackend.event.PictureEvent;
 import com.tzy.picturebackend.event.PictureEventType;
 import com.tzy.picturebackend.manager.MachineReviewException;
+import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.enums.MachineReviewStatusEnum;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.service.AiSuggestionService;
 import com.tzy.picturebackend.service.MachineReviewService;
+import com.tzy.picturebackend.service.PictureSearchService;
 import com.tzy.picturebackend.service.PictureService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -21,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -40,6 +43,10 @@ class PictureEventConsumerTest {
 
     private AiProperties aiProperties;
 
+    private PictureSearchService pictureSearchService;
+
+    private PictureListCache pictureListCache;
+
     private PictureModerationConsumer moderationConsumer;
 
     private PictureAiConsumer aiConsumer;
@@ -55,11 +62,13 @@ class PictureEventConsumerTest {
         machineReviewProperties.setEnabled(true);
         aiProperties = new AiProperties();
         aiProperties.setEnabled(true);
+        pictureSearchService = mock(PictureSearchService.class);
+        pictureListCache = mock(PictureListCache.class);
         moderationConsumer = new PictureModerationConsumer(
                 pictureService, machineReviewService, machineReviewProperties);
         aiConsumer = new PictureAiConsumer(
                 pictureService, aiSuggestionService, aiProperties, machineReviewProperties);
-        searchConsumer = new PictureSearchConsumer(pictureService);
+        searchConsumer = new PictureSearchConsumer(pictureService, pictureSearchService, pictureListCache);
     }
 
     // ==================== 机审 ====================
@@ -234,12 +243,17 @@ class PictureEventConsumerTest {
     // ==================== 搜索 ====================
 
     @Test
-    @DisplayName("搜索：图片存在时同步索引")
+    @DisplayName("搜索：已通过的图片写入索引，并在写完后失效列表缓存")
     void search_existingPictureIsHandled() {
-        when(pictureService.getById(3L))
-                .thenReturn(picture(3L, PictureReviewStatusEnum.PASS.getValue()));
+        Picture picture = picture(3L, PictureReviewStatusEnum.PASS.getValue());
+        when(pictureService.getById(3L)).thenReturn(picture);
+        when(pictureSearchService.enabled()).thenReturn(true);
 
         assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 3L)));
+
+        verify(pictureSearchService).indexPicture(picture);
+        verify(pictureSearchService, never()).deletePicture(3L);
+        verify(pictureListCache).invalidate();
     }
 
     @Test
@@ -248,6 +262,33 @@ class PictureEventConsumerTest {
         when(pictureService.getById(4L)).thenReturn(null);
 
         assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 4L)));
+
+        verify(pictureSearchService).deletePicture(4L);
+        verify(pictureSearchService, never()).indexPicture(any());
+    }
+
+    @Test
+    @DisplayName("搜索：待审核 / 已拒绝的图片从索引删除，避免未过审内容被搜到")
+    void search_unreviewedPictureIsRemovedFromIndex() {
+        when(pictureService.getById(5L))
+                .thenReturn(picture(5L, PictureReviewStatusEnum.REVIEWING.getValue()));
+        when(pictureService.getById(6L))
+                .thenReturn(picture(6L, PictureReviewStatusEnum.REJECT.getValue()));
+
+        assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 5L)));
+        assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 6L)));
+
+        verify(pictureSearchService).deletePicture(5L);
+        verify(pictureSearchService).deletePicture(6L);
+        verify(pictureSearchService, never()).indexPicture(any());
+    }
+
+    @Test
+    @DisplayName("搜索：空事件直接确认，不查库也不碰索引")
+    void search_invalidEventIsAcknowledged() {
+        assertFalse(searchConsumer.handle(null));
+
+        verifyNoInteractions(pictureService, pictureSearchService);
     }
 
     private Picture picture(Long id, int reviewStatus) {

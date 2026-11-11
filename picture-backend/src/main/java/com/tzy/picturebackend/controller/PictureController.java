@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.controller;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.annotation.AuthCheck;
@@ -12,6 +13,7 @@ import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.PictureListCache;
+import com.tzy.picturebackend.manager.PictureSearchSortException;
 import com.tzy.picturebackend.model.dto.picture.*;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -22,6 +24,7 @@ import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.AiSuggestionService;
+import com.tzy.picturebackend.service.PictureSearchService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
@@ -34,6 +37,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("picture")
@@ -54,6 +60,9 @@ public class PictureController {
 
     @Resource
     private AiSuggestionService aiSuggestionService;
+
+    @Resource
+    private PictureSearchService pictureSearchService;
 
 
 
@@ -189,13 +198,58 @@ public class PictureController {
         if (cached != null) {
             return ResultUtils.success(cached.toPage());
         }
-        // 查询数据库
-        Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                pictureService.getQueryWrapper(pictureQueryRequest));
-        // 获取封装类
-        Page<PictureVO> pictureVOPage = pictureService.getPictureVOPage(picturePage, request);
+        // 启用 Elasticsearch 时由索引召回 id，再回 MySQL 取数据；索引不可用时自动回落
+        Page<PictureVO> pictureVOPage = null;
+        if (pictureSearchService.enabled()) {
+            try {
+                pictureVOPage = searchPublicPictureVOPage(pictureQueryRequest, request, current, size);
+            } catch (PictureSearchSortException e) {
+                // 排序字段不合法属于参数问题，交给 MySQL 查询路径返回统一的 40000
+                log.debug("搜索排序字段不合法，回落到 MySQL 校验: {}", e.getMessage());
+            } catch (RuntimeException e) {
+                log.warn("Elasticsearch 搜索失败，回落到 MySQL 查询, searchText={}",
+                        pictureQueryRequest.getSearchText(), e);
+            }
+        }
+        if (pictureVOPage == null) {
+            // 查询数据库
+            Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
+                    pictureService.getQueryWrapper(pictureQueryRequest));
+            // 获取封装类
+            pictureVOPage = pictureService.getPictureVOPage(picturePage, request);
+        }
         pictureListCache.put(pictureQueryRequest, PictureListPage.of(pictureVOPage));
         return ResultUtils.success(pictureVOPage);
+    }
+
+    /**
+     * 通过 Elasticsearch 召回图片 id，再回 MySQL 取完整数据。
+     * <p>
+     * MySQL 是唯一事实来源：这里会再次过滤 {@code reviewStatus = PASS}，
+     * 索引延迟最多导致「少搜到」，不会把未过审内容展示出去。
+     */
+    private Page<PictureVO> searchPublicPictureVOPage(PictureQueryRequest pictureQueryRequest,
+                                                      HttpServletRequest request,
+                                                      long current, long size) {
+        Page<Long> idPage = pictureSearchService.searchPictureIds(pictureQueryRequest);
+        List<Long> ids = idPage.getRecords();
+        if (CollUtil.isEmpty(ids)) {
+            return new Page<>(current, size, idPage.getTotal());
+        }
+        List<Picture> found = pictureService.listByIds(ids);
+        Map<Long, Picture> pictureMap = (found == null ? List.<Picture>of() : found).stream()
+                .filter(picture -> picture.getReviewStatus() != null
+                        && picture.getReviewStatus() == PictureReviewStatusEnum.PASS.getValue())
+                .collect(Collectors.toMap(Picture::getId, picture -> picture, (left, right) -> left));
+        // 按索引返回的顺序还原记录，过滤掉的失效文档从 total 中扣除
+        List<Picture> pictures = ids.stream()
+                .map(pictureMap::get)
+                .filter(Objects::nonNull)
+                .toList();
+        long total = Math.max(idPage.getTotal() - (ids.size() - pictures.size()), pictures.size());
+        Page<Picture> picturePage = new Page<>(current, size, total);
+        picturePage.setRecords(pictures);
+        return pictureService.getPictureVOPage(picturePage, request);
     }
 
     /**

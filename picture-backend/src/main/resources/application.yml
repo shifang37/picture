@@ -50,6 +50,11 @@ spring:
     timeout: 7d
     redis:
       namespace: picture:session
+  # 全文搜索（app.search.engine=es 时使用）：连接本地 Elasticsearch
+  elasticsearch:
+    uris: ${ES_URIS:http://localhost:9200}
+    connection-timeout: 2s
+    socket-timeout: 5s
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -123,6 +128,10 @@ app:
     retry-delay-millis: ${AI_RETRY_DELAY_MS:1000}
     max-tokens: ${AI_MAX_TOKENS:800}
     timeout: ${AI_TIMEOUT:60s}
+  search:
+    # 搜索后端：mysql（默认，沿用原有模糊查询）| es（Elasticsearch 全文检索）
+    # 设为 es 后公开列表由索引召回 id，Elasticsearch 异常时自动回落到 MySQL
+    engine: ${SEARCH_ENGINE:mysql}
 
 # 对象存储配置：生产环境通过环境变量注入，禁止把真实密钥写入仓库
 cos:
@@ -147,3 +156,9 @@ management:
       probes:
         enabled: true
       show-details: never
+  health:
+    # 默认不启用 Elasticsearch 健康检查：SEARCH_ENGINE=mysql 时没有 ES 可连，
+    # 否则 /api/actuator/health 会被错误地标记为 DOWN。
+    # 启用搜索后如需监控 ES 连通性，把它设为 true。
+    elasticsearch:
+      enabled: ${SEARCH_HEALTH_ENABLED:false}

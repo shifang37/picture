@@ -34,6 +34,26 @@ services:
       timeout: 10s
       retries: 10
 
+  elasticsearch:
+    # 版本与客户端保持一致（Spring Boot 3.5.16 管理的 elasticsearch-java 为 8.18.8）
+    # 本地开发关闭安全认证，只绑定回环地址；生产见 docker-compose.yml
+    image: elasticsearch:8.18.8
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: '-Xms512m -Xmx512m'
+    ports:
+      - '127.0.0.1:9200:9200'
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9200/_cluster/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
 volumes:
   redis-data:
   rabbitmq-data:
+  elasticsearch-data:

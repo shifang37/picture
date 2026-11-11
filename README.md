@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ、数据万象内容审核、DeepSeek |
+| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ、Elasticsearch、数据万象内容审核、DeepSeek |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理与内容审核） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
 | 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、ESLint |
@@ -22,7 +22,7 @@ picture/
 │       ├── controller/              # 接口层
 │       ├── service/                 # 业务层（接口 + impl）
 │       ├── mapper/                  # MyBatis-Plus Mapper
-│       ├── manager/                 # COS 上传、数据万象机审、DeepSeek 标注与限流封装
+│       ├── manager/                 # COS 上传、数据万象机审、DeepSeek 标注、搜索查询构建与限流封装
 │       ├── event/                   # 图片事件模型与 Spring 事件转发
 │       ├── mq/                      # RabbitMQ 拓扑与队列消费者
 │       ├── model/                   # entity / dto / vo / enums
@@ -46,7 +46,7 @@ picture/
 - JDK 21
 - Node.js `^20.19.0 || >=22.12.0`
 - MySQL 8.x
-- Redis 7、RabbitMQ 4（本地用 `docker-compose.infra.yml` 启动）
+- Redis 7、RabbitMQ 4、Elasticsearch 8.18（本地用 `docker-compose.infra.yml` 启动；搜索默认关闭，不启用时可只启动 Redis 与 RabbitMQ）
 - 一个腾讯云 COS 存储桶（用于图片存储）
 
 ### 1. 初始化数据库
@@ -83,7 +83,7 @@ cp application-local.yml.example application-local.yml
 docker compose -f docker-compose.infra.yml up -d
 ```
 
-本地 Redis 只绑定 `127.0.0.1:6379` 且默认无密码，与 `application.yml` 中的默认配置一致；RabbitMQ 只绑定 `127.0.0.1:5672`，管理界面为 `http://127.0.0.1:15672`（默认 `guest / guest`，仅本机可登录）。
+本地 Redis 只绑定 `127.0.0.1:6379` 且默认无密码，与 `application.yml` 中的默认配置一致；RabbitMQ 只绑定 `127.0.0.1:5672`，管理界面为 `http://127.0.0.1:15672`（默认 `guest / guest`，仅本机可登录）。如需启用全文搜索，再启动 Elasticsearch：`docker compose -f docker-compose.infra.yml up -d elasticsearch`，它只绑定 `127.0.0.1:9200` 且关闭安全认证。
 
 ### 4. 启动后端
 
@@ -318,9 +318,36 @@ app:
 - 生产者开启 `publisher-confirm-type: correlated` 与 `publisher-returns`，确认失败或无法路由只记录日志；RabbitMQ 停机时上传、审核等主流程仍然成功（发布失败只留错误日志，接口正常返回）；
 - 消费者失败最多尝试 3 次（首次后按 1s、2s 退避），仍失败则拒绝消息，由队列的 `x-dead-letter-exchange` 转入 `${queue}.dlq`；消息体无法解析等「毒消息」同样进死信，不会无限重入队；
 - 消费者按 id 回查并检查状态：图片已删除、已审核或机审字段已有值时直接确认消息，避免重复处理；
-- 机审消费者在开关开启时调用数据万象并写回机审字段，另有每 5 分钟的兜底扫描；AI 消费者机审开启时只处理机审正常的图片，机审关闭时直接消费上传事件；搜索索引消费者目前仍只做状态校验与事件记录，后续接入搜索能力。
+- 机审消费者在开关开启时调用数据万象并写回机审字段，另有每 5 分钟的兜底扫描；AI 消费者机审开启时只处理机审正常的图片，机审关闭时直接消费上传事件；搜索索引消费者按 id 回查后写入或删除 Elasticsearch 文档（搜索未启用时空实现，不产生外部调用）。
 
 管理界面可以查看队列、绑定与死信：`http://127.0.0.1:15672`（本地默认 `guest / guest`）。生产环境不映射 15672 到宿主机。
+
+## 全文搜索（Elasticsearch）
+
+公开列表（`POST /api/picture/list/page/vo`）默认仍走 MySQL 模糊查询。设置 `SEARCH_ENGINE=es` 后，改由 Elasticsearch 召回图片 id，再回 MySQL 取数据并再次过滤 `reviewStatus = 1`：
+
+- **MySQL 是唯一事实来源**：索引里只有已通过审核的图片，索引延迟最多导致「少搜到」，不会泄露未过审内容；
+- **只接管公开列表**：「我的图片」和管理端列表继续走 MySQL；
+- **可降级**：Elasticsearch 调用异常时自动回落到原 MySQL 查询并记录 warn 日志，首页搜索保持可用；
+- **索引**：`picture_v1`，别名 `picture`；名称、简介使用内置 `cjk` 分析器（不需要 IK 插件），名称权重为 3；分类、标签、格式等使用 keyword；
+- **排序**：有搜索词时按相关度，否则按请求字段（默认 `createTime` 倒序），排序字段沿用原白名单；
+- **同步**：`picture.uploaded` / `picture.changed` 事件驱动，`picture.search.q` 消费者按 id 回查：公开可见就写入索引，待审核、拒绝、删除则删除文档；
+- **全量重建**：`POST /api/search/reindex`（仅管理员），每批 500 条从 MySQL 写入临时索引，完成后原子切换别名再删除旧索引；首次启用、索引损坏或巡检不一致时使用；
+- **一致性巡检**：`SEARCH_ENGINE=es` 时每天 03:00 对比 MySQL 公开图片数与索引文档数，不一致时记录「搜索索引与数据库不一致」告警日志；
+- **健康检查**：默认不启用 Elasticsearch 健康项，避免 MySQL 搜索模式下 `/api/actuator/health` 被误判为 DOWN；启用搜索后可设置 `SEARCH_HEALTH_ENABLED=true`。
+
+本地启用步骤：
+
+```powershell
+docker compose -f docker-compose.infra.yml up -d elasticsearch
+cd picture-backend
+$env:SEARCH_ENGINE = 'es'
+.\mvnw.cmd spring-boot:run
+```
+
+启动后先以管理员身份调用一次全量重建（写接口需要 CSRF，先 `GET /api/health` 拿 `XSRF-TOKEN`），把历史图片补进索引；此后新上传、审核、编辑、删除都由消息队列自动同步。
+
+> 单节点开发堆内存 512MB。生产 compose 开启基础认证（`ES_USERNAME` / `ES_PASSWORD`），只在内网可达，不映射 9200 到宿主机。
 
 ## 前端构建与代码检查
 
@@ -343,19 +370,20 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 
 ## 生产部署（Docker / 反向代理 / 监控）
 
-1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码、RabbitMQ 账号密码、腾讯云 COS 配置；如开启 AI 建议，还需填写 `DEEPSEEK_API_KEY`
+1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码、RabbitMQ 账号密码、腾讯云 COS 配置；如开启 AI 建议，还需填写 `DEEPSEEK_API_KEY`；如开启全文搜索，设置 `SEARCH_ENGINE=es` 与 `ES_PASSWORD`
 2. 执行 `docker compose up -d --build`
 3. 访问 `http://localhost:8080`；前端 nginx 会把 `/api` 反向代理到后端 `8123`
 
 说明：
 
 - 后端以 `prod` profile 启动，默认关闭 Swagger 与 MyBatis SQL 日志（见 `application-prod.yml.example`）
-- 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）
+- 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）；Elasticsearch 健康项默认关闭，启用搜索后可设 `SEARCH_HEALTH_ENABLED=true`
 - **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/metrics` 不再可访问；确需 metrics 时使用独立管理端口（例如 `management.server.port: 8124`），该端口不要经过 nginx，只在内网/监控网络开放
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
 - **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增更高版本的迁移脚本（如 `V7__xxx.sql`）
 - **Redis 与会话**：compose 内置 `redis` 服务（AOF 持久化 + 密码认证，密码由 `REDIS_PASSWORD` 指定，务必改掉默认值）；`redis-data` 卷保存会话与失效版本，删除该卷会让所有用户重新登录
 - **RabbitMQ**：compose 内置 `rabbitmq` 服务（`rabbitmq:4-management`，持久化卷 `rabbitmq-data`，只在内网可达，不映射 5672/15672 到宿主机）。账号密码由 `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` 指定；**不要使用 `guest`**，RabbitMQ 的 guest 只允许本机回环地址登录，容器间连不上。账号只在数据卷首次初始化时生效，修改 `.env` 后需要删除 `rabbitmq-data` 卷（会丢失队列与死信）或进入容器手工改密码
+- **Elasticsearch**：compose 内置 `elasticsearch` 服务（版本 8.18.8，堆内存 512MB，持久化卷 `elasticsearch-data`，只在内网可达，不映射 9200 到宿主机），开启基础认证（`ES_USERNAME` / `ES_PASSWORD`）并关闭 HTTP TLS（仅内网访问）。`SEARCH_ENGINE` 默认 `mysql`，此时只启动不连接；切换为 `es` 后需管理员调用一次 `POST /api/search/reindex` 初始化索引
 - **图片事件**：队列与交换机在应用启动时由 `RabbitAdmin` 幂等声明；RabbitMQ 不可用时上传与审核仍然成功，只是事件投递失败并记录日志。机审开启时每 5 分钟兜底补发遗漏图片（Redis 互斥），可用 `MACHINE_REVIEW_ENABLED` / `MACHINE_REVIEW_MODE` 控制；关闭机审则不会有任何外部审核调用
 - **机审费用与权限**：开启机审前确认 COS 桶已绑定数据万象、账号具备 `ci:CreateAuditingPictureJob`；图片审核按张计费，默认关闭
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
@@ -363,7 +391,7 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 ## 常用命令
 
 ```bash
-# 本地基础设施（Redis）
+# 本地基础设施（Redis / RabbitMQ / Elasticsearch）
 docker compose -f docker-compose.infra.yml up -d
 docker compose -f docker-compose.infra.yml down
 
@@ -389,7 +417,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **310 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **329 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

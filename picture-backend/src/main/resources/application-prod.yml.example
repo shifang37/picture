@@ -10,6 +10,13 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:picture}
     password: ${RABBITMQ_PASSWORD:picture}
+  # 全文搜索（SEARCH_ENGINE=es 时使用 compose 内网的 elasticsearch）
+  elasticsearch:
+    uris: ${ES_URIS:http://elasticsearch:9200}
+    username: ${ES_USERNAME:elastic}
+    password: ${ES_PASSWORD:picture}
+    connection-timeout: 2s
+    socket-timeout: 5s
   servlet:
     multipart:
       max-file-size: 2MB
@@ -67,6 +74,9 @@ app:
     api-key: ${DEEPSEEK_API_KEY:}
     model: ${AI_MODEL:deepseek-flash}
     daily-limit: ${AI_DAILY_LIMIT:20}
+  search:
+    # mysql（默认，沿用模糊查询）| es（Elasticsearch 全文检索）
+    engine: ${SEARCH_ENGINE:mysql}
 management:
   endpoints:
     web:

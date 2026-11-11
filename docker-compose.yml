@@ -41,6 +41,25 @@ services:
       timeout: 10s
       retries: 10
 
+  elasticsearch:
+    # 版本与后端客户端一致（elasticsearch-java 8.18.8）
+    # 只在 Compose 内网可达，不映射 9200 到宿主机；开启基础认证，关闭 HTTP TLS（内网访问）
+    image: elasticsearch:8.18.8
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'true'
+      xpack.security.http.ssl.enabled: 'false'
+      ELASTIC_PASSWORD: ${ES_PASSWORD:-picture}
+      ES_JAVA_OPTS: '-Xms512m -Xmx512m'
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS -u "elastic:$${ELASTIC_PASSWORD}" http://localhost:9200/_cluster/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+
   backend:
     build: ./picture-backend
     environment:
@@ -69,6 +88,11 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       AI_MODEL: ${AI_MODEL:-deepseek-flash}
       AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-20}
+      # 全文搜索：默认 mysql；设为 es 时使用下面的 Elasticsearch 连接
+      SEARCH_ENGINE: ${SEARCH_ENGINE:-mysql}
+      ES_URIS: ${ES_URIS:-http://elasticsearch:9200}
+      ES_USERNAME: ${ES_USERNAME:-elastic}
+      ES_PASSWORD: ${ES_PASSWORD:-picture}
     expose:
       - '8123'
     depends_on:
@@ -77,6 +101,8 @@ services:
       redis:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://localhost:8123/api/health >/dev/null || exit 1']
@@ -97,3 +123,4 @@ volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
+  elasticsearch-data:
