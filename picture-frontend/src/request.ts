@@ -8,6 +8,9 @@ const myAxios = axios.create({
   baseURL: '/api',
   timeout: 60000,
   withCredentials: true,
+  // 与后端 CsrfFilter 的 double-submit cookie 约定保持一致
+  xsrfCookieName: 'XSRF-TOKEN',
+  xsrfHeaderName: 'X-XSRF-TOKEN',
 })
 
 // 全局响应拦截器
@@ -26,6 +29,14 @@ myAxios.interceptors.response.use(
         const current = window.location.pathname + window.location.search
         window.location.href = `/user/login?redirect=${encodeURIComponent(current)}`
       }
+    }
+    // CSRF 校验失败：通常是页面停留过久 cookie 丢失，刷新后重新获取 token
+    if (data.code === 40300) {
+      message.error(data.message || '请求校验失败，请刷新页面后重试')
+    }
+    // 登录 / 上传等接口触发限流
+    if (data.code === 42900) {
+      message.warning(data.message || '请求过于频繁，请稍后再试')
     }
     return response
   },

@@ -1,0 +1,96 @@
+package com.tzy.picturebackend.filter;
+
+import cn.hutool.core.util.StrUtil;
+import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.manager.RateLimitManager;
+import com.tzy.picturebackend.model.entity.User;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
+import jakarta.annotation.Resource;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+
+import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_STATE;
+
+/**
+ * 登录与上传接口限流，避免暴力破解和恶意刷上传。
+ */
+@Component
+@Order(Ordered.HIGHEST_PRECEDENCE + 20)
+public class RateLimitFilter extends OncePerRequestFilter {
+
+    private static final int LOGIN_LIMIT_PER_MINUTE = 10;
+
+    private static final int UPLOAD_LIMIT_PER_MINUTE = 20;
+
+    @Resource
+    private RateLimitManager rateLimitManager;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        if (!"POST".equalsIgnoreCase(request.getMethod())) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        String path = relativePath(request);
+        try {
+            if ("/user/login".equals(path)) {
+                rateLimitManager.check("login:ip:" + clientIp(request),
+                        LOGIN_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
+            } else if ("/picture/upload".equals(path)) {
+                rateLimitManager.check(uploadKey(request), UPLOAD_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
+            }
+        } catch (BusinessException e) {
+            writeError(response, e.getCode(), e.getMessage());
+            return;
+        }
+        filterChain.doFilter(request, response);
+    }
+
+    private String uploadKey(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            Object loginUser = session.getAttribute(USER_LOGIN_STATE);
+            if (loginUser instanceof User user && user.getId() != null) {
+                return "upload:user:" + user.getId();
+            }
+        }
+        return "upload:ip:" + clientIp(request);
+    }
+
+    private String relativePath(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (StrUtil.isNotBlank(contextPath) && path.startsWith(contextPath)) {
+            return path.substring(contextPath.length());
+        }
+        return path;
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (StrUtil.isNotBlank(forwarded)) {
+            // 取第一个地址，兼容反向代理场景
+            return forwarded.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
+    }
+
+    private void writeError(HttpServletResponse response, int code, String message) throws IOException {
+        response.setStatus(HttpServletResponse.SC_OK);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write(String.format(
+                "{\"code\":%d,\"data\":null,\"message\":\"%s\"}", code, message));
+    }
+}

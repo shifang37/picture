@@ -157,6 +157,20 @@ class UserServiceImplTest {
     }
 
     @Test
+    @DisplayName("登录：成功后会更换 session id，防止会话固定")
+    void userLogin_rotatesSessionId() {
+        User user = userWithPassword(encoder.encode("123456"));
+        when(userMapper.selectOne(any())).thenReturn(user);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        String oldSessionId = request.getSession(true).getId();
+
+        userService.userLogin("tzyy", "123456", request);
+
+        assertNotEquals(oldSessionId, request.getSession().getId());
+        assertNotNull(request.getSession().getAttribute("user_login"));
+    }
+
+    @Test
     @DisplayName("登录：BCrypt 密码校验通过并写入 Session")
     void userLogin_successWithBcryptPassword() {
         User user = userWithPassword(encoder.encode("123456"));

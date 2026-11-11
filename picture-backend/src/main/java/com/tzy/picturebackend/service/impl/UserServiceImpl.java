@@ -160,8 +160,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             user.setUserPassword(upgrade.getUserPassword());
         }
 
-        //4.记录登录状态
-        request.getSession().setAttribute(USER_LOGIN_STATE,user);
+        //4.记录登录状态：登录成功后更换 session id，防止会话固定攻击
+        HttpSession session = request.getSession(true);
+        request.changeSessionId();
+        session.setAttribute(USER_LOGIN_STATE, user);
         return this.getLoginUserVO(user);
     }
 
