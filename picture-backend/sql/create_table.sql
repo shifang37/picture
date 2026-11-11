@@ -27,6 +27,7 @@ create table if not exists picture
     category     varchar(64)                        null comment '分类',
     tags         varchar(512)                      null comment '标签（JSON 数组）',
     picSize      bigint                             null comment '图片体积',
+    downloadCount bigint   default 0                not null comment '下载次数',
     picWidth     int                                null comment '图片宽度',
     picHeight    int                                null comment '图片高度',
     picScale     double                             null comment '图片宽高比例',

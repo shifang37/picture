@@ -54,6 +54,9 @@
             <a-descriptions-item label="大小">
               {{ formatSize(picture.picSize) }}
             </a-descriptions-item>
+            <a-descriptions-item label="下载次数">
+              {{ picture.downloadCount ?? 0 }}
+            </a-descriptions-item>
           </a-descriptions>
           <a-space wrap>
             <a-button v-if="canEdit" type="default" @click="doEdit">
@@ -107,6 +110,7 @@ import {
 } from '@ant-design/icons-vue'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { getPictureVoById, deletePicture } from '@/api/pictureController'
+import { recordPictureDownload } from '@/api/pictureExtra'
 import { downloadImage, formatSize } from '@/utils'
 
 const loginUserStore = useLoginUserStore()
@@ -212,8 +216,19 @@ const doShare = async () => {
   }
 }
 
-// 处理下载
-const doDownload = () => {
+// 处理下载：先记录统计，统计失败不影响实际下载
+const doDownload = async () => {
+  const id = picture.value.id
+  if (id) {
+    try {
+      const res = await recordPictureDownload(id)
+      if (res.data.code === 0) {
+        picture.value.downloadCount = String((Number(picture.value.downloadCount) || 0) + 1)
+      }
+    } catch {
+      // 下载统计是 best-effort，忽略异常继续下载
+    }
+  }
   downloadImage(picture.value.url)
 }
 

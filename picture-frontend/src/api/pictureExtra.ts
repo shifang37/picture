@@ -12,6 +12,16 @@ export interface PictureReviewLog {
 }
 
 /**
+ * 记录一次图片下载（后端会校验图片可见性）
+ */
+export async function recordPictureDownload(id: string, options?: { [key: string]: any }) {
+  return request<API.BaseResponseBoolean>(`/picture/download/${id}`, {
+    method: 'POST',
+    ...(options || {}),
+  })
+}
+
+/**
  * 查询某张图片的审核历史（管理员）
  */
 export async function listPictureReviewLogs(pictureId: string, options?: { [key: string]: any }) {

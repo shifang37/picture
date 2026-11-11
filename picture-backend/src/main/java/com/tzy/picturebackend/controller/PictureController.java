@@ -131,6 +131,14 @@ public class PictureController {
     }
 
     /**
+     * 记录图片下载次数
+     */
+    @PostMapping("/download/{id}")
+    public BaseResponse<Boolean> downloadPicture(@PathVariable Long id, HttpServletRequest request) {
+        return ResultUtils.success(pictureService.incrementDownloadCount(id, request));
+    }
+
+    /**
      * 分页获取图片列表（仅管理员可用）
      */
     @PostMapping("/list/page")

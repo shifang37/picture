@@ -534,6 +534,29 @@ class PictureServiceImplTest {
         assertEquals(List.of("热门", "生活", "高清"), result.getTagList());
     }
 
+    @Test
+    @DisplayName("下载统计：已通过审核的图片可以自增下载次数")
+    void incrementDownloadCount_incrementsApprovedPicture() {
+        when(pictureMapper.selectById(1L))
+                .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
+
+        assertTrue(pictureService.incrementDownloadCount(1L, new MockHttpServletRequest()));
+
+        verify(pictureMapper).update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    @DisplayName("下载统计：图片不存在时不更新")
+    void incrementDownloadCount_rejectsMissingPicture() {
+        when(pictureMapper.selectById(1L)).thenReturn(null);
+
+        assertThrows(BusinessException.class,
+                () -> pictureService.incrementDownloadCount(1L, new MockHttpServletRequest()));
+
+        verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+    }
+
     // ==================== 字段长度校验 ====================
 
     @Test

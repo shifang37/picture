@@ -48,6 +48,11 @@ public class PictureVO implements Serializable {
     private Long picSize;
 
     /**
+     * 下载次数
+     */
+    private Long downloadCount;
+
+    /**
      * 图片宽度
      */
     private Integer picWidth;

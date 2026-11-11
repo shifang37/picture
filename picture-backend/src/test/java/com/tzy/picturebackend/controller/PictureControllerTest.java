@@ -168,6 +168,17 @@ class PictureControllerTest {
     }
 
     @Test
+    @DisplayName("下载统计：记录下载成功")
+    void downloadPicture_recordsCount() throws Exception {
+        when(pictureService.incrementDownloadCount(eq(1L), any())).thenReturn(true);
+
+        mockMvc.perform(post("/picture/download/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+    }
+
+    @Test
     @DisplayName("标签分类：接口返回服务层动态汇总结果")
     void listPictureTagCategory_returnsDynamicValues() throws Exception {
         PictureTagCategory tagCategory = new PictureTagCategory();

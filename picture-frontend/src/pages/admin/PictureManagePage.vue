@@ -143,6 +143,11 @@ const columns = [
     width: 110,
   },
   {
+    title: '下载次数',
+    dataIndex: 'downloadCount',
+    width: 100,
+  },
+  {
     title: '创建时间',
     dataIndex: 'createTime',
   },

@@ -157,6 +157,7 @@ declare namespace API {
     category?: string
     tags?: string
     picSize?: string
+    downloadCount?: string
     picWidth?: number
     picHeight?: number
     picScale?: number
@@ -233,6 +234,7 @@ declare namespace API {
     tags?: string[]
     category?: string
     picSize?: string
+    downloadCount?: string
     picWidth?: number
     picHeight?: number
     picScale?: number

@@ -91,4 +91,13 @@ public interface PictureService extends IService<Picture> {
      */
     PictureTagCategory listTagCategory();
 
+    /**
+     * 记录一次图片下载（原子自增），并校验图片对当前访问者可见
+     *
+     * @param id      图片 id
+     * @param request 当前请求
+     * @return 是否记录成功
+     */
+    boolean incrementDownloadCount(Long id, HttpServletRequest request);
+
 }
