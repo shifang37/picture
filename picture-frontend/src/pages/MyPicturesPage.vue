@@ -24,7 +24,7 @@
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'cover'">
-          <img class="cover" :src="record.url" :alt="record.name" />
+          <img class="cover" :src="getThumbnailUrl(record.url)" :alt="record.name" />
         </template>
         <template v-else-if="column.key === 'name'">
           <div>{{ record.name || '未命名' }}</div>
@@ -71,7 +71,7 @@ import { InfoCircleOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { deletePicture } from '@/api/pictureController'
 import { listMyPictureVoByPage } from '@/api/pictureExtra'
-import { formatSize } from '@/utils'
+import { formatSize, getThumbnailUrl } from '@/utils'
 
 const router = useRouter()
 

@@ -46,7 +46,7 @@
               <img
                 style="height: 180px; object-fit: cover"
                 :alt="picture.name"
-                :src="picture.url"
+                :src="getThumbnailUrl(picture.url)"
               />
             </template>
             <a-card-meta :title="picture.name">
@@ -73,6 +73,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { listPictureVoByPage, listPictureTagCategory } from '@/api/pictureController'
+import { getThumbnailUrl } from '@/utils'
 
 // 数据
 const dataList = ref<API.PictureVO[]>([])

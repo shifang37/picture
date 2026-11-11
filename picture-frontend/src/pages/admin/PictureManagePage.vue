@@ -47,7 +47,7 @@
     >
       <template #bodyCell="{ column, record }">
         <template v-if="column.dataIndex === 'url'">
-          <a-image :src="record.url" :width="120" />
+          <a-image :src="getThumbnailUrl(record.url)" :width="120" />
         </template>
         <!-- 标签 -->
         <template v-if="column.dataIndex === 'tags'">
@@ -99,6 +99,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { deletePicture, listPictureByPage } from '@/api/pictureController'
+import { getThumbnailUrl } from '@/utils'
 import dayjs from 'dayjs'
 const columns = [
   {

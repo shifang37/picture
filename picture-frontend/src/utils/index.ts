@@ -15,6 +15,22 @@ export const formatSize = (size?: number | string) => {
 }
 
 /**
+ * 生成缩略图地址（依赖腾讯云 COS 图片处理参数）
+ * @param url 原图地址
+ * @param size 缩略图最长边
+ */
+export function getThumbnailUrl(url?: string, size = 300) {
+  if (!url) {
+    return ''
+  }
+  // 已经带图片处理参数时不重复拼接
+  if (url.includes('imageMogr2')) {
+    return url
+  }
+  return `${url}${url.includes('?') ? '&' : '?'}imageMogr2/thumbnail/${size}x`
+}
+
+/**
  * 下载图片
  * @param url 图片下载地址
  * @param fileName 要保存为的文件名
