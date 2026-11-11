@@ -99,11 +99,6 @@ const originItems = [
     label: '标签分类管理',
     title: '标签分类管理',
   },
-  {
-    key: 'others',
-    label: h('a', { href: 'https://www.codefather.cn', target: '_blank' }, '编程导航'),
-    title: '编程导航',
-  },
 ]
 
 // 过滤菜单项

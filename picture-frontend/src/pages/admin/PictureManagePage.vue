@@ -52,7 +52,7 @@
         <!-- 标签 -->
         <template v-if="column.dataIndex === 'tags'">
           <a-space wrap>
-            <a-tag v-for="tag in JSON.parse(record.tags || '[]')" :key="tag">{{ tag }}</a-tag>
+            <a-tag v-for="tag in parseTags(record.tags)" :key="tag">{{ tag }}</a-tag>
           </a-space>
         </template>
         <!-- 审核状态 -->
@@ -67,13 +67,13 @@
           <div>宽度：{{ record.picWidth }}</div>
           <div>高度：{{ record.picHeight }}</div>
           <div>宽高比：{{ record.picScale }}</div>
-          <div>大小：{{ (record.picSize / 1024).toFixed(2) }}KB</div>
+          <div>大小：{{ formatSize(record.picSize) }}</div>
         </template>
         <template v-else-if="column.dataIndex === 'createTime'">
-          {{ dayjs(record.createTime).format('YYYY-MM-DD HH:mm:ss') }}
+          {{ formatTime(record.createTime) }}
         </template>
         <template v-else-if="column.dataIndex === 'editTime'">
-          {{ dayjs(record.editTime).format('YYYY-MM-DD HH:mm:ss') }}
+          {{ formatTime(record.editTime) }}
         </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
@@ -99,8 +99,22 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { message } from 'ant-design-vue'
 import { deletePicture, listPictureByPage } from '@/api/pictureController'
-import { getThumbnailUrl } from '@/utils'
+import { formatSize, getThumbnailUrl } from '@/utils'
 import dayjs from 'dayjs'
+
+const parseTags = (tags?: string) => {
+  if (!tags) {
+    return []
+  }
+  try {
+    const parsed = JSON.parse(tags)
+    return Array.isArray(parsed) ? (parsed as string[]) : []
+  } catch {
+    return []
+  }
+}
+
+const formatTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-')
 const columns = [
   {
     title: 'id',

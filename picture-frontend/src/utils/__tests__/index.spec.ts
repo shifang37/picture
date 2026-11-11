@@ -3,7 +3,7 @@ import { formatSize, getThumbnailUrl } from '@/utils'
 
 describe('formatSize', () => {
   it('格式化 B / KB / MB', () => {
-    expect(formatSize(0)).toBe('未知')
+    expect(formatSize(0)).toBe('0 B')
     expect(formatSize(512)).toBe('512 B')
     expect(formatSize(2048)).toBe('2.00 KB')
     expect(formatSize(2 * 1024 * 1024)).toBe('2.00 MB')

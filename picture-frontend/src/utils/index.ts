@@ -8,7 +8,7 @@ import { saveAs } from 'file-saver'
 export const formatSize = (size?: number | string) => {
   if (size === undefined || size === null || size === '') return '未知'
   const value = Number(size)
-  if (!value || Number.isNaN(value)) return '未知'
+  if (Number.isNaN(value)) return '未知'
   if (value < 1024) return value + ' B'
   if (value < 1024 * 1024) return (value / 1024).toFixed(2) + ' KB'
   return (value / (1024 * 1024)).toFixed(2) + ' MB'

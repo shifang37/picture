@@ -78,14 +78,6 @@ const router = createRouter({
       props: true,
     },
     {
-      path: '/about',
-      name: 'about',
-      // route level code-splitting
-      // this generates a separate chunk (About.[hash].js) for this route
-      // which is lazy-loaded when the route is visited.
-      component: () => import('../views/AboutView.vue'),
-    },
-    {
       // 兜底路由：未匹配的站内地址统一显示 404 页面
       path: '/:pathMatch(.*)*',
       name: 'notFound',

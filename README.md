@@ -118,6 +118,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - 长边超过 `1920` 的图片等比缩小；
 - JPEG 超过约 `1.5MB` 时以 `0.85` 质量重新编码；
 - PNG 只缩放、保留透明通道；WebP 当前保持原文件（JDK 没有内置 WebP 编码器）；
+- 压缩前只读取图片头校验像素数，超过 `4000 万` 像素直接拒绝上传，避免解压炸弹耗尽内存；
 - 压缩失败会自动回退原文件，不阻断上传；数据库中的 `picSize` 为压缩后的大小。
 
 上传接口 `POST /api/picture/upload` 使用 `multipart/form-data`：`file` 为图片文件，`id` 可选（重新上传已有图片时传）。该接口只要求登录，普通用户也可以调用。
@@ -126,9 +127,9 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 
 - 普通用户登录后从右上角用户菜单进入「个人中心」（`/user/profile`），可以修改昵称、头像地址和简介，也可以修改密码
 - 修改资料接口 `POST /api/user/update/profile`：只作用于当前登录用户，不允许修改角色、账号和密码
-- 修改密码接口 `POST /api/user/update/password`：原密码错误、新密码长度不合法会返回明确的 `40000` 业务码
+- 修改密码接口 `POST /api/user/update/password`：原密码错误、新密码长度不合法会返回明确的 `40000` 业务码；修改成功后其他设备上的旧会话立即失效，当前页面保持登录
 - 管理员在「用户管理」（`/admin/userManage`）可以新增用户、编辑昵称/头像/简介/角色、删除用户（删除前二次确认）
-- 管理员可以重置任意用户密码：`POST /api/user/reset/password`，body 为 `{ "id": "用户 id", "newPassword": "6-72 位新密码" }`；重置后旧密码立即失效
+- 管理员可以重置任意用户密码：`POST /api/user/reset/password`，body 为 `{ "id": "用户 id", "newPassword": "6-72 位新密码" }`；重置后旧密码立即失效，该用户的所有已有登录会话也会立即失效
 - 删除用户时不能删除自己；目标用户还有图片时会被拒绝，需要先处理该用户的图片
 - 新用户默认密码 `12345678`；管理端用户查询和列表接口不会返回密码哈希
 
@@ -172,6 +173,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - 后端以 `prod` profile 启动，默认关闭 Swagger 与 MyBatis SQL 日志（见 `application-prod.yml.example`）
 - 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）
 - **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/metrics` 不再可访问；确需 metrics 时使用独立管理端口（例如 `management.server.port: 8124`），该端口不要经过 nginx，只在内网/监控网络开放
+- **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
 - 已有数据库升级时依次执行 `picture-backend/sql/upgrade_v2.sql`（审核记录与下载次数字段）和 `picture-backend/sql/upgrade_v3.sql`（标签/分类字典）
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
@@ -197,7 +199,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **197 个单元测试**，覆盖用户注册/登录/改密、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **206 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

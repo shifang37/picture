@@ -87,7 +87,7 @@ public interface PictureService extends IService<Picture> {
     List<PictureReviewLogVO> listPictureReviewLogs(Long pictureId);
 
     /**
-     * 从已通过审核的图片中动态汇总标签和分类
+     * 从标签/分类字典读取可选项（由管理员维护）
      *
      * @return 标签与分类列表
      */
