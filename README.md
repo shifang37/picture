@@ -113,6 +113,13 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 3. 上传成功后填写名称、简介、分类、标签，提交后跳转到图片详情
 4. 「我的图片」（`/my_pictures`）可以查看自己上传的全部图片，按待审核 / 已通过 / 已拒绝筛选，并支持编辑、删除
 
+上传时后端会按需压缩原图，降低存储与下载流量：
+
+- 长边超过 `1920` 的图片等比缩小；
+- JPEG 超过约 `1.5MB` 时以 `0.85` 质量重新编码；
+- PNG 只缩放、保留透明通道；WebP 当前保持原文件（JDK 没有内置 WebP 编码器）；
+- 压缩失败会自动回退原文件，不阻断上传；数据库中的 `picSize` 为压缩后的大小。
+
 上传接口 `POST /api/picture/upload` 使用 `multipart/form-data`：`file` 为图片文件，`id` 可选（重新上传已有图片时传）。该接口只要求登录，普通用户也可以调用。
 
 ## 个人中心与用户管理
@@ -121,6 +128,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - 修改资料接口 `POST /api/user/update/profile`：只作用于当前登录用户，不允许修改角色、账号和密码
 - 修改密码接口 `POST /api/user/update/password`：原密码错误、新密码长度不合法会返回明确的 `40000` 业务码
 - 管理员在「用户管理」（`/admin/userManage`）可以新增用户、编辑昵称/头像/简介/角色、删除用户（删除前二次确认）
+- 管理员可以重置任意用户密码：`POST /api/user/reset/password`，body 为 `{ "id": "用户 id", "newPassword": "6-72 位新密码" }`；重置后旧密码立即失效
 - 删除用户时不能删除自己；目标用户还有图片时会被拒绝，需要先处理该用户的图片
 - 新用户默认密码 `12345678`；管理端用户查询和列表接口不会返回密码哈希
 
@@ -133,6 +141,25 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 3. 普通用户重新上传已通过的图片会**重新进入待审核**，并清空上一次的审核信息
 4. 管理员在「图片审核」页面（`/admin/pictureReview`）通过或拒绝，可填写审核意见
 5. 审核通过（`reviewStatus = 1`）后，图片才对所有访客可见；作者可在「我的图片」中看到拒绝原因
+6. 审核历史会记录审核人（昵称/账号，用户已删除时显示 `用户#id`）、动作、时间和意见；管理员上传/重传自动通过时也会写入一条「管理员上传，自动通过」记录
+
+## 标签与分类字典
+
+标签和分类由管理员维护的字典表 `tag_category` 提供，不再从图片动态汇总：
+
+- 首页与上传页仍然调用 `GET /api/picture/tag_category`，响应结构保持 `{ tagList, categoryList }`
+- 管理页：`/admin/tagCategoryManage`，支持新增、删除和「从现有图片同步」
+- 管理接口（均需管理员）：
+  - `POST /api/tag_category/add`：`{ "type": "tag|category", "name": "名称" }`
+  - `POST /api/tag_category/delete`：`{ "id": "字典 id" }`
+  - `POST /api/tag_category/sync`：把已通过审核图片中缺失的标签/分类补进字典，返回新增数量
+  - `GET /api/tag_category/list`：返回带 id 的完整字典
+- 删除字典项不会修改已有图片的 `category` / `tags` 字段；图片仍在使用时只是不再作为新选项出现
+- 升级已有数据库时执行 `picture-backend/sql/upgrade_v3.sql`，会建表并初始化现有图片的标签/分类
+
+## 下载次数统计口径
+
+详情页的「下载次数」按**下载按钮点击次数**统计：点击后前端请求 `POST /api/picture/download/{id}` 自增，然后由浏览器直接下载 COS 原图。因此重复点击、统计请求成功但用户取消保存等情况都会被计入，它不代表「实际完成的下载次数」。如果后续需要精确统计，可改为后端下载代理后再自增。
 
 ## 生产部署（Docker / 反向代理 / 监控）
 
@@ -144,7 +171,8 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 
 - 后端以 `prod` profile 启动，默认关闭 Swagger 与 MyBatis SQL 日志（见 `application-prod.yml.example`）
 - 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）
-- 已有数据库升级时执行 `picture-backend/sql/upgrade_v2.sql`（新增 `picture_review_log` 表和 `downloadCount` 字段）
+- **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/metrics` 不再可访问；确需 metrics 时使用独立管理端口（例如 `management.server.port: 8124`），该端口不要经过 nginx，只在内网/监控网络开放
+- 已有数据库升级时依次执行 `picture-backend/sql/upgrade_v2.sql`（审核记录与下载次数字段）和 `picture-backend/sql/upgrade_v3.sql`（标签/分类字典）
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
 ## 常用命令
@@ -169,7 +197,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 55 个单元测试，覆盖用户注册/登录/改密、图片上传权限与审核状态、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，全部基于 Mockito，不依赖数据库与外部服务：
+后端目前包含 **197 个单元测试**，覆盖用户注册/登录/改密、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
