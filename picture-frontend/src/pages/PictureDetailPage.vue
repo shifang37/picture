@@ -62,12 +62,20 @@
                 <EditOutlined />
               </template>
             </a-button>
-            <a-button v-if="canEdit" danger @click="doDelete">
-              删除
-              <template #icon>
-                <DeleteOutlined />
-              </template>
-            </a-button>
+            <a-popconfirm
+              v-if="canEdit"
+              title="确定删除这张图片吗？"
+              ok-text="删除"
+              cancel-text="取消"
+              @confirm="doDelete"
+            >
+              <a-button danger>
+                删除
+                <template #icon>
+                  <DeleteOutlined />
+                </template>
+              </a-button>
+            </a-popconfirm>
             <a-button type="primary" @click="doDownload">
               免费下载
               <template #icon>
@@ -168,8 +176,9 @@ const doDelete = async () => {
   const res = await deletePicture({ id })
   if (res.data.code === 0) {
     message.success('删除成功')
+    router.replace('/my_pictures')
   } else {
-    message.error('删除失败')
+    message.error('删除失败，' + (res.data.message || '未知错误'))
   }
 }
 

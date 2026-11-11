@@ -28,11 +28,11 @@ npm run type-check   # 仅类型检查
 
 ```
 src/
-├── api/             # OpenAPI 生成的请求客户端与类型定义
+├── api/             # OpenAPI 生成的请求客户端与类型定义（pictureExtra.ts 为手工维护）
 ├── assets/          # 静态资源
 ├── components/      # 公共组件（顶部导航、图片上传等）
 ├── layouts/         # 页面布局
-├── pages/           # 页面
+├── pages/           # 页面（含「我的图片」）
 │   ├── user/        # 登录、注册
 │   └── admin/       # 图片审核、图片管理、用户管理
 ├── router/          # 路由与全局守卫（access.ts）
@@ -44,7 +44,7 @@ src/
 
 ## 接口客户端
 
-`src/api/` 下的文件由后端 OpenAPI 文档生成，**不要手工修改**。后端接口变更后重新生成：
+`src/api/` 下由 OpenAPI 生成的客户端文件**不要手工修改**。后端接口变更后重新生成：
 
 ```bash
 npm run openapi
@@ -52,7 +52,15 @@ npm run openapi
 
 该命令会请求 `http://localhost:8123/api/v3/api-docs`，因此需要后端处于运行状态。
 
+`src/api/pictureExtra.ts` 是手工维护的补充封装，用于 OpenAPI 生成器无法正确表达的接口：
+
+- `uploadPicture`：以 `multipart/form-data` 上传图片，`file` 为文件，`id` 可选
+- `listMyPictureVoByPage`：分页获取当前登录用户自己的图片（含待审核 / 已拒绝）
+
+`npm run openapi` 不会覆盖该文件。
+
 ## 说明
 
 - 后端会把 `Long` 类型序列化为字符串（避免雪花 ID 精度丢失），因此前端所有 ID 均为 `string`，请勿再转成 `Number`。
-- 页面权限通过 `src/access.ts` 中的全局路由守卫控制，`/admin` 前缀的路由仅管理员可进入。
+- 页面权限通过 `src/access.ts` 中的全局路由守卫控制：`/admin` 前缀仅管理员可进入，`/add_picture` 与 `/my_pictures` 需要登录。
+- 登录页支持 `redirect` 查询参数，未登录被拦截后会跳回原页面。

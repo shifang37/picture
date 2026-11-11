@@ -3,6 +3,11 @@ spring:
     active: local
   application:
     name: picture-backend
+  servlet:
+    multipart:
+      # 与 FileManager / 前端保持一致：单张图片最大 2MB
+      max-file-size: 2MB
+      max-request-size: 3MB
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/picture

@@ -21,8 +21,14 @@ router.beforeEach(async (to, from) => {
   if (toUrl.startsWith('/admin')) {
     if (!loginUser || loginUser.userRole !== 'admin') {
       message.error('没有权限')
-      return `/user/login?redirect=${to.fullPath}`
+      return `/user/login?redirect=${encodeURIComponent(to.fullPath)}`
     }
+  }
+  // 普通用户上传、查看自己的图片需要登录
+  const requiresLogin = to.path === '/add_picture' || to.path === '/my_pictures'
+  if (requiresLogin && !loginUser?.id) {
+    message.warning('请先登录')
+    return `/user/login?redirect=${encodeURIComponent(to.fullPath)}`
   }
   return true
 })

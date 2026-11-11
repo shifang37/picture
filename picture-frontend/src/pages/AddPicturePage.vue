@@ -1,13 +1,29 @@
 <template>
   <div id="addPicturePage">
     <h2 style="margin-bottom: 16px">
-      {{ route.query?.id ? '修改图片' : '创建图片' }}
+      {{ isEdit ? '修改图片' : '创建图片' }}
     </h2>
 
     <PictureUpload :picture="picture" :onSuccess="onSuccess" />
-    <a-form v-if="picture" layout="vertical" :model="pictureForm" @finish="handleSubmit">
+
+    <a-alert
+      v-if="picture && picture.reviewStatus !== 1"
+      :type="picture.reviewStatus === 2 ? 'error' : 'warning'"
+      show-icon
+      :message="picture.reviewStatus === 2 ? '图片未通过审核' : '图片已上传，等待管理员审核'"
+      :description="reviewDescription"
+      style="margin: 16px 0"
+    />
+
+    <a-form
+      v-if="picture"
+      layout="vertical"
+      :model="pictureForm"
+      :rules="formRules"
+      @finish="handleSubmit"
+    >
       <a-form-item label="名称" name="name">
-        <a-input v-model:value="pictureForm.name" placeholder="请输入名称" />
+        <a-input v-model:value="pictureForm.name" placeholder="请输入名称" allowClear />
       </a-form-item>
       <a-form-item label="简介" name="introduction">
         <a-textarea
@@ -19,42 +35,71 @@
         />
       </a-form-item>
       <a-form-item label="分类" name="category">
-        <a-input v-model:value="pictureForm.category" placeholder="请输入分类" allowClear />
+        <a-auto-complete
+          v-model:value="pictureForm.category"
+          :options="categoryOptions"
+          placeholder="请选择或输入分类"
+          allowClear
+        />
       </a-form-item>
       <a-form-item label="标签" name="tags">
         <a-select
           v-model:value="pictureForm.tags"
           :options="tagOptions"
           mode="tags"
-          placeholder="请输入标签"
+          placeholder="请输入或选择标签"
           allowClear
         />
       </a-form-item>
 
       <a-form-item>
-        <a-button type="primary" html-type="submit" style="width: 100%">创建</a-button>
+        <a-button type="primary" html-type="submit" style="width: 100%">
+          {{ isEdit ? '保存修改' : '创建' }}
+        </a-button>
       </a-form-item>
     </a-form>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message } from 'ant-design-vue'
 import PictureUpload from '@/components/PictureUpload.vue'
 import { editPicture, listPictureTagCategory, getPictureVoById } from '@/api/pictureController'
 
+const router = useRouter()
+const route = useRoute()
+
+// 是否是编辑已有图片
+const isEdit = computed(() => typeof route.query?.id === 'string')
+
 const picture = ref<API.PictureVO>()
-
-const onSuccess = (newPicture: API.PictureVO) => {
-  picture.value = newPicture
-  pictureForm.name = newPicture.name
-}
-
 const pictureForm = reactive<API.PictureEditRequest>({})
 
-const router = useRouter()
+// 表单校验规则：名称会作为数据库中的非空字段，必须填写
+const formRules = {
+  name: [{ required: true, message: '请输入图片名称', trigger: 'blur' }],
+}
+
+// 未通过审核时给用户的说明
+const reviewDescription = computed(() => {
+  if (picture.value?.reviewStatus === 2) {
+    return picture.value.reviewMessage
+      ? `拒绝原因：${picture.value.reviewMessage}。重新上传图片后会再次进入审核。`
+      : '该图片未通过审核，重新上传图片后会再次进入审核。'
+  }
+  return '审核通过后才会出现在首页列表中，审核期间可以在「我的图片」中查看。'
+})
+
+const onSuccess = (newPicture: API.PictureVO) => {
+  const isFirstUpload = !picture.value?.id
+  picture.value = newPicture
+  // 首次上传时用文件名作为默认名称；重新上传时不要覆盖用户已经填写的内容
+  if (isFirstUpload || !pictureForm.name) {
+    pictureForm.name = newPicture.name
+  }
+}
 
 /**
  * 提交表单
@@ -63,20 +108,21 @@ const router = useRouter()
 const handleSubmit = async (values: any) => {
   const pictureId = picture.value?.id
   if (!pictureId) {
+    message.error('请先上传图片')
     return
   }
   const res = await editPicture({
     id: pictureId,
     ...values,
   })
-  if (res.data.code === 0 && res.data.data) {
-    message.success('创建成功')
+  if (res.data.code === 0) {
+    message.success(isEdit.value ? '保存成功' : '创建成功')
     // 跳转到图片详情页
     router.push({
       path: `/picture/${pictureId}`,
     })
   } else {
-    message.error('创建失败，' + res.data.message)
+    message.error('保存失败，' + (res.data.message || '未知错误'))
   }
 }
 
@@ -105,12 +151,6 @@ const getTagCategoryOptions = async () => {
   }
 }
 
-onMounted(() => {
-  getTagCategoryOptions()
-})
-
-const route = useRoute()
-
 // 获取老数据
 const getOldPicture = async () => {
   // 获取数据
@@ -127,11 +167,14 @@ const getOldPicture = async () => {
       pictureForm.introduction = data.introduction
       pictureForm.category = data.category
       pictureForm.tags = data.tags
+    } else {
+      message.error('获取图片信息失败：' + (res.data.message || '图片不存在'))
     }
   }
 }
 
 onMounted(() => {
+  getTagCategoryOptions()
   getOldPicture()
 })
 </script>

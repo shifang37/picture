@@ -1,6 +1,6 @@
 # 云图库 picture
 
-一个前后端分离的图片素材管理与分享平台。支持图片上传、分类标签检索、内容审核，以及管理端的用户与图片管理。
+一个前后端分离的图片素材管理与分享平台。普通用户登录后可以上传图片、管理自己的图片并查看审核状态；支持分类标签检索、内容审核，以及管理端的用户与图片管理。
 
 ## 技术栈
 
@@ -29,8 +29,8 @@ picture/
 │       └── exception/               # 统一异常与错误码
 ├── picture-frontend/                # Vue 前端
 │   └── src/
-│       ├── api/                     # OpenAPI 生成的前端请求客户端
-│       ├── pages/                   # 页面（含 admin 下的管理页）
+│       ├── api/                     # OpenAPI 生成的前端请求客户端 + pictureExtra.ts 手工封装
+│       ├── pages/                   # 页面（含「我的图片」与 admin 下的管理页）
 │       ├── components/              # 公共组件
 │       ├── router/  stores/  utils/
 │       └── request.ts               # axios 封装
@@ -105,14 +105,24 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - Swagger UI：`http://localhost:8123/api/swagger-ui/index.html`
 - OpenAPI JSON：`http://localhost:8123/api/v3/api-docs`
 
+## 普通用户上传图片
+
+1. 登录后通过顶部「创建图片」进入上传页，也可以直接访问 `/add_picture`
+2. 支持 jpg / jpeg / png / webp，单张不超过 2MB；后端会同时校验后缀、MIME 类型和文件头
+3. 上传成功后填写名称、简介、分类、标签，提交后跳转到图片详情
+4. 「我的图片」（`/my_pictures`）可以查看自己上传的全部图片，按待审核 / 已通过 / 已拒绝筛选，并支持编辑、删除
+
+上传接口 `POST /api/picture/upload` 使用 `multipart/form-data`：`file` 为图片文件，`id` 可选（重新上传已有图片时传）。该接口只要求登录，普通用户也可以调用。
+
 ## 图片审核流程
 
 本项目实现了完整的图片审核闭环：
 
-1. 上传的图片默认进入**待审核**状态（`reviewStatus = 0`）
+1. 普通用户上传的图片进入**待审核**状态（`reviewStatus = 0`）；管理员上传的图片自动通过（`reviewStatus = 1`）
 2. 待审核与被拒绝的图片**不会出现在首页列表**，只有管理员和作者本人能通过直链访问详情
-3. 管理员在「图片审核」页面（`/admin/pictureReview`）通过或拒绝，可填写审核意见
-4. 审核通过（`reviewStatus = 1`）后，图片才对所有访客可见
+3. 普通用户重新上传已通过的图片会**重新进入待审核**，并清空上一次的审核信息
+4. 管理员在「图片审核」页面（`/admin/pictureReview`）通过或拒绝，可填写审核意见
+5. 审核通过（`reviewStatus = 1`）后，图片才对所有访客可见；作者可在「我的图片」中看到拒绝原因
 
 ## 常用命令
 
@@ -132,10 +142,11 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 ```
 
 > `npm run openapi` 需要后端已启动，它从 `http://localhost:8123/api/v3/api-docs` 拉取接口定义。
+> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传与「我的图片」封装不会被覆盖。
 
 ## 测试
 
-后端目前包含 37 个单元测试，覆盖用户注册/登录/改密、图片审核可见性与排序字段白名单逻辑，全部基于 Mockito，不依赖数据库与外部服务：
+后端目前包含 55 个单元测试，覆盖用户注册/登录/改密、图片上传权限与审核状态、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，全部基于 Mockito，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

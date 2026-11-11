@@ -22,6 +22,7 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -43,14 +44,16 @@ public class PictureController {
 
 
     /**
-     * 上传图片（可重新上传）
+     * 上传图片（登录用户可用，可重新上传）
+     * <p>
+     * 普通用户上传后进入待审核状态，管理员上传后自动通过审核。
      */
-    @PostMapping("/upload")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public BaseResponse<PictureVO> uploadPicture(
             @RequestPart("file") MultipartFile multipartFile,
             PictureUploadRequest pictureUploadRequest,
             HttpServletRequest request) {
+        // 上传只要求登录，普通用户也可以调用
         User loginUser = userService.getLoginUser(request);
         PictureVO pictureVO = pictureService.uploadPicture(multipartFile, pictureUploadRequest, loginUser);
         return ResultUtils.success(pictureVO);
@@ -162,6 +165,27 @@ public class PictureController {
         pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
         // 查询数据库
         Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
+                pictureService.getQueryWrapper(pictureQueryRequest));
+        // 获取封装类
+        return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
+    }
+
+    /**
+     * 分页获取当前登录用户的图片（含待审核 / 已拒绝）
+     * <p>
+     * 用于普通用户在「我的图片」里管理自己上传的内容，不要求管理员权限。
+     */
+    @PostMapping("/my/page/vo")
+    public BaseResponse<Page<PictureVO>> listMyPictureVOByPage(@RequestBody PictureQueryRequest pictureQueryRequest,
+                                                               HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
+        long size = pictureQueryRequest.getPageSize();
+        ThrowUtils.throwIf(size <= 0 || size > 20, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        // 强制只查本人图片，忽略客户端传入的 userId，避免越权查看他人待审核内容
+        pictureQueryRequest.setUserId(loginUser.getId());
+        // 查询数据库
+        Page<Picture> picturePage = pictureService.page(new Page<>(pictureQueryRequest.getCurrent(), size),
                 pictureService.getQueryWrapper(pictureQueryRequest));
         // 获取封装类
         return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));

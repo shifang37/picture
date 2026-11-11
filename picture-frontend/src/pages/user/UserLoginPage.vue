@@ -31,12 +31,13 @@ import { userLogin } from '@/api/userController'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { message } from 'ant-design-vue'
 import { reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 const formState = reactive<API.UserLoginRequest>({
   userAccount: '',
   userPassword: '',
 })
 const router = useRouter()
+const route = useRoute()
 const loginUserStore = useLoginUserStore()
 const handleSubmit = async (values: any) => {
   const res = await userLogin(values)
@@ -46,10 +47,13 @@ const handleSubmit = async (values: any) => {
     // 尝试获取完整的用户信息
     await loginUserStore.fetchLoginUser()
     message.success('登录成功')
-    router.push({
-      path: '/',
-      replace: true,
-    })
+    // 登录成功后回到被拦截的页面（只接受站内路径）
+    const redirect = route.query.redirect
+    const target =
+      typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+        ? redirect
+        : '/'
+    router.replace(target)
   } else {
     message.error('登录失败' + res.data.message)
   }

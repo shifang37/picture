@@ -1,18 +1,25 @@
 package com.tzy.picturebackend.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.mapper.PictureMapper;
+import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -25,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -41,13 +49,17 @@ class PictureServiceImplTest {
 
     private PictureMapper pictureMapper;
 
+    private FileManager fileManager;
+
     @BeforeEach
     void setUp() {
         pictureService = new PictureServiceImpl();
         userService = mock(UserService.class);
         pictureMapper = mock(PictureMapper.class);
+        fileManager = mock(FileManager.class);
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
+        ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
     }
 
     // ==================== 可见性 ====================
@@ -112,6 +124,115 @@ class PictureServiceImplTest {
     void checkPictureVisible_rejectsNullPicture() {
         assertThrows(BusinessException.class,
                 () -> pictureService.checkPictureVisible(null, new MockHttpServletRequest()));
+    }
+
+    // ==================== 上传 ====================
+
+    @Test
+    @DisplayName("上传：普通用户上传后进入待审核，不写审核人")
+    void uploadPicture_normalUserEntersReviewing() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        when(pictureMapper.insert(any(Picture.class))).thenReturn(1);
+
+        PictureVO pictureVO = pictureService.uploadPicture(jpegFile(), null, normalUser);
+
+        ArgumentCaptor<Picture> captor = ArgumentCaptor.forClass(Picture.class);
+        verify(pictureMapper).insert(captor.capture());
+        Picture saved = captor.getValue();
+        assertEquals(Integer.valueOf(PictureReviewStatusEnum.REVIEWING.getValue()), saved.getReviewStatus());
+        assertNull(saved.getReviewerId());
+        assertNull(saved.getReviewTime());
+        assertEquals(Long.valueOf(100L), saved.getUserId());
+        assertEquals(Integer.valueOf(PictureReviewStatusEnum.REVIEWING.getValue()), pictureVO.getReviewStatus());
+    }
+
+    @Test
+    @DisplayName("上传：管理员上传自动通过并记录审核人")
+    void uploadPicture_adminAutoPasses() {
+        User admin = admin();
+        when(userService.isAdmin(admin)).thenReturn(true);
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        when(pictureMapper.insert(any(Picture.class))).thenReturn(1);
+
+        pictureService.uploadPicture(jpegFile(), null, admin);
+
+        ArgumentCaptor<Picture> captor = ArgumentCaptor.forClass(Picture.class);
+        verify(pictureMapper).insert(captor.capture());
+        Picture saved = captor.getValue();
+        assertEquals(Integer.valueOf(PictureReviewStatusEnum.PASS.getValue()), saved.getReviewStatus());
+        assertEquals(admin.getId(), saved.getReviewerId());
+        assertNotNull(saved.getReviewTime());
+    }
+
+    @Test
+    @DisplayName("上传：普通用户重传已通过图片会重新进入待审核并清空审核信息")
+    void uploadPicture_normalUserReuploadResetsReview() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        when(pictureMapper.selectById(1L))
+                .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()));
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
+
+        pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser);
+
+        ArgumentCaptor<Picture> entityCaptor = ArgumentCaptor.forClass(Picture.class);
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper).update(entityCaptor.capture(), wrapperCaptor.capture());
+        Picture updated = entityCaptor.getValue();
+        assertEquals(Long.valueOf(1L), updated.getId());
+        assertEquals(Long.valueOf(100L), updated.getUserId(), "重传不能改变作者");
+        assertEquals(Integer.valueOf(PictureReviewStatusEnum.REVIEWING.getValue()), updated.getReviewStatus());
+        assertNull(updated.getReviewerId());
+        assertNull(updated.getReviewTime());
+        UpdateWrapper<Picture> wrapper = (UpdateWrapper<Picture>) wrapperCaptor.getValue();
+        String sqlSet = wrapper.getSqlSet();
+        assertTrue(sqlSet.contains("reviewMessage"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewerId"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("reviewTime"), "实际 SET: " + sqlSet);
+    }
+
+    @Test
+    @DisplayName("上传：管理员重传他人图片时保留原作者并自动通过")
+    void uploadPicture_adminReuploadPreservesOwner() {
+        User admin = admin();
+        when(userService.isAdmin(admin)).thenReturn(true);
+        when(pictureMapper.selectById(1L))
+                .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.REJECT.getValue()));
+        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
+
+        pictureService.uploadPicture(jpegFile(), uploadRequest(1L), admin);
+
+        ArgumentCaptor<Picture> captor = ArgumentCaptor.forClass(Picture.class);
+        verify(pictureMapper).update(captor.capture(), any(Wrapper.class));
+        Picture updated = captor.getValue();
+        assertEquals(Long.valueOf(100L), updated.getUserId(), "不能把作者改成管理员");
+        assertEquals(Integer.valueOf(PictureReviewStatusEnum.PASS.getValue()), updated.getReviewStatus());
+        assertEquals(admin.getId(), updated.getReviewerId());
+    }
+
+    @Test
+    @DisplayName("上传：普通用户不能重传他人的图片")
+    void uploadPicture_rejectsOtherUsersPicture() {
+        User otherUser = user(200L, "user");
+        when(userService.isAdmin(otherUser)).thenReturn(false);
+        when(pictureMapper.selectById(1L))
+                .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()));
+
+        assertThrows(BusinessException.class,
+                () -> pictureService.uploadPicture(jpegFile(), uploadRequest(1L), otherUser));
+        verifyNoInteractions(fileManager);
+    }
+
+    @Test
+    @DisplayName("上传：未登录用户不能上传")
+    void uploadPicture_rejectsAnonymous() {
+        assertThrows(BusinessException.class,
+                () -> pictureService.uploadPicture(jpegFile(), null, null));
+        verifyNoInteractions(fileManager);
     }
 
     // ==================== 审核 ====================
@@ -237,6 +358,30 @@ class PictureServiceImplTest {
     }
 
     // ==================== 辅助方法 ====================
+
+    private PictureUploadRequest uploadRequest(Long id) {
+        PictureUploadRequest request = new PictureUploadRequest();
+        request.setId(id);
+        return request;
+    }
+
+    private UploadPictureResult uploadResult() {
+        UploadPictureResult result = new UploadPictureResult();
+        result.setUrl("https://example.com/public/100/2026-11-11_test.jpg");
+        result.setPicName("test");
+        result.setPicSize(1024L);
+        result.setPicWidth(100);
+        result.setPicHeight(100);
+        result.setPicScale(1.0);
+        result.setPicFormat("jpg");
+        return result;
+    }
+
+    private MockMultipartFile jpegFile() {
+        // 最小 JPEG 文件头，仅用于 service 层测试（不经过 FileManager 校验）
+        return new MockMultipartFile("file", "test.jpg", "image/jpeg",
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 0, 0, 0});
+    }
 
     private PictureQueryRequest queryRequest(String sortField, String sortOrder) {
         PictureQueryRequest request = new PictureQueryRequest();

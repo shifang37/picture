@@ -4,6 +4,7 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.tzy.picturebackend.exception.BusinessException;
@@ -49,6 +50,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             "id", "name", "category", "picSize", "picWidth", "picHeight", "picScale", "picFormat",
             "userId", "createTime", "editTime", "updateTime", "reviewStatus", "reviewTime");
 
+    /**
+     * 管理员上传自动通过时写入的审核意见
+     */
+    private static final String ADMIN_AUTO_REVIEW_MESSAGE = "管理员上传，自动通过";
+
     @Resource
     private FileManager fileManager;
 
@@ -58,6 +64,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Override
     public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        // 普通用户可以上传，管理员上传后自动通过审核
+        boolean isAdmin = userService.isAdmin(loginUser);
         // 用于判断是新增还是更新图片
         Long pictureId = null;
         if (pictureUploadRequest != null) {
@@ -69,7 +77,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             oldPicture = this.getById(pictureId);
             ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
             // 仅本人或管理员可编辑
-            if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
+            if (!oldPicture.getUserId().equals(loginUser.getId()) && !isAdmin) {
                 throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
             }
         }
@@ -87,6 +95,14 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         picture.setPicScale(uploadPictureResult.getPicScale());
         picture.setPicFormat(uploadPictureResult.getPicFormat());
         picture.setUserId(loginUser.getId());
+        // 管理员上传/重传直接通过；普通用户上传/重传一律进入待审核
+        Date reviewTime = isAdmin ? new Date() : null;
+        picture.setReviewStatus(isAdmin
+                ? PictureReviewStatusEnum.PASS.getValue()
+                : PictureReviewStatusEnum.REVIEWING.getValue());
+        picture.setReviewMessage(isAdmin ? ADMIN_AUTO_REVIEW_MESSAGE : null);
+        picture.setReviewerId(isAdmin ? loginUser.getId() : null);
+        picture.setReviewTime(reviewTime);
         // 如果 pictureId 不为空，表示更新，否则是新增
         if (pictureId != null) {
             // 如果是更新，需要补充 id 和编辑时间
@@ -94,9 +110,20 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             // 保留原归属：管理员代用户重传时，图片作者不能被改成管理员
             picture.setUserId(oldPicture.getUserId());
             picture.setEditTime(new Date());
+            // 普通用户重传后必须重新审核，因此显式清空上一次的审核信息
+            // （updateById 默认忽略 null 字段，这里用 UpdateWrapper 才能把字段置空）
+            // reviewStatus 由上面的实体字段更新；这里只负责把其余可能为 null 的审核字段显式置空
+            UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
+                    .eq("id", pictureId)
+                    .set("reviewMessage", picture.getReviewMessage())
+                    .set("reviewerId", picture.getReviewerId())
+                    .set("reviewTime", picture.getReviewTime());
+            boolean result = this.update(picture, updateWrapper);
+            ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
+        } else {
+            boolean result = this.save(picture);
+            ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
         }
-        boolean result = this.saveOrUpdate(picture);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
         return PictureVO.objToVo(picture);
     }
 

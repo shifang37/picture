@@ -4,6 +4,7 @@ import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.RandomUtil;
+import cn.hutool.core.util.StrUtil;
 import com.qcloud.cos.model.PutObjectResult;
 import com.qcloud.cos.model.ciModel.persistence.ImageInfo;
 import com.tzy.picturebackend.config.CosClientConfig;
@@ -18,13 +19,31 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
+import java.io.InputStream;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 @Slf4j
 @Service
 public class FileManager {
+
+    /**
+     * 单张图片大小上限：2MB
+     */
+    private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L;
+
+    /**
+     * 允许上传的图片后缀
+     */
+    private static final List<String> ALLOW_FORMAT_LIST = List.of("jpeg", "jpg", "png", "webp");
+
+    /**
+     * 允许上传的图片 MIME 类型
+     */
+    private static final Set<String> ALLOW_CONTENT_TYPE_LIST =
+            Set.of("image/jpeg", "image/jpg", "image/png", "image/webp");
 
     @Resource
     private CosClientConfig cosClientConfig;
@@ -79,21 +98,62 @@ public class FileManager {
     }
 
     /**
-     * 校验文件
+     * 校验文件：空文件、大小、后缀、MIME 类型和文件头都要符合图片要求
      *
      * @param multipartFile multipart 文件
      */
     public void validPicture(MultipartFile multipartFile) {
-        ThrowUtils.throwIf(multipartFile == null, ErrorCode.PARAMS_ERROR, "文件不能为空");
+        ThrowUtils.throwIf(multipartFile == null || multipartFile.isEmpty(), ErrorCode.PARAMS_ERROR, "文件不能为空");
         // 1. 校验文件大小
-        long fileSize = multipartFile.getSize();
-        final long ONE_M = 1024 * 1024L;
-        ThrowUtils.throwIf(fileSize > 2 * ONE_M, ErrorCode.PARAMS_ERROR, "文件大小不能超过 2M");
-        // 2. 校验文件后缀
-        String fileSuffix = FileUtil.getSuffix(multipartFile.getOriginalFilename());
-        // 允许上传的文件后缀
-        final List<String> ALLOW_FORMAT_LIST = Arrays.asList("jpeg", "jpg", "png", "webp");
-        ThrowUtils.throwIf(!ALLOW_FORMAT_LIST.contains(fileSuffix), ErrorCode.PARAMS_ERROR, "文件类型错误");
+        ThrowUtils.throwIf(multipartFile.getSize() > MAX_FILE_SIZE, ErrorCode.PARAMS_ERROR, "文件大小不能超过 2M");
+        // 2. 校验文件后缀（忽略大小写）
+        String originalFilename = multipartFile.getOriginalFilename();
+        ThrowUtils.throwIf(StrUtil.isBlank(originalFilename), ErrorCode.PARAMS_ERROR, "文件名不能为空");
+        String fileSuffix = FileUtil.getSuffix(originalFilename);
+        ThrowUtils.throwIf(StrUtil.isBlank(fileSuffix)
+                        || !ALLOW_FORMAT_LIST.contains(fileSuffix.toLowerCase(Locale.ROOT)),
+                ErrorCode.PARAMS_ERROR, "文件类型错误");
+        // 3. 如果客户端带了 MIME 类型，也要在允许范围内（忽略 charset 等参数）
+        String contentType = multipartFile.getContentType();
+        if (StrUtil.isNotBlank(contentType)) {
+            String mediaType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+            ThrowUtils.throwIf(!ALLOW_CONTENT_TYPE_LIST.contains(mediaType),
+                    ErrorCode.PARAMS_ERROR, "文件类型错误");
+        }
+        // 4. 校验文件头，防止只改后缀绕过校验
+        try (InputStream inputStream = multipartFile.getInputStream()) {
+            ThrowUtils.throwIf(!isSupportedImage(inputStream, fileSuffix),
+                    ErrorCode.PARAMS_ERROR, "文件内容不是受支持的图片");
+        } catch (IOException e) {
+            log.error("读取上传文件失败", e);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "读取上传文件失败");
+        }
+    }
+
+    /**
+     * 根据文件头判断是否为受支持的图片
+     *
+     * @param inputStream 文件流
+     * @param fileSuffix  文件后缀
+     */
+    private boolean isSupportedImage(InputStream inputStream, String fileSuffix) throws IOException {
+        // JPEG / PNG 需要 8 字节，WebP 需要 12 字节
+        byte[] header = inputStream.readNBytes(12);
+        return switch (fileSuffix.toLowerCase(Locale.ROOT)) {
+            case "jpg", "jpeg" -> header.length >= 3
+                    && (header[0] & 0xFF) == 0xFF
+                    && (header[1] & 0xFF) == 0xD8
+                    && (header[2] & 0xFF) == 0xFF;
+            case "png" -> header.length >= 8
+                    && (header[0] & 0xFF) == 0x89
+                    && header[1] == 'P' && header[2] == 'N' && header[3] == 'G'
+                    && (header[4] & 0xFF) == 0x0D && (header[5] & 0xFF) == 0x0A
+                    && (header[6] & 0xFF) == 0x1A && (header[7] & 0xFF) == 0x0A;
+            case "webp" -> header.length >= 12
+                    && header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F'
+                    && header[8] == 'W' && header[9] == 'E' && header[10] == 'B' && header[11] == 'P';
+            default -> false;
+        };
     }
 
     /**

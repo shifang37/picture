@@ -16,7 +16,7 @@
         @click="doMenuClick"
       />
     </a-col>
-    <a-col flex="120px">
+    <a-col flex="160px">
       <div class="user-login-status">
         <div v-if="loginUserStore.loginUser.id">
           <a-dropdown>
@@ -36,6 +36,7 @@
             </template>
           </a-dropdown>
         </div>
+        <a-button v-else type="primary" size="small" @click="doLogin">登录</a-button>
       </div>
     </a-col>
   </a-row>
@@ -65,6 +66,11 @@ const originItems = [
     title: '创建图片',
   },
   {
+    key: '/my_pictures',
+    label: '我的图片',
+    title: '我的图片',
+  },
+  {
     key: '/admin/pictureReview',
     label: '图片审核',
     title: '图片审核',
@@ -88,13 +94,19 @@ const originItems = [
 
 // 过滤菜单项
 const filterMenus = (menus = [] as MenuProps['items']) => {
+  const loginUser = loginUserStore.loginUser
   return menus?.filter((menu) => {
     const menuKey = menu?.key
-    if (typeof menuKey === 'string' && menuKey.startsWith('/admin')) {
-      const loginUser = loginUserStore.loginUser
-      if (!loginUser || loginUser.userRole !== 'admin') {
-        return false
-      }
+    if (typeof menuKey !== 'string') {
+      return true
+    }
+    // 管理菜单仅管理员可见
+    if (menuKey.startsWith('/admin') && loginUser?.userRole !== 'admin') {
+      return false
+    }
+    // 上传和「我的图片」需要登录
+    if ((menuKey === '/add_picture' || menuKey === '/my_pictures') && !loginUser?.id) {
+      return false
     }
     return true
   })
@@ -104,6 +116,9 @@ const filterMenus = (menus = [] as MenuProps['items']) => {
 const items = computed<MenuProps['items']>(() => filterMenus(originItems))
 
 const router = useRouter()
+const doLogin = () => {
+  router.push('/user/login')
+}
 const doMenuClick = ({ key }: { key: string }) => {
   router.push({
     path: key,
