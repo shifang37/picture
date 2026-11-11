@@ -70,6 +70,106 @@ const mockHomeApi = async (
   })
 }
 
+const mockDashboardApi = async (page: Page) => {
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: { id: '1', userAccount: 'admin', userName: '管理员', userRole: 'admin' },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/analyze/overview')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: {
+            userCount: '1234',
+            pictureCount: '567',
+            pendingReviewCount: '8',
+            totalPicSize: '1048576',
+            totalDownloadCount: '9001',
+          },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/analyze/upload_trend')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: [
+            { date: '2026-11-09', count: '2' },
+            { date: '2026-11-10', count: '5' },
+            { date: '2026-11-11', count: '3' },
+          ],
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/analyze/category')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: [
+            { category: '风景', count: '10', totalSize: '2048' },
+            { category: '人物', count: '4', totalSize: '1024' },
+          ],
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/analyze/tags')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: [
+            { tag: '测试', count: '7' },
+            { tag: '蓝色', count: '3' },
+          ],
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/analyze/review')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: { approvedCount: '5', rejectedCount: '2', averageReviewSeconds: '90' },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/analyze/top_download')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: [
+            {
+              id: '1',
+              name: '最热图片',
+              url: 'https://example.invalid/1.jpg',
+              downloadCount: '99',
+            },
+          ],
+          message: 'ok',
+        },
+      })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+}
+
 test('未知路径显示 404 页面', async ({ page }) => {
   await page.route(API_PATTERN, (route) =>
     route.fulfill({ json: { code: 40100, data: null, message: '未登录' } }),
@@ -195,6 +295,8 @@ test('首页不会请求管理端页面代码', async ({ page }) => {
   await expect(page.getByText('鱼皮云图库').first()).toBeVisible()
 
   expect(scriptUrls.some((url) => url.includes('/pages/admin/'))).toBe(false)
+  expect(scriptUrls.some((url) => url.toLowerCase().includes('echarts'))).toBe(false)
+  expect(scriptUrls.some((url) => url.includes('DashboardPage'))).toBe(false)
 })
 
 test('管理员进入管理页时才加载对应页面代码', async ({ page }) => {
@@ -225,6 +327,25 @@ test('管理员进入管理页时才加载对应页面代码', async ({ page }) 
   expect(scriptUrls.some((url) => url.includes('/pages/admin/UserManagePage.vue'))).toBe(true)
 })
 
+test('管理员进入数据看板才加载 ECharts 并展示统计结果', async ({ page }) => {
+  const scriptUrls: string[] = []
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script') {
+      scriptUrls.push(request.url())
+    }
+  })
+  await mockDashboardApi(page)
+
+  await page.goto('/admin/dashboard')
+  await expect(page.getByRole('heading', { name: '数据看板' })).toBeVisible()
+  await expect(page.getByText('1,234')).toBeVisible()
+  await expect(page.getByText('最热图片')).toBeVisible()
+  await expect(page.locator('canvas')).toHaveCount(4)
+
+  expect(scriptUrls.some((url) => url.includes('/pages/admin/DashboardPage.vue'))).toBe(true)
+  expect(scriptUrls.some((url) => url.toLowerCase().includes('echarts'))).toBe(true)
+})
+
 test('未登录访问受限页面会跳转登录页并带 redirect', async ({ page }) => {
   await page.route(API_PATTERN, (route) =>
     route.fulfill({ json: { code: 40100, data: null, message: '未登录' } }),
@@ -239,4 +360,8 @@ test('未登录访问受限页面会跳转登录页并带 redirect', async ({ pa
   await page.goto('/admin/userManage')
   await expect(page).toHaveURL(/\/user\/login/)
   await expect.poll(redirectOf).toBe('/admin/userManage')
+
+  await page.goto('/admin/dashboard')
+  await expect(page).toHaveURL(/\/user\/login/)
+  await expect.poll(redirectOf).toBe('/admin/dashboard')
 })

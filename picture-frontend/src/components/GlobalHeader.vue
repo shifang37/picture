@@ -80,6 +80,11 @@ const originItems = [
     title: '我的图片',
   },
   {
+    key: '/admin/dashboard',
+    label: '数据看板',
+    title: '数据看板',
+  },
+  {
     key: '/admin/pictureReview',
     label: '图片审核',
     title: '图片审核',

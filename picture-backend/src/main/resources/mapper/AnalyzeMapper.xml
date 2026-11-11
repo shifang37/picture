@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tzy.picturebackend.mapper.AnalyzeMapper">
+
+    <!-- 核心指标：一次性取用户数、图片数、待审核数、总体积与总下载次数 -->
+    <select id="selectOverview" resultType="com.tzy.picturebackend.model.vo.AnalyzeOverviewVO">
+        SELECT
+            (SELECT COUNT(*) FROM `user` WHERE isDelete = 0) AS userCount,
+            COUNT(*) AS pictureCount,
+            COALESCE(SUM(CASE WHEN reviewStatus = 0 THEN 1 ELSE 0 END), 0) AS pendingReviewCount,
+            CAST(COALESCE(SUM(picSize), 0) AS SIGNED) AS totalPicSize,
+            CAST(COALESCE(SUM(downloadCount), 0) AS SIGNED) AS totalDownloadCount
+        FROM picture
+        WHERE isDelete = 0
+    </select>
+
+    <!-- 按天上传趋势：先生成连续日期，再左连接图片，避免没有上传的日期在图表上断档 -->
+    <select id="selectUploadTrend" resultType="com.tzy.picturebackend.model.vo.AnalyzeUploadTrendVO">
+        WITH RECURSIVE date_series AS (
+            SELECT DATE_SUB(CURDATE(), INTERVAL #{offsetDays} DAY) AS d
+            UNION ALL
+            SELECT DATE_ADD(d, INTERVAL 1 DAY)
+            FROM date_series
+            WHERE d &lt; CURDATE()
+        )
+        SELECT DATE_FORMAT(ds.d, '%Y-%m-%d') AS `date`,
+               COUNT(p.id) AS `count`
+        FROM date_series ds
+        LEFT JOIN picture p
+               ON p.createTime &gt;= ds.d
+              AND p.createTime &lt; DATE_ADD(ds.d, INTERVAL 1 DAY)
+              AND p.isDelete = 0
+        GROUP BY ds.d
+        ORDER BY ds.d
+    </select>
+
+    <!-- 分类统计：空分类归入「未分类」 -->
+    <select id="selectCategoryStats" resultType="com.tzy.picturebackend.model.vo.AnalyzeCategoryVO">
+        SELECT COALESCE(NULLIF(TRIM(category), ''), '未分类') AS category,
+               COUNT(*) AS `count`,
+               CAST(COALESCE(SUM(picSize), 0) AS SIGNED) AS totalSize
+        FROM picture
+        WHERE isDelete = 0
+        GROUP BY category
+        ORDER BY COUNT(*) DESC, category ASC
+    </select>
+
+    <!-- 标签排行：用 JSON_TABLE 展开 picture.tags（JSON 数组） -->
+    <select id="selectTopTags" resultType="com.tzy.picturebackend.model.vo.AnalyzeTagVO">
+        SELECT jt.tag AS tag,
+               COUNT(*) AS `count`
+        FROM picture p,
+             JSON_TABLE(p.tags, '$[*]' COLUMNS (tag VARCHAR(64) PATH '$')) jt
+        WHERE p.isDelete = 0
+          AND p.tags IS NOT NULL
+          AND JSON_VALID(p.tags)
+        GROUP BY jt.tag
+        ORDER BY COUNT(*) DESC, jt.tag ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 审核统计：平均耗时只统计有 reviewTime 的图片 -->
+    <select id="selectReviewStats" resultType="com.tzy.picturebackend.model.vo.AnalyzeReviewVO">
+        SELECT CAST(COALESCE(SUM(CASE WHEN reviewStatus = 1 THEN 1 ELSE 0 END), 0) AS SIGNED) AS approvedCount,
+               CAST(COALESCE(SUM(CASE WHEN reviewStatus = 2 THEN 1 ELSE 0 END), 0) AS SIGNED) AS rejectedCount,
+               COALESCE(
+                   ROUND(AVG(CASE
+                       WHEN reviewTime IS NOT NULL
+                           THEN TIMESTAMPDIFF(SECOND, createTime, reviewTime)
+                   END), 0),
+                   0
+               ) AS averageReviewSeconds
+        FROM picture
+        WHERE isDelete = 0
+    </select>
+
+    <!-- 下载排行：同次数时优先新的图片 -->
+    <select id="selectTopDownload" resultType="com.tzy.picturebackend.model.vo.AnalyzeTopDownloadVO">
+        SELECT id,
+               name,
+               url,
+               downloadCount
+        FROM picture
+        WHERE isDelete = 0
+        ORDER BY downloadCount DESC, createTime DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

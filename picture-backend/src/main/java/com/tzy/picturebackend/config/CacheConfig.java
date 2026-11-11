@@ -28,7 +28,14 @@ public class CacheConfig {
      */
     public static final String TAG_CATEGORY_CACHE = "tagCategory";
 
+    /**
+     * 管理端数据看板缓存名
+     */
+    public static final String ANALYZE_CACHE = "analyze";
+
     private static final Duration TAG_CATEGORY_TTL = Duration.ofMinutes(30);
+
+    private static final Duration ANALYZE_TTL = Duration.ofMinutes(5);
 
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
@@ -40,9 +47,12 @@ public class CacheConfig {
                 // 存 JSON 而不是 JDK 序列化：值里不带类版本耦合，便于排查
                 .serializeValuesWith(RedisSerializationContext.SerializationPair
                         .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+        RedisCacheConfiguration analyzeConfig = defaults.entryTtl(ANALYZE_TTL);
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaults)
-                .withInitialCacheConfigurations(Map.of(TAG_CATEGORY_CACHE, defaults))
+                .withInitialCacheConfigurations(Map.of(
+                        TAG_CATEGORY_CACHE, defaults,
+                        ANALYZE_CACHE, analyzeConfig))
                 .build();
     }
 }

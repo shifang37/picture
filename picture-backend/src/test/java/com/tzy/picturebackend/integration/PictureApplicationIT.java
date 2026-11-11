@@ -4,11 +4,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.RedisRateLimitCounter;
+import com.tzy.picturebackend.mapper.AnalyzeMapper;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.AnalyzeCategoryVO;
+import com.tzy.picturebackend.model.vo.AnalyzeOverviewVO;
+import com.tzy.picturebackend.model.vo.AnalyzeReviewVO;
+import com.tzy.picturebackend.model.vo.AnalyzeTagVO;
+import com.tzy.picturebackend.model.vo.AnalyzeTopDownloadVO;
+import com.tzy.picturebackend.model.vo.AnalyzeUploadTrendVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.servlet.http.Cookie;
@@ -104,6 +111,9 @@ class PictureApplicationIT {
 
     @Autowired
     private RedisRateLimitCounter redisRateLimitCounter;
+
+    @Autowired
+    private AnalyzeMapper analyzeMapper;
 
     /**
      * 上传集成测试不访问 COS，只用 mock 返回结果，重点验证数据库更新行为
@@ -283,6 +293,100 @@ class PictureApplicationIT {
                 "应写入按用户 id 的限流 key：" + userKey);
         assertFalse(Boolean.TRUE.equals(redisTemplate.hasKey(ipKey)),
                 "不应退化为按 IP 的限流 key：" + ipKey);
+    }
+
+    // ==================== 管理端数据看板 ====================
+
+    @Test
+    @DisplayName("数据看板：六个统计查询在真实 MySQL 上返回正确聚合结果")
+    void analyzeAggregatesFromRealDatabase() {
+        User user = createUser("analyze");
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String category = "IT分类-" + suffix;
+        String tag = "IT标签-" + suffix;
+        Picture picture = savePicture(user.getId(), "analyze-" + suffix + ".jpg");
+        jdbcTemplate.update(
+                "update picture set category = ?, tags = ?, picSize = ?, downloadCount = ?, "
+                        + "reviewStatus = ?, reviewTime = DATE_ADD(createTime, INTERVAL 90 SECOND) "
+                        + "where id = ?",
+                category, "[\"" + tag + "\"]", 4096L, 11L,
+                PictureReviewStatusEnum.PASS.getValue(), picture.getId());
+
+        AnalyzeOverviewVO overview = analyzeMapper.selectOverview();
+        assertTrue(overview.getPictureCount() >= 1);
+        assertTrue(overview.getUserCount() >= 1);
+        assertTrue(overview.getTotalPicSize() >= 4096);
+        assertTrue(overview.getTotalDownloadCount() >= 11);
+        assertNotNull(overview.getPendingReviewCount());
+
+        List<AnalyzeCategoryVO> categories = analyzeMapper.selectCategoryStats();
+        AnalyzeCategoryVO categoryStat = categories.stream()
+                .filter(item -> category.equals(item.getCategory()))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(categoryStat, "分类统计应包含 " + category);
+        assertTrue(categoryStat.getCount() >= 1);
+        assertTrue(categoryStat.getTotalSize() >= 4096);
+
+        List<AnalyzeTagVO> tags = analyzeMapper.selectTopTags(50);
+        AnalyzeTagVO tagStat = tags.stream()
+                .filter(item -> tag.equals(item.getTag()))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(tagStat, "标签统计应包含 " + tag);
+        assertTrue(tagStat.getCount() >= 1);
+
+        List<AnalyzeUploadTrendVO> trend = analyzeMapper.selectUploadTrend(6);
+        assertEquals(7, trend.size(), "最近 7 天应返回 7 个日期点");
+        long trendTotal = trend.stream()
+                .mapToLong(item -> item.getCount() == null ? 0 : item.getCount())
+                .sum();
+        assertTrue(trendTotal >= 1, "最近 7 天应统计到刚插入的图片");
+
+        AnalyzeReviewVO review = analyzeMapper.selectReviewStats();
+        assertTrue(review.getApprovedCount() >= 1);
+        assertNotNull(review.getAverageReviewSeconds());
+        assertTrue(review.getAverageReviewSeconds() >= 0);
+
+        List<AnalyzeTopDownloadVO> topDownloads = analyzeMapper.selectTopDownload(50);
+        AnalyzeTopDownloadVO top = topDownloads.stream()
+                .filter(item -> picture.getId().equals(item.getId()))
+                .findFirst()
+                .orElse(null);
+        assertNotNull(top, "下载排行应包含刚插入的图片");
+        assertEquals(11L, top.getDownloadCount());
+    }
+
+    @Test
+    @DisplayName("数据看板：普通用户无权限，管理员六个接口可用，非法参数返回参数错误")
+    void analyzeEndpointsRequireAdmin() throws Exception {
+        String csrf = csrfToken();
+        User admin = createUser("analyze-admin");
+        jdbcTemplate.update("update user set userRole = 'admin' where id = ?", admin.getId());
+        Cookie adminSession = login(admin.getUserAccount(), PASSWORD, csrf);
+
+        List<String> endpoints = List.of(
+                "/analyze/overview",
+                "/analyze/upload_trend?days=7",
+                "/analyze/category",
+                "/analyze/tags?limit=5",
+                "/analyze/review",
+                "/analyze/top_download?limit=5");
+        for (String endpoint : endpoints) {
+            mockMvc.perform(get(endpoint).cookie(adminSession))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.code").value(0));
+        }
+
+        mockMvc.perform(get("/analyze/upload_trend").param("days", "0").cookie(adminSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        User normal = createUser("analyze-normal");
+        Cookie normalSession = login(normal.getUserAccount(), PASSWORD, csrf);
+        mockMvc.perform(get("/analyze/overview").cookie(normalSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40101));
     }
 
     // ==================== 辅助方法 ====================

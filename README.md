@@ -9,7 +9,7 @@
 | 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ、Elasticsearch、数据万象内容审核、DeepSeek |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理与内容审核） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
-| 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、VueUse、ESLint |
+| 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、VueUse、ECharts、ESLint |
 | 构建 | Maven Wrapper 3.9.16、npm |
 
 ## 目录结构
@@ -359,14 +359,32 @@ $env:SEARCH_ENGINE = 'es'
 - **状态进 URL**：搜索词、分类、标签写入查询参数，刷新或分享链接都能还原；切换条件时回到页面顶部；
 - **返回恢复**：首页通过路由 `meta.keepAlive` 缓存，从详情页返回时恢复原来的滚动位置；其他页面仍沿用浏览器前进后退的滚动位置。
 
+## 管理端数据看板
+
+`/admin/dashboard` 页面（仅管理员可见）展示运营数据，后端接口统一要求管理员权限，结果用 Spring Cache 缓存 5 分钟：
+
+| 接口 | 内容 |
+| --- | --- |
+| `GET /api/analyze/overview` | 用户数、图片数、待审核数、总存储体积、总下载次数 |
+| `GET /api/analyze/upload_trend?days=30` | 按天的上传数量，没有上传的日期补 0 |
+| `GET /api/analyze/category` | 各分类的图片数与体积 |
+| `GET /api/analyze/tags?limit=20` | 使用次数最多的标签（`JSON_TABLE` 展开 `picture.tags`） |
+| `GET /api/analyze/review` | 已通过/已拒绝数量、平均审核耗时 |
+| `GET /api/analyze/top_download?limit=10` | 下载次数最多的图片 |
+
+- 聚合 SQL 写在 `AnalyzeMapper.xml`，自定义 SQL 手动加 `isDelete = 0`，不会经过 MyBatis-Plus 的逻辑删除插件；
+- 天数限制 1–365，排行限制 1–50，越界返回 `40000`；
+- 前端按需注册 ECharts，`echarts` 与 `vue-echarts` 只打进看板页面的懒加载分包，首页不会加载；
+- 图表：上传趋势折线图、审核结果环形图、分类柱状图、标签横向条形图，另有下载排行表格；指标卡片显示用户数、图片数、待审核、存储体积和下载次数。
+
 ## 前端构建与代码检查
 
 - **路由懒加载**：只有首页静态导入，其余页面（含全部管理端页面）按路由拆包，首屏不再加载管理端代码；
 - **组件按需引入**：Ant Design Vue 由 `unplugin-vue-components` 按需解析，`main.ts` 不再 `app.use(Antd)`；生成的 `components.d.ts` 已提交，模板里的 `a-xxx` 有完整类型；
 - **路由元信息**：权限写在路由 `meta.requiresLogin` / `meta.requiresAdmin`，`access.ts` 只读 `to.meta`，新增页面不用再改权限判断；
 - **ESLint**：扁平配置 `eslint.config.js`，`npm run lint` 检查，CI 在格式检查之后执行；
-- **构建体积**：入口 chunk 从改造前的 1,664 kB（gzip 518 kB）降到约 643 kB（gzip 212 kB），管理端页面均为独立 chunk；
-- 前端测试：20 个 Vitest 用例 + 9 个 Playwright 用例。
+- **构建体积**：入口 chunk 从改造前的 1,664 kB（gzip 518 kB）降到约 643 kB（gzip 212 kB），管理端页面均为独立 chunk；数据看板的 ECharts 分包约 578 kB（gzip 199 kB），只在进入看板时加载；
+- 前端测试：23 个 Vitest 用例 + 10 个 Playwright 用例。
 
 ## 并发模型（虚拟线程评估）
 
