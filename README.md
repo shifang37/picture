@@ -370,7 +370,7 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 
 ## 生产部署（Docker / 反向代理 / 监控）
 
-1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码、RabbitMQ 账号密码、腾讯云 COS 配置；如开启 AI 建议，还需填写 `DEEPSEEK_API_KEY`；如开启全文搜索，设置 `SEARCH_ENGINE=es` 与 `ES_PASSWORD`
+1. 复制 `.env.example` 为 `.env`，填写 `DB_ROOT_PASSWORD`、`DB_PASSWORD`（应用账号 `picture` 的密码）、Redis 密码、RabbitMQ 账号密码、腾讯云 COS 配置；如开启 AI 建议，还需填写 `DEEPSEEK_API_KEY`；如开启全文搜索，设置 `SEARCH_ENGINE=es` 与 `ES_PASSWORD`
 2. 执行 `docker compose up -d --build`
 3. 访问 `http://localhost:8080`；前端 nginx 会把 `/api` 反向代理到后端 `8123`
 
@@ -381,6 +381,14 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 - **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/prometheus` 不可访问；Prometheus 指标只在独立管理端口 8124 暴露，详见下一节「可观测性」
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
 - **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增更高版本的迁移脚本（如 `V7__xxx.sql`）
+- **数据库账号**：应用不再使用 root。MySQL 首次初始化时会创建专用账号 `picture`（密码 `DB_PASSWORD`），对 `picture` 库有全部权限，Flyway 才能执行 DDL。已有 `mysql-data` 卷需要手工补一次：
+  ```sql
+  CREATE USER IF NOT EXISTS 'picture'@'%' IDENTIFIED BY '<DB_PASSWORD>';
+  GRANT ALL PRIVILEGES ON picture.* TO 'picture'@'%';
+  FLUSH PRIVILEGES;
+  ```
+- **数据库备份**：`mysql-backup` 服务每天用应用账号执行 `mysqldump --single-transaction --triggers --no-tablespaces` 备份到 `mysql-backup` 卷，保留 7 天。恢复时先从 `mysql-backup` 卷取出 `.sql`，再执行 `docker compose exec -T mysql mysql -uroot -p picture < backup.sql`；该卷本身仍需要纳入宿主机层面的快照/异地备份
+- **镜像与资源**：后端镜像使用非 root 用户（UID 10001）运行，堆上限默认为容器内存的 75%（`JAVA_OPTS` 可覆盖），构建时先解析依赖再复制源码以复用缓存；前端镜像固定 `nginx:1.30-alpine` 并在构建时执行 `apk upgrade`，避免基础镜像中可修复的高危漏洞让 CI 扫描失败。compose 为各服务设置了 `restart: unless-stopped` 和内存上限，避免单个服务拖垮整机
 - **Redis 与会话**：compose 内置 `redis` 服务（AOF 持久化 + 密码认证，密码由 `REDIS_PASSWORD` 指定，务必改掉默认值）；`redis-data` 卷保存会话与失效版本，删除该卷会让所有用户重新登录
 - **RabbitMQ**：compose 内置 `rabbitmq` 服务（`rabbitmq:4-management`，持久化卷 `rabbitmq-data`，只在内网可达，不映射 5672/15672 到宿主机）。账号密码由 `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` 指定；**不要使用 `guest`**，RabbitMQ 的 guest 只允许本机回环地址登录，容器间连不上。账号只在数据卷首次初始化时生效，修改 `.env` 后需要删除 `rabbitmq-data` 卷（会丢失队列与死信）或进入容器手工改密码
 - **Elasticsearch**：compose 内置 `elasticsearch` 服务（版本 8.18.8，堆内存 512MB，持久化卷 `elasticsearch-data`，只在内网可达，不映射 9200 到宿主机），开启基础认证（`ES_USERNAME` / `ES_PASSWORD`）并关闭 HTTP TLS（仅内网访问）。`SEARCH_ENGINE` 默认 `mysql`，此时只启动不连接；切换为 `es` 后需管理员调用一次 `POST /api/search/reindex` 初始化索引
