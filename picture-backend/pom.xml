@@ -112,6 +112,13 @@
             <version>5.6.283</version>
         </dependency>
 
+        <!-- 上传时压缩过大的原图（等比缩放 + JPEG 质量控制） -->
+        <dependency>
+            <groupId>net.coobird</groupId>
+            <artifactId>thumbnailator</artifactId>
+            <version>0.4.20</version>
+        </dependency>
+
     </dependencies>
 
     <dependencyManagement>

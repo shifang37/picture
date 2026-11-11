@@ -14,9 +14,12 @@ import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import net.coobird.thumbnailator.Thumbnails;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -45,6 +48,21 @@ public class FileManager {
     private static final Set<String> ALLOW_CONTENT_TYPE_LIST =
             Set.of("image/jpeg", "image/jpg", "image/png", "image/webp");
 
+    /**
+     * 原图长边上限：超过时等比缩小
+     */
+    static final int MAX_DIMENSION = 1920;
+
+    /**
+     * JPEG 压缩质量
+     */
+    static final double JPEG_QUALITY = 0.85;
+
+    /**
+     * JPEG 超过该体积时即便尺寸不大也重新编码压缩
+     */
+    static final long JPEG_COMPRESS_THRESHOLD = (long) (1.5 * 1024 * 1024);
+
     @Resource
     private CosClientConfig cosClientConfig;
 
@@ -69,14 +87,21 @@ public class FileManager {
         // 注意：这里的路径不能以 "/" 开头，否则拼接 host 后会生成 "https://xxx//public/..." 的双斜杠地址
         String uploadPath = String.format("%s/%s", uploadPathPrefix, uploadFilename);
         File file = null;
+        File compressedFile = null;
         try {
             // 创建临时文件
             file =File.createTempFile(uploadPath, null);
             multipartFile.transferTo(file);
+            // 上传前按需压缩原图；WebP 没有 JDK 内置编码器，保持原文件
+            String suffix = FileUtil.getSuffix(originFilename).toLowerCase(Locale.ROOT);
+            File uploadFile = compressIfNeeded(file, suffix);
+            if (!uploadFile.equals(file)) {
+                compressedFile = uploadFile;
+            }
             // 上传图片
-            PutObjectResult putObjectResult = cosManager.putPictureObject(uploadPath, file);
+            PutObjectResult putObjectResult = cosManager.putPictureObject(uploadPath, uploadFile);
             ImageInfo imageInfo = putObjectResult.getCiUploadResult().getOriginalInfo().getImageInfo();
-            // 封装返回结果
+            // 封装返回结果：宽高/格式以实际上传文件为准，体积使用压缩后的文件大小
             UploadPictureResult uploadPictureResult = new UploadPictureResult();
             int picWidth = imageInfo.getWidth();
             int picHeight = imageInfo.getHeight();
@@ -86,7 +111,7 @@ public class FileManager {
             uploadPictureResult.setPicHeight(picHeight);
             uploadPictureResult.setPicScale(picScale);
             uploadPictureResult.setPicFormat(imageInfo.getFormat());
-            uploadPictureResult.setPicSize(FileUtil.size(file));
+            uploadPictureResult.setPicSize(FileUtil.size(uploadFile));
             uploadPictureResult.setUrl(cosClientConfig.getHost() + "/" + uploadPath);
             return uploadPictureResult;
         } catch (Exception e) {
@@ -94,6 +119,81 @@ public class FileManager {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR,"上传失败");
         } finally {
             this.deleteTempFile(file);
+            if (compressedFile != null) {
+                this.deleteTempFile(compressedFile);
+            }
+        }
+    }
+
+    /**
+     * 按需压缩原图：
+     * <ul>
+     *   <li>长边超过 {@link #MAX_DIMENSION} 时等比缩小；</li>
+     *   <li>JPEG 超过 {@link #JPEG_COMPRESS_THRESHOLD} 时以 0.85 质量重新编码；</li>
+     *   <li>PNG 只缩放、保留透明通道；WebP 没有内置编码器，保持原文件；</li>
+     *   <li>压缩失败或结果没有变小时回退原文件，不阻断上传。</li>
+     * </ul>
+     *
+     * @param source 原始临时文件
+     * @param suffix 文件后缀（小写）
+     * @return 压缩后的临时文件；无需压缩或压缩失败时返回原文件
+     */
+    File compressIfNeeded(File source, String suffix) {
+        if (source == null || StrUtil.isBlank(suffix)) {
+            return source;
+        }
+        String normalizedSuffix = suffix.toLowerCase(Locale.ROOT);
+        boolean jpeg = "jpg".equals(normalizedSuffix) || "jpeg".equals(normalizedSuffix);
+        boolean png = "png".equals(normalizedSuffix);
+        if (!jpeg && !png) {
+            // WebP 当前 JDK 没有内置编码器，保持原文件
+            return source;
+        }
+        File compressed = null;
+        try {
+            BufferedImage image = ImageIO.read(source);
+            if (image == null) {
+                log.warn("无法解析图片内容，跳压缩, suffix = {}", suffix);
+                return source;
+            }
+            int width = image.getWidth();
+            int height = image.getHeight();
+            int longSide = Math.max(width, height);
+            boolean needResize = longSide > MAX_DIMENSION;
+            boolean needQuality = jpeg && source.length() > JPEG_COMPRESS_THRESHOLD;
+            if (!needResize && !needQuality) {
+                return source;
+            }
+            compressed = File.createTempFile("picture-compressed-", "." + normalizedSuffix);
+            Thumbnails.Builder<File> builder = Thumbnails.of(source);
+            if (needResize) {
+                double scale = MAX_DIMENSION * 1.0 / longSide;
+                builder.size(Math.max(1, (int) Math.round(width * scale)),
+                        Math.max(1, (int) Math.round(height * scale)));
+            } else {
+                builder.scale(1.0);
+            }
+            if (jpeg) {
+                builder.outputFormat("jpg").outputQuality(JPEG_QUALITY);
+            } else {
+                builder.outputFormat("png");
+            }
+            builder.toFile(compressed);
+            // 仅因体积触发压缩时，压缩结果反而更大就回退原文件
+            if (!needResize && compressed.length() >= source.length()) {
+                deleteTempFile(compressed);
+                return source;
+            }
+            log.info("原图已压缩, suffix = {}, 原大小 = {}, 压缩后 = {}",
+                    suffix, source.length(), compressed.length());
+            return compressed;
+        } catch (Exception e) {
+            // 压缩是优化手段，失败不能阻断上传
+            log.warn("压缩图片失败，回退原文件, suffix = {}", suffix, e);
+            if (compressed != null) {
+                deleteTempFile(compressed);
+            }
+            return source;
         }
     }
 
