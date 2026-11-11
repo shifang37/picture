@@ -106,30 +106,36 @@ const pagination = computed(() => {
 
 const fetchData = async () => {
   loading.value = true
-  // 转换搜索参数
-  const params: API.PictureQueryRequest = {
-    ...searchParams,
-    tags: [],
-  }
-  if (selectedCategory.value !== 'all') {
-    params.category = selectedCategory.value
-  }
-  selectedTagList.value.forEach((useTag, index) => {
-    if (useTag && params.tags) {
-      const tag = tagList.value[index]
-      if (tag) {
-        params.tags.push(tag)
-      }
+  try {
+    // 转换搜索参数
+    const params: API.PictureQueryRequest = {
+      ...searchParams,
+      tags: [],
     }
-  })
-  const res = await listPictureVoByPage(params)
-  if (res.data.data) {
-    dataList.value = res.data.data.records ?? []
-    total.value = Number(res.data.data.total) || 0
-  } else {
-    message.error('获取数据失败，' + res.data.message)
+    if (selectedCategory.value !== 'all') {
+      params.category = selectedCategory.value
+    }
+    selectedTagList.value.forEach((useTag, index) => {
+      if (useTag && params.tags) {
+        const tag = tagList.value[index]
+        if (tag) {
+          params.tags.push(tag)
+        }
+      }
+    })
+    const res = await listPictureVoByPage(params)
+    if (res.data.code === 0 && res.data.data) {
+      dataList.value = res.data.data.records ?? []
+      total.value = Number(res.data.data.total) || 0
+    } else {
+      message.error('获取数据失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error: any) {
+    message.error('获取数据失败：' + (error.message || '系统错误'))
+  } finally {
+    // 无论成功失败都要结束 loading，避免页面一直转圈
+    loading.value = false
   }
-  loading.value = false
 }
 
 // 页面加载时请求一次
