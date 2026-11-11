@@ -93,6 +93,8 @@ const pagination = computed(() => {
     current: searchParams.current ?? 1,
     pageSize: searchParams.pageSize ?? 10,
     total: total.value,
+    // 后端公开列表每页最多 20 条，限制可选项，避免切到 50/100 后被拒绝
+    pageSizeOptions: ['12', '20'],
     // 切换页号时，会修改搜索参数并获取数据
     onChange: (page: number, pageSize: number) => {
       searchParams.current = page
