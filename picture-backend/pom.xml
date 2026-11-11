@@ -92,6 +92,17 @@
             <artifactId>spring-session-data-redis</artifactId>
         </dependency>
 
+        <!-- 缓存：标签字典用 Spring Cache + Redis，公开列表的本地一级缓存用 Caffeine -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
         <!-- 仅用于密码哈希（BCrypt），不引入完整的 Spring Security -->
         <dependency>
             <groupId>org.springframework.security</groupId>

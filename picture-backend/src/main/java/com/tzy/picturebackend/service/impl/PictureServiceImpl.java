@@ -12,6 +12,7 @@ import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.FileManager;
+import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
@@ -69,6 +70,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private FileManager fileManager;
+
+    @Resource
+    private PictureListCache pictureListCache;
 
     @Resource
     private UserService userService;
@@ -172,6 +176,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             pictureReviewLogService.record(picture.getId(), loginUser.getId(),
                     PictureReviewStatusEnum.PASS.getValue(), ADMIN_AUTO_REVIEW_MESSAGE);
         }
+        // 新增或重传都会改变公开列表内容（重传会让已通过图片重新进入待审核）
+        pictureListCache.invalidate();
         return PictureVO.objToVo(picture);
     }
 
@@ -198,8 +204,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         picture.setEditTime(new Date());
         validPicture(picture);
         // 普通用户改动已审核图片的内容后必须重新审核，否则过审后改文字就能绕过审核
-        boolean needReviewAgain = !isAdmin && isReviewed(oldPicture)
-                && hasContentChanged(pictureEditRequest, oldPicture);
+        boolean contentChanged = hasContentChanged(pictureEditRequest, oldPicture);
+        boolean needReviewAgain = !isAdmin && isReviewed(oldPicture) && contentChanged;
         boolean result;
         if (needReviewAgain) {
             // updateById 会忽略 null，清空审核信息必须用 UpdateWrapper.set 显式置空
@@ -214,6 +220,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             result = this.updateById(picture);
         }
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "编辑失败");
+        if (contentChanged) {
+            // 名称、简介、分类、标签变化都会影响公开列表
+            pictureListCache.invalidate();
+        }
         return true;
     }
 
@@ -294,6 +304,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         boolean result = this.removeById(id);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
         deletePictureFile(oldPicture.getUrl());
+        pictureListCache.invalidate();
         return true;
     }
 
@@ -494,6 +505,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "审核失败");
         // 审核结果落库成功后再记录历史，失败不影响本次审核
         pictureReviewLogService.record(id, loginUser.getId(), reviewStatus, reviewMessage);
+        // 通过/拒绝都会改变公开列表（以及名称、简介等展示内容）
+        pictureListCache.invalidate();
     }
 
     @Override

@@ -10,6 +10,7 @@ import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
+import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.model.dto.picture.*;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -41,6 +42,9 @@ public class PictureController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private PictureListCache pictureListCache;
 
 
 
@@ -98,6 +102,8 @@ public class PictureController {
         // 操作数据库
         boolean result = pictureService.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 管理员直接改图也可能改变首页展示内容
+        pictureListCache.invalidate();
         return ResultUtils.success(true);
     }
 
@@ -167,11 +173,18 @@ public class PictureController {
         validPage(current, size, 20);
         // 公开列表只展示审核通过的图片，避免未审核 / 被拒绝的内容外泄
         pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        // 公开列表是唯一允许缓存的列表；我的图片、管理列表、详情页都不缓存
+        PictureListPage cached = pictureListCache.get(pictureQueryRequest);
+        if (cached != null) {
+            return ResultUtils.success(cached.toPage());
+        }
         // 查询数据库
         Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
                 pictureService.getQueryWrapper(pictureQueryRequest));
         // 获取封装类
-        return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
+        Page<PictureVO> pictureVOPage = pictureService.getPictureVOPage(picturePage, request);
+        pictureListCache.put(pictureQueryRequest, PictureListPage.of(pictureVOPage));
+        return ResultUtils.success(pictureVOPage);
     }
 
     /**

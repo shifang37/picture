@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
+import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
@@ -65,6 +66,8 @@ class PictureServiceImplTest {
 
     private TagCategoryService tagCategoryService;
 
+    private PictureListCache pictureListCache;
+
     @BeforeEach
     void setUp() {
         pictureService = new PictureServiceImpl();
@@ -73,11 +76,13 @@ class PictureServiceImplTest {
         fileManager = mock(FileManager.class);
         pictureReviewLogService = mock(PictureReviewLogService.class);
         tagCategoryService = mock(TagCategoryService.class);
+        pictureListCache = mock(PictureListCache.class);
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
         ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);
         ReflectionTestUtils.setField(pictureService, "tagCategoryService", tagCategoryService);
+        ReflectionTestUtils.setField(pictureService, "pictureListCache", pictureListCache);
     }
 
     // ==================== 可见性 ====================
@@ -189,6 +194,7 @@ class PictureServiceImplTest {
         assertNotNull(saved.getReviewTime());
         verify(pictureReviewLogService).record(1L, admin.getId(),
                 PictureReviewStatusEnum.PASS.getValue(), "管理员上传，自动通过");
+        verify(pictureListCache).invalidate();
     }
 
     @Test
@@ -278,6 +284,7 @@ class PictureServiceImplTest {
 
         verify(pictureMapper).deleteById(1L);
         verify(fileManager).deletePicture(existing.getUrl());
+        verify(pictureListCache).invalidate();
     }
 
     @Test
@@ -428,6 +435,7 @@ class PictureServiceImplTest {
                         .containsValue(PictureReviewStatusEnum.REVIEWING.getValue()),
                 "reviewStatus 应被置为待审核，实际参数: " + wrapper.getParamNameValuePairs());
         verify(pictureMapper, never()).updateById(any(Picture.class));
+        verify(pictureListCache).invalidate();
     }
 
     @Test
@@ -448,6 +456,7 @@ class PictureServiceImplTest {
         verify(pictureMapper).updateById(entityCaptor.capture());
         assertNull(entityCaptor.getValue().getReviewStatus(), "内容未变化时不得改动审核状态");
         verify(pictureMapper, never()).update(any(Picture.class), any(Wrapper.class));
+        verify(pictureListCache, never()).invalidate();
     }
 
     @Test
@@ -581,6 +590,7 @@ class PictureServiceImplTest {
         assertNull(updated.getUserId(), "不应覆盖 userId");
         verify(pictureReviewLogService).record(1L, admin.getId(),
                 PictureReviewStatusEnum.REJECT.getValue(), "内容不合规");
+        verify(pictureListCache).invalidate();
     }
 
     @Test

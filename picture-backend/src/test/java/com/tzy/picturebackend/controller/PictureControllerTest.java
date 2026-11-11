@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
+import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureListPage;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.User;
@@ -51,13 +53,17 @@ class PictureControllerTest {
 
     private UserService userService;
 
+    private PictureListCache pictureListCache;
+
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
         userService = mock(UserService.class);
+        pictureListCache = mock(PictureListCache.class);
         PictureController pictureController = new PictureController();
         ReflectionTestUtils.setField(pictureController, "pictureService", pictureService);
         ReflectionTestUtils.setField(pictureController, "userService", userService);
+        ReflectionTestUtils.setField(pictureController, "pictureListCache", pictureListCache);
         mockMvc = MockMvcBuilders.standaloneSetup(pictureController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -190,6 +196,53 @@ class PictureControllerTest {
         verify(pictureService).editPicture(requestCaptor.capture(), eq(normalUser));
         assertEquals(Long.valueOf(1L), requestCaptor.getValue().getId());
         assertEquals("新名称", requestCaptor.getValue().getName());
+    }
+
+    // ==================== 公开列表缓存 ====================
+
+    @Test
+    @DisplayName("公开列表：缓存命中时直接返回，不查询数据库")
+    void listPictureVOByPage_returnsCachedPage() throws Exception {
+        PictureVO cachedPicture = new PictureVO();
+        cachedPicture.setId(9L);
+        cachedPicture.setName("缓存图片");
+        PictureListPage cached = new PictureListPage();
+        cached.setRecords(List.of(cachedPicture));
+        cached.setTotal(1);
+        cached.setCurrent(1);
+        cached.setSize(10);
+        when(pictureListCache.get(any())).thenReturn(cached);
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.total").value(1))
+                .andExpect(jsonPath("$.data.records[0].name").value("缓存图片"));
+
+        verify(pictureService, never()).page(any(), any());
+        verify(pictureListCache, never()).put(any(), any());
+    }
+
+    @Test
+    @DisplayName("公开列表：未命中时回源数据库，并只缓存已通过审核的内容")
+    void listPictureVOByPage_populatesCacheOnMiss() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureService.page(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<PictureQueryRequest> requestCaptor =
+                ArgumentCaptor.forClass(PictureQueryRequest.class);
+        verify(pictureListCache).put(requestCaptor.capture(), any());
+        assertEquals(Integer.valueOf(1), requestCaptor.getValue().getReviewStatus(),
+                "公开列表的缓存 key 必须带上已通过审核的状态");
     }
 
     @Test

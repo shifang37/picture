@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session |
+| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
 | 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router |
@@ -183,6 +183,14 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - 限流计数在 `picture:ratelimit:` 下：登录按 IP 10 次/分钟，上传按用户 60 次/分钟（未登录时按 IP）；
 - Redis 是硬依赖：没有 Redis 时登录与鉴权不可用，本地开发请先执行 `docker compose -f docker-compose.infra.yml up -d`。
 
+## 缓存策略
+
+- **标签/分类字典**（`GET /api/picture/tag_category`）：Spring Cache 存 Redis（key 为 `tagCategory::…`），TTL 30 分钟；管理员新增、删除、同步字典后立即失效，首页分类 Tab 马上更新。
+- **公开图片列表**（`POST /api/picture/list/page/vo`）：两级缓存，L1 是 Caffeine（最多 500 项、写入后 30 秒过期），L2 是 Redis（5 分钟 + 0~60 秒随机抖动）。「我的图片」、管理列表、详情页都不缓存。
+- **失效**：审核通过/拒绝、编辑、删除、上传成功后对 `picture:list:ns` 自增，新请求换用新命名空间，旧 key 自然过期。因此审核结果立即可见，L1 最多比数据库滞后 30 秒。
+- **降级**：缓存只保存公开可见的数据；Redis 读写异常时直接回源数据库，列表接口不受影响。
+- 实测（300 张图片、50 次请求）：公开列表热缓存 p95 约 8.5 ms，每次失效回源 p95 约 19 ms。
+
 ## 生产部署（Docker / 反向代理 / 监控）
 
 1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码和腾讯云 COS 配置
@@ -225,7 +233,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **219 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，以及 Redis 限流降级、会话失效版本和过滤器顺序，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **227 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

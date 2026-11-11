@@ -5,6 +5,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.tzy.picturebackend.config.CacheConfig;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
@@ -17,6 +18,8 @@ import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.service.TagCategoryService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
@@ -45,6 +48,7 @@ public class TagCategoryServiceImpl
     private PictureMapper pictureMapper;
 
     @Override
+    @Cacheable(cacheNames = CacheConfig.TAG_CATEGORY_CACHE)
     public PictureTagCategory listAll() {
         Set<String> tagSet = new TreeSet<>();
         Set<String> categorySet = new TreeSet<>();
@@ -69,6 +73,7 @@ public class TagCategoryServiceImpl
     }
 
     @Override
+    @CacheEvict(cacheNames = CacheConfig.TAG_CATEGORY_CACHE, allEntries = true)
     public boolean add(String type, String name) {
         String normalizedType = normalizeType(type);
         String normalizedName = normalizeName(name);
@@ -85,6 +90,7 @@ public class TagCategoryServiceImpl
     }
 
     @Override
+    @CacheEvict(cacheNames = CacheConfig.TAG_CATEGORY_CACHE, allEntries = true)
     public boolean delete(Long id) {
         ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "id 不能为空");
         TagCategory existing = this.getById(id);
@@ -93,6 +99,7 @@ public class TagCategoryServiceImpl
     }
 
     @Override
+    @CacheEvict(cacheNames = CacheConfig.TAG_CATEGORY_CACHE, allEntries = true)
     public int syncFromPictures() {
         // 只同步已通过审核的图片，保持首页可见内容与字典一致
         List<Picture> pictures = pictureMapper.selectList(new QueryWrapper<Picture>()
