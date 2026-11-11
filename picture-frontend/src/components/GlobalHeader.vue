@@ -139,16 +139,19 @@ router.afterEach((to) => {
 })
 // 用户注销
 const doLogout = async () => {
-  const res = await userLogout()
-  console.log(res)
-  if (res.data.code === 0) {
-    loginUserStore.setLoginUser({
-      userName: '未登录',
-    })
-    message.success('退出登录成功')
-    await router.push('/user/login')
-  } else {
-    message.error('退出登录失败，' + res.data.message)
+  try {
+    const res = await userLogout()
+    if (res.data.code === 0) {
+      loginUserStore.setLoginUser({
+        userName: '未登录',
+      })
+      message.success('退出登录成功')
+      await router.push('/user/login')
+    } else {
+      message.error('退出登录失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error: any) {
+    message.error('退出登录失败：' + (error.message || '系统错误'))
   }
 }
 </script>

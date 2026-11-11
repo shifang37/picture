@@ -173,12 +173,16 @@ const doDelete = async () => {
   if (!id) {
     return
   }
-  const res = await deletePicture({ id })
-  if (res.data.code === 0) {
-    message.success('删除成功')
-    router.replace('/my_pictures')
-  } else {
-    message.error('删除失败，' + (res.data.message || '未知错误'))
+  try {
+    const res = await deletePicture({ id })
+    if (res.data.code === 0) {
+      message.success('删除成功')
+      router.replace('/my_pictures')
+    } else {
+      message.error('删除失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error: any) {
+    message.error('删除失败：' + (error.message || '系统错误'))
   }
 }
 

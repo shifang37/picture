@@ -167,16 +167,20 @@ const doDelete = async (record: API.PictureVO) => {
   if (!record.id) {
     return
   }
-  const res = await deletePicture({ id: record.id })
-  if (res.data.code === 0) {
-    message.success('删除成功')
-    // 删除当前页最后一条时回到上一页
-    if (dataList.value.length === 1 && (query.current ?? 1) > 1) {
-      query.current = (query.current ?? 1) - 1
+  try {
+    const res = await deletePicture({ id: record.id })
+    if (res.data.code === 0) {
+      message.success('删除成功')
+      // 删除当前页最后一条时回到上一页
+      if (dataList.value.length === 1 && (query.current ?? 1) > 1) {
+        query.current = (query.current ?? 1) - 1
+      }
+      await fetchData()
+    } else {
+      message.error('删除失败：' + (res.data.message || '未知错误'))
     }
-    await fetchData()
-  } else {
-    message.error('删除失败，' + (res.data.message || '未知错误'))
+  } catch (error: any) {
+    message.error('删除失败：' + (error.message || '系统错误'))
   }
 }
 
