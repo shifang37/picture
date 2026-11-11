@@ -28,6 +28,10 @@
             </ASpace>
             <template #overlay>
               <a-menu>
+                <a-menu-item @click="doProfile">
+                  <UserOutlined />
+                  个人中心
+                </a-menu-item>
                 <a-menu-item @click="doLogout">
                   <LogoutOutlined />
                   退出登录
@@ -43,7 +47,7 @@
 </template>
 <script lang="ts" setup>
 import { h, ref, computed } from 'vue'
-import { HomeOutlined, LogoutOutlined } from '@ant-design/icons-vue'
+import { HomeOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
 import type { MenuProps } from 'ant-design-vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
@@ -118,6 +122,9 @@ const items = computed<MenuProps['items']>(() => filterMenus(originItems))
 const router = useRouter()
 const doLogin = () => {
   router.push('/user/login')
+}
+const doProfile = () => {
+  router.push('/user/profile')
 }
 const doMenuClick = ({ key }: { key: string }) => {
   router.push({

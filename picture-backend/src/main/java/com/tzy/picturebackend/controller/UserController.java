@@ -12,10 +12,12 @@ import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.model.dto.user.*;
+import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
+import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +38,9 @@ public class UserController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private PictureService pictureService;
 
     @PostMapping("/register")
     public BaseResponse<Long> userRegister(@Valid @RequestBody UserRegisterRequest userRegisterRequest) {
@@ -87,6 +92,19 @@ public class UserController {
     }
 
     /**
+     * 修改当前登录用户的个人资料（普通用户可用）
+     */
+    @PostMapping("/update/profile")
+    public BaseResponse<Boolean> updateProfile(
+            @Valid @RequestBody UserUpdateProfileRequest userUpdateProfileRequest,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(userUpdateProfileRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        boolean result = userService.updateProfile(loginUser, userUpdateProfileRequest);
+        return ResultUtils.success(result);
+    }
+
+    /**
      * 创建用户
      */
     @PostMapping("/add")
@@ -134,11 +152,19 @@ public class UserController {
      */
     @PostMapping("/delete")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Boolean> deleteUser(@Valid @RequestBody DeleteRequest deleteRequest) {
+    public BaseResponse<Boolean> deleteUser(@Valid @RequestBody DeleteRequest deleteRequest,
+                                            HttpServletRequest request) {
         ThrowUtils.throwIf(deleteRequest == null || deleteRequest.getId() == null
                 || deleteRequest.getId() <= 0, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        ThrowUtils.throwIf(deleteRequest.getId().equals(loginUser.getId()),
+                ErrorCode.PARAMS_ERROR, "不能删除自己");
         User oldUser = userService.getById(deleteRequest.getId());
         ThrowUtils.throwIf(oldUser == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        // 用户还有图片时拒绝删除，避免留下公开的孤儿图片；图片需由管理员先处理
+        long pictureCount = pictureService.count(
+                new QueryWrapper<Picture>().eq("userId", deleteRequest.getId()));
+        ThrowUtils.throwIf(pictureCount > 0, ErrorCode.PARAMS_ERROR, "该用户还有图片，请先处理该用户的图片");
         boolean result = userService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除用户失败");
         return ResultUtils.success(true);
@@ -161,7 +187,15 @@ public class UserController {
         user.setUserProfile(userUpdateRequest.getUserProfile());
         // 不传角色表示不修改，避免把管理员误降级为普通用户
         if (StrUtil.isNotBlank(userUpdateRequest.getUserRole())) {
-            user.setUserRole(normalizeRole(userUpdateRequest.getUserRole()));
+            String newRole = normalizeRole(userUpdateRequest.getUserRole());
+            boolean wasAdmin = UserRoleEnum.ADMIN.getValue().equals(oldUser.getUserRole());
+            boolean willBeAdmin = UserRoleEnum.ADMIN.getValue().equals(newRole);
+            if (wasAdmin && !willBeAdmin) {
+                long adminCount = userService.count(
+                        new QueryWrapper<User>().eq("userRole", UserRoleEnum.ADMIN.getValue()));
+                ThrowUtils.throwIf(adminCount <= 1, ErrorCode.PARAMS_ERROR, "系统至少需要保留一个管理员");
+            }
+            user.setUserRole(newRole);
         }
         boolean result = userService.updateById(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);

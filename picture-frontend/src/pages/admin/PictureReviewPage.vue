@@ -20,7 +20,11 @@
       </a-form>
 
       <a-space>
-        <a-radio-group v-model:value="searchParams.reviewStatus" button-style="solid" @change="doSearch">
+        <a-radio-group
+          v-model:value="searchParams.reviewStatus"
+          button-style="solid"
+          @change="doSearch"
+        >
           <a-radio-button :value="0">待审核</a-radio-button>
           <a-radio-button :value="1">已通过</a-radio-button>
           <a-radio-button :value="2">已拒绝</a-radio-button>

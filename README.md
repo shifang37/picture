@@ -114,6 +114,15 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 
 上传接口 `POST /api/picture/upload` 使用 `multipart/form-data`：`file` 为图片文件，`id` 可选（重新上传已有图片时传）。该接口只要求登录，普通用户也可以调用。
 
+## 个人中心与用户管理
+
+- 普通用户登录后从右上角用户菜单进入「个人中心」（`/user/profile`），可以修改昵称、头像地址和简介，也可以修改密码
+- 修改资料接口 `POST /api/user/update/profile`：只作用于当前登录用户，不允许修改角色、账号和密码
+- 修改密码接口 `POST /api/user/update/password`：原密码错误、新密码长度不合法会返回明确的 `40000` 业务码
+- 管理员在「用户管理」（`/admin/userManage`）可以新增用户、编辑昵称/头像/简介/角色、删除用户（删除前二次确认）
+- 删除用户时不能删除自己；目标用户还有图片时会被拒绝，需要先处理该用户的图片
+- 新用户默认密码 `12345678`；管理端用户查询和列表接口不会返回密码哈希
+
 ## 图片审核流程
 
 本项目实现了完整的图片审核闭环：

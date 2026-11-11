@@ -1,27 +1,36 @@
 package com.tzy.picturebackend.controller;
 
+import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * UserController 接口测试：删除结果与参数校验
+ * UserController 接口测试：用户管理、个人资料、修改密码与删除保护
  */
 class UserControllerTest {
 
@@ -29,20 +38,33 @@ class UserControllerTest {
 
     private UserService userService;
 
+    private PictureService pictureService;
+
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
+        pictureService = mock(PictureService.class);
         UserController userController = new UserController();
         ReflectionTestUtils.setField(userController, "userService", userService);
+        ReflectionTestUtils.setField(userController, "pictureService", pictureService);
+
+        LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
+        validator.afterPropertiesSet();
+
         mockMvc = MockMvcBuilders.standaloneSetup(userController)
                 .setControllerAdvice(new GlobalExceptionHandler())
+                .setValidator(validator)
                 .build();
     }
+
+    // ==================== 删除用户 ====================
 
     @Test
     @DisplayName("删除用户：成功返回 true")
     void deleteUser_returnsTrueOnSuccess() throws Exception {
-        when(userService.getById(1L)).thenReturn(user(1L));
+        when(userService.getLoginUser(any())).thenReturn(user(99L, "admin"));
+        when(userService.getById(1L)).thenReturn(user(1L, "user"));
+        when(pictureService.count(any())).thenReturn(0L);
         when(userService.removeById(1L)).thenReturn(true);
 
         mockMvc.perform(post("/user/delete")
@@ -54,8 +76,9 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("删除用户：用户不存在返回 40400，前端不再显示删除成功")
+    @DisplayName("删除用户：用户不存在返回 40400")
     void deleteUser_returnsNotFoundForMissingUser() throws Exception {
+        when(userService.getLoginUser(any())).thenReturn(user(99L, "admin"));
         when(userService.getById(1L)).thenReturn(null);
 
         mockMvc.perform(post("/user/delete")
@@ -68,7 +91,39 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("删除用户：空 body 返回 40000，不出现空指针")
+    @DisplayName("删除用户：不能删除自己")
+    void deleteUser_rejectsSelf() throws Exception {
+        when(userService.getLoginUser(any())).thenReturn(user(1L, "admin"));
+
+        mockMvc.perform(post("/user/delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("不能删除自己"));
+
+        verify(userService, never()).removeById(anyLong());
+    }
+
+    @Test
+    @DisplayName("删除用户：用户还有图片时拒绝删除")
+    void deleteUser_rejectsUserWithPictures() throws Exception {
+        when(userService.getLoginUser(any())).thenReturn(user(99L, "admin"));
+        when(userService.getById(1L)).thenReturn(user(1L, "user"));
+        when(pictureService.count(any())).thenReturn(2L);
+
+        mockMvc.perform(post("/user/delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("该用户还有图片，请先处理该用户的图片"));
+
+        verify(userService, never()).removeById(anyLong());
+    }
+
+    @Test
+    @DisplayName("删除用户：空 body 返回 40000")
     void deleteUser_rejectsEmptyBody() throws Exception {
         mockMvc.perform(post("/user/delete")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -82,7 +137,9 @@ class UserControllerTest {
     @Test
     @DisplayName("删除用户：数据库删除失败返回 50001")
     void deleteUser_returnsOperationErrorWhenRemoveFails() throws Exception {
-        when(userService.getById(1L)).thenReturn(user(1L));
+        when(userService.getLoginUser(any())).thenReturn(user(99L, "admin"));
+        when(userService.getById(1L)).thenReturn(user(1L, "user"));
+        when(pictureService.count(any())).thenReturn(0L);
         when(userService.removeById(1L)).thenReturn(false);
 
         mockMvc.perform(post("/user/delete")
@@ -92,11 +149,189 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.code").value(50001));
     }
 
-    private User user(Long id) {
+    // ==================== 新增用户 ====================
+
+    @Test
+    @DisplayName("新增用户：返回新用户 id，默认密码加密存储")
+    void addUser_returnsNewUserId() throws Exception {
+        when(userService.count(any())).thenReturn(0L);
+        when(userService.getEncryptPassword("12345678")).thenReturn("encrypted");
+        when(userService.save(any(User.class))).thenAnswer(invocation -> {
+            User saved = invocation.getArgument(0);
+            saved.setId(9L);
+            return true;
+        });
+
+        mockMvc.perform(post("/user/add")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userAccount\":\"newuser\",\"userName\":\"新用户\",\"userRole\":\"admin\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userService).save(captor.capture());
+        User saved = captor.getValue();
+        assertEquals("admin", saved.getUserRole());
+        assertEquals("encrypted", saved.getUserPassword());
+    }
+
+    // ==================== 编辑用户 ====================
+
+    @Test
+    @DisplayName("编辑用户：只更新允许字段，不能改账号和密码")
+    void updateUser_updatesAllowedFieldsOnly() throws Exception {
+        when(userService.getById(1L)).thenReturn(user(1L, "user"));
+        when(userService.updateById(any(User.class))).thenReturn(true);
+
+        mockMvc.perform(post("/user/update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"userName\":\"新昵称\",\"userAvatar\":\"http://a.png\","
+                                + "\"userProfile\":\"简介\",\"userRole\":\"admin\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userService).updateById(captor.capture());
+        User updated = captor.getValue();
+        assertEquals("新昵称", updated.getUserName());
+        assertEquals("admin", updated.getUserRole());
+        assertNull(updated.getUserAccount(), "不允许通过该接口改账号");
+        assertNull(updated.getUserPassword(), "不允许通过该接口改密码");
+    }
+
+    @Test
+    @DisplayName("编辑用户：目标不存在返回 40400")
+    void updateUser_returnsNotFoundForMissingUser() throws Exception {
+        when(userService.getById(1L)).thenReturn(null);
+
+        mockMvc.perform(post("/user/update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"userName\":\"新昵称\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40400));
+    }
+
+    @Test
+    @DisplayName("编辑用户：非法角色返回 40000")
+    void updateUser_rejectsIllegalRole() throws Exception {
+        when(userService.getById(1L)).thenReturn(user(1L, "user"));
+
+        mockMvc.perform(post("/user/update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"userRole\":\"superadmin\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+    }
+
+    @Test
+    @DisplayName("编辑用户：不能把最后一个管理员降级")
+    void updateUser_preventsDemotingLastAdmin() throws Exception {
+        when(userService.getById(1L)).thenReturn(user(1L, "admin"));
+        when(userService.count(any())).thenReturn(1L);
+
+        mockMvc.perform(post("/user/update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"userRole\":\"user\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("系统至少需要保留一个管理员"));
+
+        verify(userService, never()).updateById(any(User.class));
+    }
+
+    // ==================== 个人资料 ====================
+
+    @Test
+    @DisplayName("个人资料：只能修改当前登录用户的字段")
+    void updateProfile_updatesOnlyLoginUser() throws Exception {
+        User loginUser = user(100L, "user");
+        when(userService.getLoginUser(any())).thenReturn(loginUser);
+        when(userService.updateProfile(any(User.class), any())).thenReturn(true);
+
+        mockMvc.perform(post("/user/update/profile")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userName\":\"我的昵称\",\"userAvatar\":\"http://a.png\","
+                                + "\"userProfile\":\"我的简介\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        verify(userService).updateProfile(userCaptor.capture(), any());
+        assertEquals(Long.valueOf(100L), userCaptor.getValue().getId());
+    }
+
+    @Test
+    @DisplayName("个人资料：未登录返回 40100")
+    void updateProfile_requiresLogin() throws Exception {
+        when(userService.getLoginUser(any())).thenThrow(new BusinessException(ErrorCode.NOT_LOGIN_ERROR));
+
+        mockMvc.perform(post("/user/update/profile")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userName\":\"我的昵称\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40100));
+    }
+
+    // ==================== 修改密码 ====================
+
+    @Test
+    @DisplayName("修改密码：成功返回 true")
+    void updatePassword_success() throws Exception {
+        when(userService.getLoginUser(any())).thenReturn(user(100L, "user"));
+        when(userService.updatePassword(any(User.class), any(), any())).thenReturn(true);
+
+        mockMvc.perform(post("/user/update/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"123456\",\"newPassword\":\"abcdef\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    @DisplayName("修改密码：原密码错误返回 40000 与明确提示")
+    void updatePassword_rejectsWrongOldPassword() throws Exception {
+        when(userService.getLoginUser(any())).thenReturn(user(100L, "user"));
+        when(userService.updatePassword(any(User.class), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.PARAMS_ERROR, "原密码错误"));
+
+        mockMvc.perform(post("/user/update/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"wrong-old\",\"newPassword\":\"abcdef\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("原密码错误"));
+    }
+
+    @Test
+    @DisplayName("修改密码：新密码少于 6 位返回 40000")
+    void updatePassword_rejectsTooShortNewPassword() throws Exception {
+        mockMvc.perform(post("/user/update/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"123456\",\"newPassword\":\"123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+    }
+
+    // ==================== 密码哈希不泄露 ====================
+
+    @Test
+    @DisplayName("管理员查询用户：响应中不返回 userPassword 哈希")
+    void getUserById_doesNotExposePassword() throws Exception {
+        User user = user(1L, "user");
+        user.setUserPassword("$2a$10$secret-hash");
+        when(userService.getById(1L)).thenReturn(user);
+
+        mockMvc.perform(get("/user/get").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.userPassword").doesNotExist());
+    }
+
+    private User user(Long id, String role) {
         User user = new User();
         user.setId(id);
         user.setUserAccount("test");
-        user.setUserRole("user");
+        user.setUserRole(role);
         return user;
     }
 }

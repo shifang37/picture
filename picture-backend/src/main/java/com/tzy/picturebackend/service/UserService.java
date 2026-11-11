@@ -2,6 +2,7 @@ package com.tzy.picturebackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
+import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
@@ -45,6 +46,15 @@ public interface UserService extends IService<User> {
      * @return 是否成功
      */
     boolean updatePassword(User loginUser, String oldPassword, String newPassword);
+
+    /**
+     * 修改当前登录用户的个人资料（昵称、头像、简介）
+     *
+     * @param loginUser 当前登录用户
+     * @param request   个人资料请求
+     * @return 是否成功
+     */
+    boolean updateProfile(User loginUser, UserUpdateProfileRequest request);
 
     UserVO getUserVO(User user);
 

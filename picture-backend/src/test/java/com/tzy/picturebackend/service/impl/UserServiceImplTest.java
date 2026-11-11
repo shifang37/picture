@@ -3,6 +3,7 @@ package com.tzy.picturebackend.service.impl;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.mapper.UserMapper;
 import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
+import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -236,6 +238,54 @@ class UserServiceImplTest {
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userMapper).updateById(captor.capture());
         assertTrue(encoder.matches("newpass1", captor.getValue().getUserPassword()));
+    }
+
+    // ==================== 个人资料 ====================
+
+    @Test
+    @DisplayName("个人资料：未登录应拒绝")
+    void updateProfile_rejectsAnonymous() {
+        assertThrows(BusinessException.class,
+                () -> userService.updateProfile(null, new UserUpdateProfileRequest()));
+    }
+
+    @Test
+    @DisplayName("个人资料：请求为空应拒绝")
+    void updateProfile_rejectsNullRequest() {
+        assertThrows(BusinessException.class,
+                () -> userService.updateProfile(loginUser(), null));
+    }
+
+    @Test
+    @DisplayName("个人资料：只更新当前登录用户的昵称、头像和简介")
+    void updateProfile_updatesOnlyAllowedFields() {
+        UserUpdateProfileRequest request = new UserUpdateProfileRequest();
+        request.setUserName("新昵称");
+        request.setUserAvatar("http://a.png");
+        request.setUserProfile("新简介");
+        when(userMapper.updateById(any(User.class))).thenReturn(1);
+
+        assertTrue(userService.updateProfile(loginUser(), request));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).updateById(captor.capture());
+        User updated = captor.getValue();
+        assertEquals(Long.valueOf(1L), updated.getId());
+        assertEquals("新昵称", updated.getUserName());
+        assertEquals("http://a.png", updated.getUserAvatar());
+        assertEquals("新简介", updated.getUserProfile());
+        assertNull(updated.getUserRole(), "不允许通过个人资料接口改角色");
+        assertNull(updated.getUserPassword(), "不允许通过个人资料接口改密码");
+    }
+
+    @Test
+    @DisplayName("个人资料：数据库更新失败应抛操作异常")
+    void updateProfile_throwsWhenUpdateFails() {
+        when(userMapper.updateById(any(User.class))).thenReturn(0);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.updateProfile(loginUser(), new UserUpdateProfileRequest()));
+        assertEquals("更新个人资料失败", e.getMessage());
     }
 
     // ==================== 排序 ====================

@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
+import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
@@ -241,6 +242,27 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         update.setId(user.getId());
         update.setUserPassword(getEncryptPassword(newPassword));
         return this.updateById(update);
+    }
+
+    @Override
+    public boolean updateProfile(User loginUser, UserUpdateProfileRequest request) {
+        if (loginUser == null || loginUser.getId() == null) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+        }
+        if (request == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        // 只允许修改当前登录用户的资料字段，不能改角色、账号和密码
+        User update = new User();
+        update.setId(loginUser.getId());
+        update.setUserName(request.getUserName());
+        update.setUserAvatar(request.getUserAvatar());
+        update.setUserProfile(request.getUserProfile());
+        boolean result = this.updateById(update);
+        if (!result) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "更新个人资料失败");
+        }
+        return true;
     }
 
     @Override
