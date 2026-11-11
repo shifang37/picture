@@ -18,6 +18,7 @@ import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
+import com.tzy.picturebackend.service.TagCategoryService;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -59,6 +61,8 @@ class PictureServiceImplTest {
 
     private PictureReviewLogService pictureReviewLogService;
 
+    private TagCategoryService tagCategoryService;
+
     @BeforeEach
     void setUp() {
         pictureService = new PictureServiceImpl();
@@ -66,10 +70,12 @@ class PictureServiceImplTest {
         pictureMapper = mock(PictureMapper.class);
         fileManager = mock(FileManager.class);
         pictureReviewLogService = mock(PictureReviewLogService.class);
+        tagCategoryService = mock(TagCategoryService.class);
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
         ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);
+        ReflectionTestUtils.setField(pictureService, "tagCategoryService", tagCategoryService);
     }
 
     // ==================== 可见性 ====================
@@ -529,23 +535,17 @@ class PictureServiceImplTest {
     }
 
     @Test
-    @DisplayName("标签分类：只汇总已通过图片的标签和分类，并去重排序")
-    void listTagCategory_collectsDistinctValues() {
-        Picture first = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
-        first.setCategory("模板");
-        first.setTags("[\"热门\",\"高清\"]");
-        Picture second = picture(2L, 100L, PictureReviewStatusEnum.PASS.getValue());
-        second.setCategory("电商");
-        second.setTags("[\"热门\",\"生活\"]");
-        Picture invalidTags = picture(3L, 100L, PictureReviewStatusEnum.PASS.getValue());
-        invalidTags.setTags("not-a-json");
-        when(pictureMapper.selectList(any(Wrapper.class)))
-                .thenReturn(List.of(first, second, invalidTags));
+    @DisplayName("标签分类：直接从字典服务读取，不再扫描图片")
+    void listTagCategory_delegatesToDictionary() {
+        PictureTagCategory fromDictionary = new PictureTagCategory();
+        fromDictionary.setCategoryList(List.of("模板"));
+        fromDictionary.setTagList(List.of("热门"));
+        when(tagCategoryService.listAll()).thenReturn(fromDictionary);
 
         PictureTagCategory result = pictureService.listTagCategory();
 
-        assertEquals(List.of("模板", "电商"), result.getCategoryList());
-        assertEquals(List.of("热门", "生活", "高清"), result.getTagList());
+        assertSame(fromDictionary, result);
+        verify(pictureMapper, never()).selectList(any(Wrapper.class));
     }
 
     @Test

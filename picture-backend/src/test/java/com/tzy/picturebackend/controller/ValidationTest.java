@@ -4,6 +4,7 @@ import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.TagCategoryService;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -36,10 +37,13 @@ class ValidationTest {
 
     private UserService userService;
 
+    private TagCategoryService tagCategoryService;
+
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
         userService = mock(UserService.class);
+        tagCategoryService = mock(TagCategoryService.class);
 
         PictureController pictureController = new PictureController();
         ReflectionTestUtils.setField(pictureController, "pictureService", pictureService);
@@ -48,10 +52,13 @@ class ValidationTest {
         UserController userController = new UserController();
         ReflectionTestUtils.setField(userController, "userService", userService);
 
+        TagCategoryController tagCategoryController = new TagCategoryController();
+        ReflectionTestUtils.setField(tagCategoryController, "tagCategoryService", tagCategoryService);
+
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
 
-        mockMvc = MockMvcBuilders.standaloneSetup(pictureController, userController)
+        mockMvc = MockMvcBuilders.standaloneSetup(pictureController, userController, tagCategoryController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -197,6 +204,53 @@ class ValidationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40000))
                 .andExpect(jsonPath("$.message").value("账号已存在"));
+    }
+
+    // ==================== 标签/分类字典 ====================
+
+    @Test
+    @DisplayName("标签分类：type 不是 tag/category 返回 40000")
+    void addTagCategory_rejectsIllegalType() throws Exception {
+        mockMvc.perform(post("/tag_category/add")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"other\",\"name\":\"热门\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("类型只能是 tag 或 category"));
+    }
+
+    @Test
+    @DisplayName("标签分类：名称为空返回 40000")
+    void addTagCategory_rejectsBlankName() throws Exception {
+        mockMvc.perform(post("/tag_category/add")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"tag\",\"name\":\"   \"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("名称不能为空"));
+    }
+
+    @Test
+    @DisplayName("标签分类：名称超过 64 个字符返回 40000")
+    void addTagCategory_rejectsTooLongName() throws Exception {
+        mockMvc.perform(post("/tag_category/add")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"category\",\"name\":\"" + "c".repeat(65) + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("名称不能超过 64 个字符"));
+    }
+
+    @Test
+    @DisplayName("标签分类：合法参数调用 service 并返回成功")
+    void addTagCategory_acceptsValidRequest() throws Exception {
+        when(tagCategoryService.add("tag", "热门")).thenReturn(true);
+
+        mockMvc.perform(post("/tag_category/add")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"tag\",\"name\":\"热门\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
     }
 
     // ==================== 分页上限 ====================

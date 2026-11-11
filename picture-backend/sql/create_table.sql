@@ -61,3 +61,14 @@ create table if not exists picture_review_log
     INDEX idx_pictureId (pictureId),
     INDEX idx_reviewerId (reviewerId)
     ) comment '图片审核记录' collate = utf8mb4_unicode_ci;
+
+
+-- 标签/分类字典表（由管理员维护，上传页与首页从这里读取选项）
+create table if not exists tag_category
+(
+    id         bigint auto_increment comment 'id' primary key,
+    type       varchar(16)                          not null comment '类型：tag/category',
+    name       varchar(64)                          not null comment '名称',
+    createTime datetime default CURRENT_TIMESTAMP not null comment '创建时间',
+    unique key uk_type_name (type, name)
+    ) comment '标签/分类字典' collate = utf8mb4_unicode_ci;

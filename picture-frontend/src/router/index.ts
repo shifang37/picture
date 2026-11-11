@@ -9,6 +9,7 @@ import BatchUploadPage from '@/pages/BatchUploadPage.vue'
 import MyPicturesPage from '@/pages/MyPicturesPage.vue'
 import PictureManagePage from '@/pages/admin/PictureManagePage.vue'
 import PictureReviewPage from '@/pages/admin/PictureReviewPage.vue'
+import TagCategoryManagePage from '@/pages/admin/TagCategoryManagePage.vue'
 import PictureDetailPage from '@/pages/PictureDetailPage.vue'
 import NotFoundPage from '@/pages/NotFoundPage.vue'
 
@@ -49,6 +50,11 @@ const router = createRouter({
       path: '/admin/userManage',
       name: '用户管理',
       component: UserManagePage,
+    },
+    {
+      path: '/admin/tagCategoryManage',
+      name: '标签分类管理',
+      component: TagCategoryManagePage,
     },
     {
       path: '/add_picture',
