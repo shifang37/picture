@@ -6,6 +6,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
+import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureService;
@@ -21,6 +22,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -28,6 +31,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -160,6 +164,20 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.code").value(40100));
 
         verify(pictureService, never()).deletePicture(any(), any());
+    }
+
+    @Test
+    @DisplayName("审核历史：管理员可以按图片 id 查询记录")
+    void listPictureReviewLogs_returnsLogs() throws Exception {
+        PictureReviewLog reviewLog = new PictureReviewLog();
+        reviewLog.setId(1L);
+        reviewLog.setReviewStatus(1);
+        when(pictureService.listPictureReviewLogs(2L)).thenReturn(List.of(reviewLog));
+
+        mockMvc.perform(get("/picture/review/log").param("pictureId", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.length()").value(1));
     }
 
     private User user(Long id, String role) {

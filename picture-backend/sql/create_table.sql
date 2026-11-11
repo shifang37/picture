@@ -46,3 +46,17 @@ create table if not exists picture
     INDEX idx_tags (tags),                 -- 提升基于标签的查询性能
     INDEX idx_userId (userId)              -- 提升基于用户 ID 的查询性能
     ) comment '图片' collate = utf8mb4_unicode_ci;
+
+
+-- 图片审核记录表
+create table if not exists picture_review_log
+(
+    id            bigint auto_increment comment 'id' primary key,
+    pictureId     bigint                             not null comment '图片 id',
+    reviewerId    bigint                             not null comment '审核人 id',
+    reviewStatus  int                                not null comment '审核结果：1-通过 2-拒绝',
+    reviewMessage varchar(512)                       null comment '审核意见',
+    createTime    datetime default CURRENT_TIMESTAMP not null comment '审核时间',
+    INDEX idx_pictureId (pictureId),
+    INDEX idx_reviewerId (reviewerId)
+    ) comment '图片审核记录' collate = utf8mb4_unicode_ci;

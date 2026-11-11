@@ -12,6 +12,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.model.dto.picture.*;
 import com.tzy.picturebackend.model.entity.Picture;
+import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
@@ -238,6 +239,15 @@ public class PictureController {
         User loginUser = userService.getLoginUser(request);
         pictureService.doPictureReview(pictureReviewRequest, loginUser);
         return ResultUtils.success(true);
+    }
+
+    /**
+     * 查询图片审核历史（仅管理员可用）
+     */
+    @GetMapping("/review/log")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<List<PictureReviewLog>> listPictureReviewLogs(@RequestParam Long pictureId) {
+        return ResultUtils.success(pictureService.listPictureReviewLogs(pictureId));
     }
 
     /**

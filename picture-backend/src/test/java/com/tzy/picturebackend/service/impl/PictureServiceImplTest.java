@@ -10,9 +10,11 @@ import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
+import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureVO;
+import com.tzy.picturebackend.service.PictureReviewLogService;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,15 +54,19 @@ class PictureServiceImplTest {
 
     private FileManager fileManager;
 
+    private PictureReviewLogService pictureReviewLogService;
+
     @BeforeEach
     void setUp() {
         pictureService = new PictureServiceImpl();
         userService = mock(UserService.class);
         pictureMapper = mock(PictureMapper.class);
         fileManager = mock(FileManager.class);
+        pictureReviewLogService = mock(PictureReviewLogService.class);
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
+        ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);
     }
 
     // ==================== 可见性 ====================
@@ -438,6 +444,22 @@ class PictureServiceImplTest {
         assertNull(updated.getUrl(), "不应覆盖 url");
         assertNull(updated.getName(), "不应覆盖 name");
         assertNull(updated.getUserId(), "不应覆盖 userId");
+        verify(pictureReviewLogService).record(1L, admin.getId(),
+                PictureReviewStatusEnum.REJECT.getValue(), "内容不合规");
+    }
+
+    @Test
+    @DisplayName("审核历史：按图片 id 查询审核记录")
+    void listPictureReviewLogs_returnsLogs() {
+        PictureReviewLog reviewLog = new PictureReviewLog();
+        reviewLog.setId(1L);
+        reviewLog.setPictureId(2L);
+        when(pictureReviewLogService.listByPictureId(2L)).thenReturn(List.of(reviewLog));
+
+        List<PictureReviewLog> logs = pictureService.listPictureReviewLogs(2L);
+
+        assertEquals(1, logs.size());
+        assertEquals(Long.valueOf(1L), logs.get(0).getId());
     }
 
     // ==================== 排序 ====================

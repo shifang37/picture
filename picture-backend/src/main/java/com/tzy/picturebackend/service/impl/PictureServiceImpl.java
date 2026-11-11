@@ -16,10 +16,12 @@ import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
+import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.model.vo.UserVO;
+import com.tzy.picturebackend.service.PictureReviewLogService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.service.UserService;
@@ -63,6 +65,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private PictureReviewLogService pictureReviewLogService;
 
     @Override
     public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
@@ -367,8 +372,16 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         updatePicture.setReviewTime(new Date());
         boolean result = this.updateById(updatePicture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "审核失败");
+        // 审核结果落库成功后再记录历史，失败不影响本次审核
+        pictureReviewLogService.record(id, loginUser.getId(), reviewStatus, reviewMessage);
     }
 
+    @Override
+    public List<PictureReviewLog> listPictureReviewLogs(Long pictureId) {
+        ThrowUtils.throwIf(pictureId == null || pictureId <= 0,
+                ErrorCode.PARAMS_ERROR, "图片 id 不能为空");
+        return pictureReviewLogService.listByPictureId(pictureId);
+    }
 
 }
 

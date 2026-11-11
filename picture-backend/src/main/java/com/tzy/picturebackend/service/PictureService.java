@@ -7,10 +7,13 @@ import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.baomidou.mybatisplus.spring.service.IService;
+import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 /**
 * @author shifang37
@@ -71,5 +74,13 @@ public interface PictureService extends IService<Picture> {
      * @param loginUser
      */
     void doPictureReview(PictureReviewRequest pictureReviewRequest, User loginUser);
+
+    /**
+     * 查询某张图片的审核历史
+     *
+     * @param pictureId 图片 id
+     * @return 审核记录，按时间倒序
+     */
+    List<PictureReviewLog> listPictureReviewLogs(Long pictureId);
 
 }

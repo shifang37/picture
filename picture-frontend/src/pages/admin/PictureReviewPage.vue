@@ -65,7 +65,10 @@
             <a-button type="link" @click="openReview(record, 1)">通过</a-button>
             <a-button type="link" danger @click="openReview(record, 2)">拒绝</a-button>
           </a-space>
-          <span v-else class="reviewed-text">已审核</span>
+          <a-space v-else>
+            <span class="reviewed-text">已审核</span>
+            <a-button type="link" size="small" @click="openHistory(record)">历史</a-button>
+          </a-space>
         </template>
       </template>
     </a-table>
@@ -91,6 +94,27 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal v-model:open="historyModalOpen" title="审核历史" :footer="null">
+      <a-spin :spinning="historyLoading">
+        <a-empty v-if="!historyLoading && historyList.length === 0" description="暂无审核记录" />
+        <a-timeline v-else>
+          <a-timeline-item
+            v-for="reviewLog in historyList"
+            :key="reviewLog.id"
+            :color="reviewLog.reviewStatus === 1 ? 'green' : 'red'"
+          >
+            <div class="history-title">
+              {{ reviewLog.reviewStatus === 1 ? '通过' : '拒绝' }} ·
+              {{ formatTime(reviewLog.createTime) }}
+            </div>
+            <div v-if="reviewLog.reviewMessage" class="history-message">
+              审核意见：{{ reviewLog.reviewMessage }}
+            </div>
+          </a-timeline-item>
+        </a-timeline>
+      </a-spin>
+    </a-modal>
   </div>
 </template>
 
@@ -99,6 +123,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { listPictureByPage, doPictureReview } from '@/api/pictureController'
+import { listPictureReviewLogs, type PictureReviewLog } from '@/api/pictureExtra'
 
 const columns = [
   { title: 'id', dataIndex: 'id', width: 180 },
@@ -236,6 +261,36 @@ const submitReview = async () => {
   }
 }
 
+// 审核历史
+const historyModalOpen = ref(false)
+const historyLoading = ref(false)
+const historyList = ref<PictureReviewLog[]>([])
+
+const formatTime = (value?: string) => {
+  return value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
+
+const openHistory = async (record: API.Picture) => {
+  if (!record.id) {
+    return
+  }
+  historyModalOpen.value = true
+  historyLoading.value = true
+  historyList.value = []
+  try {
+    const res = await listPictureReviewLogs(record.id)
+    if (res.data.code === 0) {
+      historyList.value = res.data.data ?? []
+    } else {
+      message.error('获取审核历史失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('获取审核历史失败：' + (e.message || '系统错误'))
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 onMounted(() => {
   fetchData()
 })
@@ -244,5 +299,16 @@ onMounted(() => {
 <style scoped>
 .reviewed-text {
   color: #999;
+}
+
+.history-title {
+  font-weight: 500;
+}
+
+.history-message {
+  color: #666;
+  font-size: 13px;
+  margin-top: 4px;
+  white-space: pre-wrap;
 }
 </style>

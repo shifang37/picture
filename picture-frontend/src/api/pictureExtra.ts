@@ -2,6 +2,31 @@
 // 生成式客户端（pictureController.ts）由 npm run openapi 重新生成，这里的内容不会被覆盖。
 import request from '@/request'
 
+export interface PictureReviewLog {
+  id?: string
+  pictureId?: string
+  reviewerId?: string
+  reviewStatus?: number
+  reviewMessage?: string
+  createTime?: string
+}
+
+/**
+ * 查询某张图片的审核历史（管理员）
+ */
+export async function listPictureReviewLogs(pictureId: string, options?: { [key: string]: any }) {
+  return request<{ code?: number; data?: PictureReviewLog[]; message?: string }>(
+    '/picture/review/log',
+    {
+      method: 'GET',
+      params: {
+        pictureId,
+      },
+      ...(options || {}),
+    },
+  )
+}
+
 /**
  * 分页获取当前登录用户的图片（含待审核 / 已拒绝）
  */
