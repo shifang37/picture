@@ -76,6 +76,12 @@
                 </template>
               </a-button>
             </a-popconfirm>
+            <a-button v-if="picture.reviewStatus === 1" @click="doShare">
+              分享
+              <template #icon>
+                <ShareAltOutlined />
+              </template>
+            </a-button>
             <a-button type="primary" @click="doDownload">
               免费下载
               <template #icon>
@@ -93,7 +99,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
+import {
+  EditOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  ShareAltOutlined,
+} from '@ant-design/icons-vue'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { getPictureVoById, deletePicture } from '@/api/pictureController'
 import { downloadImage, formatSize } from '@/utils'
@@ -187,6 +198,17 @@ const doDelete = async () => {
     }
   } catch (error: any) {
     message.error('删除失败：' + (error.message || '系统错误'))
+  }
+}
+
+// 分享：复制当前详情页链接
+const doShare = async () => {
+  const shareUrl = window.location.href
+  try {
+    await navigator.clipboard.writeText(shareUrl)
+    message.success('链接已复制，可以分享给他人了')
+  } catch {
+    message.info('复制失败，请手动复制浏览器地址栏链接：' + shareUrl)
   }
 }
 
