@@ -144,7 +144,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 
 - 后端以 `prod` profile 启动，默认关闭 Swagger 与 MyBatis SQL 日志（见 `application-prod.yml.example`）
 - 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）
-- 已有数据库升级时需要手动执行 `picture-backend/sql/create_table.sql` 中新增的 `picture_review_log` 表和 `downloadCount` 字段
+- 已有数据库升级时执行 `picture-backend/sql/upgrade_v2.sql`（新增 `picture_review_log` 表和 `downloadCount` 字段）
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
 ## 常用命令
