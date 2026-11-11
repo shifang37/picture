@@ -35,6 +35,12 @@ services:
     volumes:
       # 队列、绑定与消息持久化到卷，重建容器不丢死信
       - rabbitmq-data:/var/lib/rabbitmq
+      # 开启 prometheus 插件（15692），供 Prometheus 采集死信深度
+      - ./docker/monitoring/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      # 按队列输出指标，死信告警按 queue 标签过滤
+      - ./docker/monitoring/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    expose:
+      - '15692'
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 10s
@@ -63,7 +69,12 @@ services:
   backend:
     build: ./picture-backend
     environment:
-      SPRING_PROFILES_ACTIVE: prod
+      # observability profile 打开独立管理端口 8124 与 /actuator/prometheus
+      SPRING_PROFILES_ACTIVE: prod,observability
+      MANAGEMENT_SERVER_PORT: 8124
+      # 生产使用 ECS 结构化日志，traceId/spanId 作为独立字段输出
+      LOGGING_STRUCTURED_FORMAT_CONSOLE: ecs
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-0.1}
       DB_URL: jdbc:mysql://mysql:3306/picture?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       DB_USERNAME: root
       DB_PASSWORD: ${DB_PASSWORD:-root}
@@ -95,6 +106,8 @@ services:
       ES_PASSWORD: ${ES_PASSWORD:-picture}
     expose:
       - '8123'
+      # 管理端口只在 Compose 内网开放，供 Prometheus 抓取，不映射到宿主机
+      - '8124'
     depends_on:
       mysql:
         condition: service_healthy
@@ -119,8 +132,44 @@ services:
       backend:
         condition: service_healthy
 
+  # 指标抓取：只读 backend:8124 与 rabbitmq:15692，不映射端口到宿主机
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./docker/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # 看板：预置 Prometheus 数据源与「云图库 · 服务概览」看板
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      # 只绑定回环地址，运维通过 SSH 隧道或本机访问；不暴露到公网
+      - '127.0.0.1:${GRAFANA_PORT:-3000}:3000'
+    depends_on:
+      - prometheus
+
 volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
   elasticsearch-data:
+  prometheus-data:
+  grafana-data:

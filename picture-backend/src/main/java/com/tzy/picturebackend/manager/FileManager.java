@@ -11,6 +11,7 @@ import com.tzy.picturebackend.config.CosClientConfig;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -75,6 +76,9 @@ public class FileManager {
 
     @Resource
     private CosManager cosManager;
+
+    @Resource
+    private PictureMetrics pictureMetrics;
 
     /**
      * 上传图片
@@ -149,6 +153,13 @@ public class FileManager {
      * @return 压缩后的临时文件；无需压缩或压缩失败时返回原文件
      */
     File compressIfNeeded(File source, String suffix) {
+        return pictureMetrics.compressTimer().record(() -> doCompressIfNeeded(source, suffix));
+    }
+
+    /**
+     * 压缩的具体实现；计时放在外层，提前返回和异常回退也会被计时器记录
+     */
+    private File doCompressIfNeeded(File source, String suffix) {
         if (source == null || StrUtil.isBlank(suffix)) {
             return source;
         }

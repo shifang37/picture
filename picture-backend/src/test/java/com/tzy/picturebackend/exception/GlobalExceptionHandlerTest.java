@@ -3,9 +3,11 @@ package com.tzy.picturebackend.exception;
 import com.tzy.picturebackend.common.BaseResponse;
 import com.tzy.picturebackend.controller.PictureController;
 import com.tzy.picturebackend.controller.UserController;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,11 +37,14 @@ class GlobalExceptionHandlerTest {
 
     private GlobalExceptionHandler handler;
 
+    private SimpleMeterRegistry meterRegistry;
+
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        handler = new GlobalExceptionHandler();
+        meterRegistry = new SimpleMeterRegistry();
+        handler = new GlobalExceptionHandler(new PictureMetrics(meterRegistry));
         PictureService pictureService = mock(PictureService.class);
         UserService userService = mock(UserService.class);
 
@@ -178,5 +183,7 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(40101, response.getCode());
         assertEquals("无权限操作", response.getMessage());
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.API_ERRORS)
+                .tag("code", "40101").counter().count());
     }
 }

@@ -14,6 +14,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
@@ -85,6 +86,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Resource
     private TagCategoryService tagCategoryService;
 
+    @Resource
+    private PictureMetrics pictureMetrics;
+
     /**
      * 发布图片事件（Spring 应用事件，由监听器转发到 RabbitMQ）
      */
@@ -93,6 +97,22 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Override
     public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
+        try {
+            PictureVO pictureVO = doUploadPicture(multipartFile, pictureUploadRequest, loginUser);
+            pictureMetrics.upload("success");
+            return pictureVO;
+        } catch (RuntimeException e) {
+            // 上传失败包含校验失败、COS 失败、入库失败等所有异常
+            pictureMetrics.upload("failure");
+            throw e;
+        }
+    }
+
+    /**
+     * 上传主流程；指标埋点放在外层，保证任何异常路径都能被统计到
+     */
+    private PictureVO doUploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest,
+                                      User loginUser) {
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
         // 普通用户可以上传，管理员上传后自动通过审核
         boolean isAdmin = userService.isAdmin(loginUser);

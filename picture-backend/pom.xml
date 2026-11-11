@@ -81,6 +81,18 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Prometheus 指标导出：/actuator/prometheus 只监听独立管理端口 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
+        <!-- 链路标识：traceId/spanId 写入日志，并随 RabbitMQ 消息跨消费者传递 -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-bridge-brave</artifactId>
+        </dependency>
+
         <!-- Redis：Spring Session 会话存储、会话失效版本、限流计数 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

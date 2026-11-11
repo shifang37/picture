@@ -1,0 +1,24 @@
+# 生产环境 Prometheus 抓取配置。
+# Prometheus 与 backend/rabbitmq 同在 compose 内网，8124/15692 不映射到宿主机。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: picture-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['backend:8124']
+
+  # rabbitmq_prometheus 插件提供队列深度，死信告警依赖它
+  - job_name: rabbitmq
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['rabbitmq:15692']
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

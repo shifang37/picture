@@ -1,9 +1,13 @@
 package com.tzy.picturebackend.manager;
 
 import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.metrics.PictureMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import javax.imageio.ImageIO;
 import java.awt.AlphaComposite;
@@ -32,7 +36,14 @@ class FileManagerCompressionTest {
 
     private final FileManager fileManager = new FileManager();
 
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
     private final List<File> tempFiles = new ArrayList<>();
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(fileManager, "pictureMetrics", new PictureMetrics(meterRegistry));
+    }
 
     @AfterEach
     void cleanup() {
@@ -58,6 +69,8 @@ class FileManagerCompressionTest {
         assertEquals(1.5, result.getWidth() / (double) result.getHeight(), 0.01);
         assertTrue(compressed.length() < originalSize,
                 "压缩后体积应下降: " + originalSize + " -> " + compressed.length());
+        assertEquals(1L, meterRegistry.get(PictureMetrics.COMPRESS).timer().count(),
+                "压缩耗时应被计时器记录一次");
     }
 
     @Test

@@ -1,0 +1,50 @@
+# B3-1 告警规则：业务码、延迟、连接池、死信、审核积压。
+# 说明：接口错误统一返回 HTTP 200 + 业务码，不能按 5xx 告警；
+# picture_api_errors_total 由 GlobalExceptionHandler 埋点，限流由 RateLimitFilter 单独计数。
+groups:
+  - name: picture-backend
+    rules:
+      - alert: PictureSystemErrorRateHigh
+        expr: sum(rate(picture_api_errors_total{code="50000"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: '系统错误码 50000 持续出现'
+          description: '过去 5 分钟系统错误速率 {{ $value | humanize }} 次/秒，检查后端日志中的 traceId 定位请求链路。'
+
+      - alert: PictureApiLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job="picture-backend"}[5m]))) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: '接口 p95 延迟超过 1 秒'
+          description: '当前 p95 为 {{ $value | humanizeDuration }}，优先检查数据库连接池与 COS/ES 外部调用。'
+
+      - alert: PictureDatabasePoolWaiting
+        expr: max(hikaricp_connections_pending{job="picture-backend"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: '有请求在等待数据库连接'
+          description: 'HikariCP 等待队列持续非空（{{ $value | humanize }} 个），可能是慢查询或连接数不足。'
+
+      - alert: PictureDeadLetterQueueNotEmpty
+        expr: sum(rabbitmq_queue_messages{job="rabbitmq", queue=~".+[.]dlq"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: '死信队列出现消息'
+          description: '死信总数 {{ $value | humanize }}，检查 picture.moderation.q.dlq / picture.ai.q.dlq / picture.search.q.dlq 与消费者日志。'
+
+      - alert: PictureReviewBacklog
+        expr: max(picture_review_pending{job="picture-backend"}) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: '待审核图片积压'
+          description: '待审核 {{ $value | humanize }} 张，持续 10 分钟；检查审核队列与管理员处理进度。'

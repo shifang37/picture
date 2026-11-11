@@ -142,23 +142,36 @@ cos:
     region: ${COS_REGION:ap-beijing}
     bucket: ${COS_BUCKET:}
 
-# 健康检查（生产环境可通过 /api/actuator/health 探测）
+# 健康检查（observability profile 下通过 8124 管理端口的 /actuator/health 探测）
 # 公网 /api 会经过 nginx 反向代理，只暴露 health/info；metrics 属于内部信息。
-# 确实需要 metrics 时使用独立管理端口（例如 management.server.port: 8124），
-# 只在内网/监控网络开放，不要把 metrics 加回这里的 include。
+# 需要 Prometheus 抓取时使用独立管理端口（application-observability.yml 已配置 8124），
+# 只在内网/监控网络开放，不要把 prometheus 加回公网默认值。
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: ${MANAGEMENT_ENDPOINTS:health,info}
   endpoint:
     health:
       probes:
         enabled: true
       show-details: never
+  metrics:
+    # 所有指标统一带 application 标签，多环境共用一套 Prometheus 时也能区分
+    tags:
+      application: ${spring.application.name:picture-backend}
+    distribution:
+      percentiles-histogram:
+        # 延迟告警按 p95 判断，必须开启直方图桶
+        http.server.requests: true
+        picture.compress: true
+  tracing:
+    sampling:
+      # 链路标识默认采样 10%，生产可用环境变量调整；采样率不影响 traceId 写入日志
+      probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
   health:
     # 默认不启用 Elasticsearch 健康检查：SEARCH_ENGINE=mysql 时没有 ES 可连，
-    # 否则 /api/actuator/health 会被错误地标记为 DOWN。
+    # 否则 Actuator health 会被错误地标记为 DOWN。
     # 启用搜索后如需监控 ES 连通性，把它设为 true。
     elasticsearch:
       enabled: ${SEARCH_HEALTH_ENABLED:false}

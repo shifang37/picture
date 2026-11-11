@@ -7,6 +7,7 @@ import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureMapper;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
@@ -30,6 +31,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.util.Date;
 import java.util.List;
@@ -71,6 +73,8 @@ class PictureServiceImplTest {
 
     private PictureEventPublisher pictureEventPublisher;
 
+    private SimpleMeterRegistry meterRegistry;
+
     @BeforeEach
     void setUp() {
         pictureService = new PictureServiceImpl();
@@ -81,6 +85,7 @@ class PictureServiceImplTest {
         tagCategoryService = mock(TagCategoryService.class);
         pictureListCache = mock(PictureListCache.class);
         pictureEventPublisher = mock(PictureEventPublisher.class);
+        meterRegistry = new SimpleMeterRegistry();
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
@@ -88,6 +93,7 @@ class PictureServiceImplTest {
         ReflectionTestUtils.setField(pictureService, "tagCategoryService", tagCategoryService);
         ReflectionTestUtils.setField(pictureService, "pictureListCache", pictureListCache);
         ReflectionTestUtils.setField(pictureService, "pictureEventPublisher", pictureEventPublisher);
+        ReflectionTestUtils.setField(pictureService, "pictureMetrics", new PictureMetrics(meterRegistry));
     }
 
     // ==================== 可见性 ====================
@@ -180,6 +186,8 @@ class PictureServiceImplTest {
         assertEquals(Integer.valueOf(PictureReviewStatusEnum.REVIEWING.getValue()), pictureVO.getReviewStatus());
         verifyNoInteractions(pictureReviewLogService);
         verify(pictureEventPublisher).pictureUploaded(1L);
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.UPLOAD)
+                .tag("result", "success").counter().count());
     }
 
     @Test
@@ -286,6 +294,8 @@ class PictureServiceImplTest {
                 () -> pictureService.uploadPicture(jpegFile(), null, null));
         verifyNoInteractions(fileManager);
         verifyNoInteractions(pictureEventPublisher);
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.UPLOAD)
+                .tag("result", "failure").counter().count());
     }
 
     // ==================== 删除 ====================

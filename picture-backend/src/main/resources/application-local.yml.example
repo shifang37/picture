@@ -33,6 +33,15 @@ springdoc:
     - group: 'default'
       paths-to-match: '/**'
       packages-to-scan: com.tzy.picturebackend.controller
+# 本地可观测性（可选）：打开后 Prometheus 从 host.docker.internal:8124 抓取
+# 也可以启动时用 --management.server.port=8124 临时覆盖，避免改动本地配置
+# management:
+#   server:
+#     port: 8124
+#   endpoints:
+#     web:
+#       exposure:
+#         include: health,info,prometheus
 # 对象存储配置（需要从腾讯云获取）
 cos:
   client:

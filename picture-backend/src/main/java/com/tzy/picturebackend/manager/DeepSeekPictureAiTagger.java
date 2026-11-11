@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tzy.picturebackend.config.AiProperties;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -57,11 +58,15 @@ public class DeepSeekPictureAiTagger implements PictureAiTagger {
 
     private final ObjectMapper objectMapper;
 
+    private final PictureMetrics pictureMetrics;
+
     private final HttpClient httpClient;
 
-    public DeepSeekPictureAiTagger(AiProperties aiProperties, ObjectMapper objectMapper) {
+    public DeepSeekPictureAiTagger(AiProperties aiProperties, ObjectMapper objectMapper,
+                                   PictureMetrics pictureMetrics) {
         this.aiProperties = aiProperties;
         this.objectMapper = objectMapper;
+        this.pictureMetrics = pictureMetrics;
         Duration timeout = aiProperties.getTimeout() == null
                 ? Duration.ofSeconds(60) : aiProperties.getTimeout();
         this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
@@ -150,6 +155,10 @@ public class DeepSeekPictureAiTagger implements PictureAiTagger {
         } catch (JsonProcessingException e) {
             throw AiSuggestionException.permanent("DeepSeek 响应不是合法 JSON", e);
         }
+        // 按 token 计费：请求成功时累计 usage，便于 Grafana 观察每日成本
+        JsonNode usage = root.path("usage");
+        pictureMetrics.aiTokens("prompt", usage.path("prompt_tokens").asLong(0));
+        pictureMetrics.aiTokens("completion", usage.path("completion_tokens").asLong(0));
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
             throw AiSuggestionException.permanent("DeepSeek 响应缺少 choices");

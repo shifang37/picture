@@ -3,6 +3,7 @@ package com.tzy.picturebackend.filter;
 import cn.hutool.core.util.StrUtil;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.RateLimitManager;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,6 +38,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Resource
     private RateLimitManager rateLimitManager;
 
+    @Resource
+    private PictureMetrics pictureMetrics;
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
@@ -53,6 +57,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 rateLimitManager.check(uploadKey(request), UPLOAD_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
             }
         } catch (BusinessException e) {
+            // 限流响应同样是 HTTP 200，按业务码无法区分来源，这里单独计数
+            pictureMetrics.rateLimited("/user/login".equals(path) ? "login" : "upload");
             writeError(response, e.getCode(), e.getMessage());
             return;
         }

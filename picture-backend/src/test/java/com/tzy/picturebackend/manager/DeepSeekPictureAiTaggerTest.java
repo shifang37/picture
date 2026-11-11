@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import com.tzy.picturebackend.config.AiProperties;
+import com.tzy.picturebackend.metrics.PictureMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -30,6 +32,8 @@ class DeepSeekPictureAiTaggerTest {
     private static final String IMAGE_URL = "https://bucket.cos.ap-beijing.myqcloud.com/public/1/a.jpg?imageMogr2/thumbnail/1024x";
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     private HttpServer server;
 
@@ -74,7 +78,8 @@ class DeepSeekPictureAiTaggerTest {
         properties.setModel("deepseek-flash");
         properties.setTimeout(Duration.ofSeconds(5));
         properties.setMaxRetries(2);
-        tagger = new DeepSeekPictureAiTagger(properties, objectMapper);
+        tagger = new DeepSeekPictureAiTagger(properties, objectMapper,
+                new PictureMetrics(meterRegistry));
     }
 
     @AfterEach
@@ -106,6 +111,10 @@ class DeepSeekPictureAiTaggerTest {
         assertTrue(userContent.get(0).path("text").asText().contains("分类字典"));
         assertTrue(userContent.get(0).path("text").asText().contains("风景"));
         assertEquals(IMAGE_URL, userContent.get(1).path("image_url").path("url").asText());
+        assertEquals(100.0, meterRegistry.get(PictureMetrics.AI_TOKENS)
+                .tag("direction", "prompt").counter().count());
+        assertEquals(20.0, meterRegistry.get(PictureMetrics.AI_TOKENS)
+                .tag("direction", "completion").counter().count());
     }
 
     @Test
@@ -198,14 +207,18 @@ class DeepSeekPictureAiTaggerTest {
 
     private String suggestionJson(String name, String category, List<String> tags) {
         try {
-            return objectMapper.writeValueAsString(objectMapper.createObjectNode()
-                    .set("choices", objectMapper.createArrayNode().add(
-                            objectMapper.createObjectNode()
-                                    .put("finish_reason", "stop")
-                                    .set("message", objectMapper.createObjectNode()
-                                            .put("content", objectMapper.writeValueAsString(
-                                                    new AiSuggestionPayload(name, "夕阳下的海面",
-                                                            category, tags)))))));
+            var root = objectMapper.createObjectNode();
+            root.set("choices", objectMapper.createArrayNode().add(
+                    objectMapper.createObjectNode()
+                            .put("finish_reason", "stop")
+                            .set("message", objectMapper.createObjectNode()
+                                    .put("content", objectMapper.writeValueAsString(
+                                            new AiSuggestionPayload(name, "夕阳下的海面",
+                                                    category, tags))))));
+            root.set("usage", objectMapper.createObjectNode()
+                    .put("prompt_tokens", 100)
+                    .put("completion_tokens", 20));
+            return objectMapper.writeValueAsString(root);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

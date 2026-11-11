@@ -3,6 +3,8 @@ package com.tzy.picturebackend.filter;
 import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.manager.InMemoryRateLimitCounter;
 import com.tzy.picturebackend.manager.RateLimitManager;
+import com.tzy.picturebackend.metrics.PictureMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,11 +30,15 @@ class RateLimitFilterTest {
 
     private RateLimitFilter rateLimitFilter;
 
+    private SimpleMeterRegistry meterRegistry;
+
     @BeforeEach
     void setUp() {
         rateLimitManager = new RateLimitManager(new InMemoryRateLimitCounter());
         rateLimitFilter = new RateLimitFilter();
+        meterRegistry = new SimpleMeterRegistry();
         ReflectionTestUtils.setField(rateLimitFilter, "rateLimitManager", rateLimitManager);
+        ReflectionTestUtils.setField(rateLimitFilter, "pictureMetrics", new PictureMetrics(meterRegistry));
     }
 
     @Test
@@ -63,6 +69,8 @@ class RateLimitFilterTest {
         assertEquals(200, lastResponse.getStatus());
         assertTrue(lastResponse.getContentAsString().contains("\"code\":42900"));
         assertNull(lastChain.getRequest(), "超过限流后不应继续执行");
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.RATE_LIMITED)
+                .tag("type", "login").counter().count());
     }
 
     @Test
@@ -84,6 +92,8 @@ class RateLimitFilterTest {
 
         assertTrue(lastResponse.getContentAsString().contains("\"code\":42900"));
         assertNull(lastChain.getRequest(), "超过限流后不应继续执行");
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.RATE_LIMITED)
+                .tag("type", "upload").counter().count());
     }
 
     @Test

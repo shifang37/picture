@@ -10,6 +10,13 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:picture}
     password: ${RABBITMQ_PASSWORD:picture}
+    template:
+      # 发布消息时创建 Observation，traceId 随消息头传给消费者
+      observation-enabled: true
+    listener:
+      simple:
+        # 消费消息时继续同一条 trace，日志里能串起「上传 → 机审 → 索引」
+        observation-enabled: true
   # 全文搜索（SEARCH_ENGINE=es 时使用 compose 内网的 elasticsearch）
   elasticsearch:
     uris: ${ES_URIS:http://elasticsearch:9200}
@@ -77,16 +84,11 @@ app:
   search:
     # mysql（默认，沿用模糊查询）| es（Elasticsearch 全文检索）
     engine: ${SEARCH_ENGINE:mysql}
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
-  # 需要 metrics 时使用独立管理端口，只在内网/监控网络开放：
-  # server:
-  #   port: 8124
-  endpoint:
-    health:
-      probes:
-        enabled: true
-      show-details: never
+# 可观测性（8124 管理端口、prometheus 端点、RabbitMQ 链路）统一放在
+# application-observability.yml，Compose 通过 SPRING_PROFILES_ACTIVE=prod,observability 激活。
+# 手工部署时除了 prod 还要同时激活 observability，否则 /actuator/prometheus 不可用。
+logging:
+  structured:
+    format:
+      # Spring Boot 3.4+ 内置结构化日志；traceId/spanId 作为独立字段输出，也可用 LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs 覆盖
+      console: ecs

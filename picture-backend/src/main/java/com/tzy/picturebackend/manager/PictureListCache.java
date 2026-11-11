@@ -7,6 +7,9 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.tzy.picturebackend.model.dto.picture.PictureListPage;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
+import com.tzy.picturebackend.metrics.PictureMetrics;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -55,14 +58,29 @@ public class PictureListCache {
 
     private final ObjectMapper objectMapper;
 
+    @Resource
+    private PictureMetrics pictureMetrics;
+
     private final Cache<String, PictureListPage> localCache = Caffeine.newBuilder()
             .maximumSize(LOCAL_MAX_SIZE)
             .expireAfterWrite(LOCAL_TTL)
+            // 开启统计后 Micrometer 才能计算命中率（cache_gets_total）
+            .recordStats()
             .build();
 
     public PictureListCache(StringRedisTemplate redisTemplate, ObjectMapper objectMapper) {
         this.redisTemplate = redisTemplate;
         this.objectMapper = objectMapper;
+    }
+
+    /**
+     * 把本地缓存命中率注册到 Micrometer；单元测试直接 new 时不执行
+     */
+    @PostConstruct
+    void registerCacheMetrics() {
+        if (pictureMetrics != null) {
+            pictureMetrics.registerCaffeineCache("picture.list.local", localCache);
+        }
     }
 
     /**

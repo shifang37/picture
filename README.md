@@ -334,7 +334,7 @@ app:
 - **同步**：`picture.uploaded` / `picture.changed` 事件驱动，`picture.search.q` 消费者按 id 回查：公开可见就写入索引，待审核、拒绝、删除则删除文档；
 - **全量重建**：`POST /api/search/reindex`（仅管理员），每批 500 条从 MySQL 写入临时索引，完成后原子切换别名再删除旧索引；首次启用、索引损坏或巡检不一致时使用；
 - **一致性巡检**：`SEARCH_ENGINE=es` 时每天 03:00 对比 MySQL 公开图片数与索引文档数，不一致时记录「搜索索引与数据库不一致」告警日志；
-- **健康检查**：默认不启用 Elasticsearch 健康项，避免 MySQL 搜索模式下 `/api/actuator/health` 被误判为 DOWN；启用搜索后可设置 `SEARCH_HEALTH_ENABLED=true`。
+- **健康检查**：默认不启用 Elasticsearch 健康项，避免 MySQL 搜索模式下 Actuator health 被误判为 DOWN；启用搜索后可设置 `SEARCH_HEALTH_ENABLED=true`。
 
 本地启用步骤：
 
@@ -376,9 +376,9 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 
 说明：
 
-- 后端以 `prod` profile 启动，默认关闭 Swagger 与 MyBatis SQL 日志（见 `application-prod.yml.example`）
-- 健康检查：`/api/health`（Docker healthcheck）与 `/api/actuator/health`（Actuator）；Elasticsearch 健康项默认关闭，启用搜索后可设 `SEARCH_HEALTH_ENABLED=true`
-- **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/metrics` 不再可访问；确需 metrics 时使用独立管理端口（例如 `management.server.port: 8124`），该端口不要经过 nginx，只在内网/监控网络开放
+- 后端以 `prod,observability` profile 启动，默认关闭 Swagger 与 MyBatis SQL 日志（见 `application-prod.yml.example`）
+- 健康检查：`/api/health`（Docker healthcheck，始终可用）。启用 `observability` profile 后 Actuator 搬到独立管理端口：`http://backend:8124/actuator/health`，该端口不经过 nginx、不映射到宿主机；Elasticsearch 健康项默认关闭，启用搜索后可设 `SEARCH_HEALTH_ENABLED=true`
+- **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/prometheus` 不可访问；Prometheus 指标只在独立管理端口 8124 暴露，详见下一节「可观测性」
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
 - **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增更高版本的迁移脚本（如 `V7__xxx.sql`）
 - **Redis 与会话**：compose 内置 `redis` 服务（AOF 持久化 + 密码认证，密码由 `REDIS_PASSWORD` 指定，务必改掉默认值）；`redis-data` 卷保存会话与失效版本，删除该卷会让所有用户重新登录
@@ -388,10 +388,95 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 - **机审费用与权限**：开启机审前确认 COS 桶已绑定数据万象、账号具备 `ci:CreateAuditingPictureJob`；图片审核按张计费，默认关闭
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
+## 可观测性（Prometheus / Grafana）
+
+所有业务异常和限流响应都是 **HTTP 200 + 业务码**，`http_server_requests` 里几乎全是 200，
+基于 5xx 的告警不会触发。因此这里按业务码自建指标，并用 Prometheus 抓取、Grafana 展示。
+
+### 组件与端口
+
+| 组件 | 端口 | 暴露范围 |
+| --- | --- | --- |
+| 业务端口 | 8123 | 经 nginx 只暴露 `/api`，不含 Prometheus 端点 |
+| Actuator 管理端口 | 8124 | 仅 Compose 内网；`/actuator/health`、`/actuator/prometheus` |
+| Prometheus | 9090 | 生产不映射到宿主机；本地仅绑定 `127.0.0.1:9090` |
+| Grafana | 3000 | 仅绑定 `127.0.0.1:3000`，通过 `.env` 的 `GRAFANA_ADMIN_PASSWORD` 登录 |
+| RabbitMQ Prometheus | 15692 | 仅 Compose 内网，由 `docker/monitoring/rabbitmq/enabled_plugins` 开启插件 |
+
+> RabbitMQ 默认只输出聚合指标，`docker/monitoring/rabbitmq/rabbitmq.conf` 打开了
+> `prometheus.return_per_object_metrics`，队列指标才会带 `queue` 标签，死信告警才能按 `*.dlq` 过滤。
+
+可观测性配置放在 `picture-backend/src/main/resources/application-observability.yml`，
+生产 Compose 已通过 `SPRING_PROFILES_ACTIVE=prod,observability` 激活。手工部署时需要同时激活
+`prod` 与 `observability` 两个 profile，否则 8124 管理端口和 `/actuator/prometheus` 都不会出现。
+
+### 本地启动
+
+```powershell
+# 启动 Redis / RabbitMQ / Prometheus / Grafana（按需只起后三个也可以）
+docker compose -f docker-compose.infra.yml up -d
+
+cd picture-backend
+# 同时激活本地配置与可观测性；日志仍是可读文本，不会变成 ECS JSON
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=local,observability"
+```
+
+- Prometheus：<http://127.0.0.1:9090>，Targets 页面应看到 `picture-backend` 与 `rabbitmq` 为 UP；
+  告警状态在 <http://127.0.0.1:9090/alerts>。
+- Grafana：<http://127.0.0.1:3000>，默认数据源与「云图库 · 服务概览」看板已预置。
+- 后端启动参数等价于 `--management.server.port=8124 --management.endpoints.web.exposure.include=health,info,prometheus`。
+
+生产 Compose 启动后 Grafana 同样只监听宿主机回环地址 `127.0.0.1:3000`；
+Prometheus、8124 管理端口、RabbitMQ 15692 都只在 Compose 内网可达。
+
+### 自定义指标
+
+| 指标 | 类型 | 埋点位置 | 说明 |
+| --- | --- | --- | --- |
+| `picture_api_errors_total{code}` | Counter | `GlobalExceptionHandler` | 全部 13 个异常分支按业务码计数 |
+| `picture_rate_limited_total{type}` | Counter | `RateLimitFilter` | `type=login/upload`，限流响应不经过异常处理器 |
+| `picture_upload_total{result}` | Counter | `PictureServiceImpl#uploadPicture` | 成功/失败，失败包含校验、COS、入库异常 |
+| `picture_compress_seconds` | Timer | `FileManager#compressIfNeeded` | 开启直方图桶，可算 p95 |
+| `picture_review_pending` | Gauge | `PictureReviewPendingMetrics` | 每 60 秒查一次待审核数量，抓取时不打库 |
+| `picture_ai_tokens_total{direction}` | Counter | `DeepSeekPictureAiTagger` | 按 `prompt/completion` 累计 token，用于估算成本 |
+| `cache_gets_total{cache="picture.list.local"}` | Counter | `PictureListCache` | Caffeine 开启 `recordStats` 后由 Micrometer 导出，可算命中率 |
+
+`http_server_requests_seconds` 已开启 `percentiles-histogram`，接口 p95 延迟可直接用
+`histogram_quantile(0.95, ...)` 计算。
+
+### 日志与链路标识
+
+- 依赖 `micrometer-tracing-bridge-brave`，请求、消息发布、消息消费共用一条 trace；
+- RabbitMQ 的 `template.observation-enabled` 与 `listener.simple.observation-enabled` 已打开，
+  消费者日志里的 `traceId` 与上传请求一致；
+- 生产环境通过 `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` 输出 ECS JSON，trace 字段为 `traceId` / `spanId`；
+- 采样率由 `TRACING_SAMPLING_PROBABILITY` 控制（默认 0.1），只影响链路数据量，不影响日志里的 traceId。
+
+排查示例：先看 Grafana 的「业务错误速率」定位业务码，再用 traceId 过滤日志：
+
+```powershell
+docker compose logs backend | Select-String 'traceId'
+```
+
+### 告警规则
+
+规则文件：`docker/monitoring/prometheus/alerts.yml`。没有引入 Alertmanager，
+Prometheus 的 `/alerts` 页面会显示 pending/firing，可再按需接钉钉、邮件或 Alertmanager。
+
+| 告警 | 条件 | 持续时间 |
+| --- | --- | --- |
+| `PictureSystemErrorRateHigh` | `picture_api_errors_total{code="50000"}` 速率 > 0.1/s | 5 分钟 |
+| `PictureApiLatencyHigh` | 接口 p95 > 1s | 5 分钟 |
+| `PictureDatabasePoolWaiting` | HikariCP 等待连接数 > 0 | 5 分钟 |
+| `PictureDeadLetterQueueNotEmpty` | 任一 `*.dlq` 队列消息数 > 0 | 1 分钟 |
+| `PictureReviewBacklog` | 待审核图片 > 100 张 | 10 分钟 |
+
+> 8124、9090、15692 都不要映射到公网；Grafana 只绑定回环地址，并务必修改 `.env` 中的默认密码。
+
 ## 常用命令
 
 ```bash
-# 本地基础设施（Redis / RabbitMQ / Elasticsearch）
+# 本地基础设施（Redis / RabbitMQ / Elasticsearch / Prometheus / Grafana）
 docker compose -f docker-compose.infra.yml up -d
 docker compose -f docker-compose.infra.yml down
 
@@ -417,7 +502,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **329 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **337 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

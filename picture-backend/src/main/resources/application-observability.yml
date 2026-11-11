@@ -1,0 +1,26 @@
+# 可观测性 profile：由 docker-compose 的 SPRING_PROFILES_ACTIVE=prod,observability 激活，
+# 本地调试也可用 --spring.profiles.active=local,observability 单独打开。
+# 只在独立管理端口暴露 Prometheus，公网 /api 仍然只有 health/info。
+management:
+  server:
+    # 8124 不经过 nginx，只供 Compose 内网的 Prometheus 抓取
+    port: ${MANAGEMENT_SERVER_PORT:8124}
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS:health,info,prometheus}
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+spring:
+  rabbitmq:
+    template:
+      # 发布消息时创建 Observation，traceId 随消息头传给消费者
+      observation-enabled: true
+    listener:
+      simple:
+        # 消费消息时继续同一条 trace，日志里能串起「上传 → 机审 → 索引」
+        observation-enabled: true
