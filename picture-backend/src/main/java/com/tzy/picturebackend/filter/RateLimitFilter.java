@@ -78,12 +78,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (StrUtil.isNotBlank(forwarded)) {
-            // 取第一个地址，兼容反向代理场景
-            return forwarded.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
+        // 只使用容器解析后的远程地址，绝不直接信任客户端可伪造的 X-Forwarded-For。
+        // 生产环境通过 server.forward-headers-strategy=native 由 Tomcat RemoteIpValve
+        // 仅在请求来自受信代理时解析转发头；nginx 也会用真实 remote_addr 覆盖该头。
+        String remoteAddr = request.getRemoteAddr();
+        return StrUtil.isBlank(remoteAddr) ? "unknown" : remoteAddr;
     }
 
     private void writeError(HttpServletResponse response, int code, String message) throws IOException {

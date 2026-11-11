@@ -78,6 +78,26 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("登录：伪造 X-Forwarded-For 不能绕过同一来源 IP 的限流")
+    void login_ignoresSpoofedForwardedHeader() throws Exception {
+        MockHttpServletResponse lastResponse = null;
+        MockFilterChain lastChain = null;
+        for (int i = 0; i < 11; i++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/user/login");
+            request.setContextPath("/api");
+            request.setRemoteAddr("10.0.0.9");
+            // 每次都伪造不同的转发头，限流仍应按真实 remoteAddr 计数
+            request.addHeader("X-Forwarded-For", "203.0.113." + i);
+            lastResponse = new MockHttpServletResponse();
+            lastChain = new MockFilterChain();
+            rateLimitFilter.doFilter(request, lastResponse, lastChain);
+        }
+
+        assertTrue(lastResponse.getContentAsString().contains("\"code\":42900"));
+        assertNull(lastChain.getRequest(), "超过限流后不应继续执行");
+    }
+
+    @Test
     @DisplayName("限流：未达到限制的正常请求继续放行")
     void normalRequest_passes() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/user/login");

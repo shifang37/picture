@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.manager;
 
+import com.tzy.picturebackend.exception.BusinessException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,9 +18,11 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -100,6 +103,17 @@ class FileManagerCompressionTest {
         Files.write(source.toPath(), "not-an-image".getBytes(StandardCharsets.UTF_8));
 
         assertSame(source, fileManager.compressIfNeeded(source, "jpg"));
+    }
+
+    @Test
+    @DisplayName("像素校验：超过 4000 万像素拒绝，边界值放行")
+    void validatePixelCount_enforcesLimit() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> FileManager.validatePixelCount(7000, 6000));
+        assertTrue(e.getMessage().contains("像素过大"));
+
+        assertDoesNotThrow(() -> FileManager.validatePixelCount(8000, 5000));
+        assertThrows(BusinessException.class, () -> FileManager.validatePixelCount(0, 100));
     }
 
     @Test

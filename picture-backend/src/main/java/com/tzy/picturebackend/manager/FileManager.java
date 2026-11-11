@@ -19,11 +19,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -62,6 +64,11 @@ public class FileManager {
      * JPEG 超过该体积时即便尺寸不大也重新编码压缩
      */
     static final long JPEG_COMPRESS_THRESHOLD = (long) (1.5 * 1024 * 1024);
+
+    /**
+     * 单张图片最大像素数：防止解压炸弹在压缩阶段耗尽内存
+     */
+    static final long MAX_PIXELS = 40_000_000L;
 
     @Resource
     private CosClientConfig cosClientConfig;
@@ -114,6 +121,9 @@ public class FileManager {
             uploadPictureResult.setPicSize(FileUtil.size(uploadFile));
             uploadPictureResult.setUrl(cosClientConfig.getHost() + "/" + uploadPath);
             return uploadPictureResult;
+        } catch (BusinessException e) {
+            // 业务校验异常（例如图片像素过大）需要保留原始错误信息
+            throw e;
         } catch (Exception e) {
             log.error("图片上传到存储失败",e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR,"上传失败");
@@ -150,14 +160,24 @@ public class FileManager {
             return source;
         }
         File compressed = null;
+        int width;
+        int height;
         try {
-            BufferedImage image = ImageIO.read(source);
-            if (image == null) {
-                log.warn("无法解析图片内容，跳压缩, suffix = {}", suffix);
+            // 先只读图片头获取宽高，避免对大尺寸图片直接全量解码
+            int[] dimensions = readImageDimensions(source);
+            if (dimensions == null) {
+                log.warn("无法读取图片尺寸，跳过压缩, suffix = {}", suffix);
                 return source;
             }
-            int width = image.getWidth();
-            int height = image.getHeight();
+            width = dimensions[0];
+            height = dimensions[1];
+        } catch (Exception e) {
+            log.warn("读取图片尺寸失败，跳过压缩, suffix = {}", suffix, e);
+            return source;
+        }
+        // 像素超限直接拒绝上传，避免 ImageIO/Thumbnailator 全量解码导致 OOM
+        validatePixelCount(width, height);
+        try {
             int longSide = Math.max(width, height);
             boolean needResize = longSide > MAX_DIMENSION;
             boolean needQuality = jpeg && source.length() > JPEG_COMPRESS_THRESHOLD;
@@ -195,6 +215,41 @@ public class FileManager {
             }
             return source;
         }
+    }
+
+    /**
+     * 只读取图片头中的宽高，不进行像素解码
+     *
+     * @param source 图片文件
+     * @return [width, height]，无法识别时返回 null
+     */
+    private int[] readImageDimensions(File source) throws IOException {
+        try (ImageInputStream input = ImageIO.createImageInputStream(source)) {
+            if (input == null) {
+                return null;
+            }
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) {
+                return null;
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(input, true, true);
+                return new int[]{reader.getWidth(0), reader.getHeight(0)};
+            } finally {
+                reader.dispose();
+            }
+        }
+    }
+
+    /**
+     * 校验图片像素数，防止高压缩比图片在解码时耗尽内存
+     */
+    static void validatePixelCount(int width, int height) {
+        ThrowUtils.throwIf(width <= 0 || height <= 0, ErrorCode.PARAMS_ERROR, "图片尺寸不合法");
+        long pixels = (long) width * height;
+        ThrowUtils.throwIf(pixels > MAX_PIXELS, ErrorCode.PARAMS_ERROR,
+                "图片像素过大，最多支持 " + (MAX_PIXELS / 10_000) + " 万像素");
     }
 
     /**
