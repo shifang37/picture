@@ -104,6 +104,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 
 - Swagger UI：`http://localhost:8123/api/swagger-ui/index.html`
 - OpenAPI JSON：`http://localhost:8123/api/v3/api-docs`
+- 默认配置关闭 Swagger 与 MyBatis SQL 日志；本地 `application-local.yml` 中开启，生产环境请保持关闭。
 
 ## 普通用户上传图片
 

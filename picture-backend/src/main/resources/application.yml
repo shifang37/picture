@@ -20,7 +20,8 @@ server:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: false
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 默认关闭 SQL 日志，本地 profile 在 application-local.yml 中单独开启
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
   global-config:
     db-config:
       logic-delete-field: isDelete
@@ -28,12 +29,15 @@ mybatis-plus:
       logic-not-delete-value: 0
 # springdoc-openapi项目配置
 springdoc:
+  # 默认关闭接口文档，本地 profile 在 application-local.yml 中开启
+  api-docs:
+    enabled: false
+    path: /v3/api-docs
   swagger-ui:
+    enabled: false
     path: /swagger-ui.html
     tags-sorter: alpha
     operations-sorter: alpha
-  api-docs:
-    path: /v3/api-docs
   group-configs:
     - group: 'default'
       paths-to-match: '/**'
