@@ -50,9 +50,12 @@ spring:
     timeout: 7d
     redis:
       namespace: picture:session
-  # 全文搜索（app.search.engine=es 时使用）：连接本地 Elasticsearch
+  # 全文搜索（app.search.engine=es 时使用）：连接本地或 Compose 内网的 Elasticsearch
+  # 本地开发默认关闭安全认证，用户名/密码留空即可；生产由 ES_USERNAME / ES_PASSWORD 注入
   elasticsearch:
     uris: ${ES_URIS:http://localhost:9200}
+    username: ${ES_USERNAME:}
+    password: ${ES_PASSWORD:}
     connection-timeout: 2s
     socket-timeout: 5s
   flyway:
