@@ -1,8 +1,11 @@
 package com.tzy.picturebackend.controller;
 
+import com.tzy.picturebackend.annotation.AuthCheck;
+import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
+import com.tzy.picturebackend.model.dto.user.UserResetPasswordRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
@@ -17,6 +20,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -310,6 +314,72 @@ class UserControllerTest {
                         .content("{\"oldPassword\":\"123456\",\"newPassword\":\"123\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40000));
+    }
+
+    // ==================== 管理员重置密码 ====================
+
+    @Test
+    @DisplayName("重置密码：管理员重置成功返回 true")
+    void resetPassword_success() throws Exception {
+        when(userService.resetPassword(1L, "newpass1")).thenReturn(true);
+
+        mockMvc.perform(post("/user/reset/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"newPassword\":\"newpass1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+
+        verify(userService).resetPassword(1L, "newpass1");
+    }
+
+    @Test
+    @DisplayName("重置密码：用户不存在返回 40400")
+    void resetPassword_returnsNotFound() throws Exception {
+        when(userService.resetPassword(1L, "newpass1"))
+                .thenThrow(new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在"));
+
+        mockMvc.perform(post("/user/reset/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"newPassword\":\"newpass1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40400))
+                .andExpect(jsonPath("$.message").value("用户不存在"));
+    }
+
+    @Test
+    @DisplayName("重置密码：新密码少于 6 位返回 40000，不调用 service")
+    void resetPassword_rejectsTooShortPassword() throws Exception {
+        mockMvc.perform(post("/user/reset/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"newPassword\":\"123\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(userService, never()).resetPassword(anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("重置密码：id 为空返回 40000")
+    void resetPassword_rejectsMissingId() throws Exception {
+        mockMvc.perform(post("/user/reset/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newPassword\":\"newpass1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(userService, never()).resetPassword(anyLong(), any());
+    }
+
+    @Test
+    @DisplayName("重置密码：接口必须声明管理员权限")
+    void resetPassword_requiresAdminRole() throws Exception {
+        AuthCheck authCheck = UserController.class
+                .getMethod("resetPassword", UserResetPasswordRequest.class)
+                .getAnnotation(AuthCheck.class);
+
+        assertNotNull(authCheck, "重置密码接口必须使用 @AuthCheck 限制管理员");
+        assertEquals(UserConstant.ADMIN_ROLE, authCheck.mustRole());
     }
 
     // ==================== 密码哈希不泄露 ====================

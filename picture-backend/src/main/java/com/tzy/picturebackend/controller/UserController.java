@@ -92,6 +92,21 @@ public class UserController {
     }
 
     /**
+     * 管理员重置指定用户的密码
+     * <p>
+     * 不需要用户原密码；重置后旧密码立即失效，用户需使用新密码登录。
+     */
+    @PostMapping("/reset/password")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> resetPassword(@Valid @RequestBody UserResetPasswordRequest userResetPasswordRequest) {
+        ThrowUtils.throwIf(userResetPasswordRequest == null, ErrorCode.PARAMS_ERROR);
+        boolean result = userService.resetPassword(userResetPasswordRequest.getId(),
+                userResetPasswordRequest.getNewPassword());
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(true);
+    }
+
+    /**
      * 修改当前登录用户的个人资料（普通用户可用）
      */
     @PostMapping("/update/profile")

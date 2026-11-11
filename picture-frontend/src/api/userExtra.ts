@@ -43,3 +43,25 @@ export async function updatePassword(body: UpdatePasswordParams, options?: { [ke
     ...(options || {}),
   })
 }
+
+export interface UserResetPasswordParams {
+  id: string
+  newPassword: string
+}
+
+/**
+ * 管理员重置指定用户的密码
+ */
+export async function resetUserPassword(
+  body: UserResetPasswordParams,
+  options?: { [key: string]: any },
+) {
+  return request<API.BaseResponseBoolean>('/user/reset/password', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  })
+}

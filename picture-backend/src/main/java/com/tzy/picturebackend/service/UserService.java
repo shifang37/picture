@@ -48,6 +48,15 @@ public interface UserService extends IService<User> {
     boolean updatePassword(User loginUser, String oldPassword, String newPassword);
 
     /**
+     * 管理员重置指定用户的密码（不需要原密码）
+     *
+     * @param userId      目标用户 id
+     * @param newPassword 新密码
+     * @return 是否成功
+     */
+    boolean resetPassword(Long userId, String newPassword);
+
+    /**
      * 修改当前登录用户的个人资料（昵称、头像、简介）
      *
      * @param loginUser 当前登录用户

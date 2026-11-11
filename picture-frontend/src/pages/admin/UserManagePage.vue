@@ -53,6 +53,7 @@
         <template v-else-if="column.key === 'action'">
           <a-space>
             <a-button type="link" @click="openEdit(record)">编辑</a-button>
+            <a-button type="link" @click="openReset(record)">重置密码</a-button>
             <a-popconfirm
               title="确定删除该用户吗？"
               ok-text="删除"
@@ -115,6 +116,46 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal
+      v-model:open="resetModalOpen"
+      title="重置密码"
+      :confirm-loading="resetSubmitting"
+      ok-text="确认重置"
+      cancel-text="取消"
+      destroy-on-close
+      @ok="handleReset"
+    >
+      <a-alert
+        type="warning"
+        show-icon
+        :message="`即将重置用户「${resetPasswordForm.userName || resetPasswordForm.userAccount}」的密码，重置后旧密码立即失效。`"
+        style="margin-bottom: 16px"
+      />
+      <a-form
+        ref="resetPasswordFormRef"
+        :model="resetPasswordForm"
+        :rules="resetRules"
+        layout="vertical"
+      >
+        <a-form-item label="新密码" name="newPassword">
+          <a-input-password
+            v-model:value="resetPasswordForm.newPassword"
+            placeholder="请输入 6-72 位新密码"
+            :maxlength="72"
+            allow-clear
+          />
+        </a-form-item>
+        <a-form-item label="确认新密码" name="confirmPassword">
+          <a-input-password
+            v-model:value="resetPasswordForm.confirmPassword"
+            placeholder="请再次输入新密码"
+            :maxlength="72"
+            allow-clear
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -124,6 +165,7 @@ import { message, type FormInstance } from 'ant-design-vue'
 import { SmileOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { addUser, deleteUser, listUserVoByPage, updateUser } from '@/api/userController'
+import { resetUserPassword } from '@/api/userExtra'
 
 const columns = [
   {
@@ -162,7 +204,7 @@ const columns = [
   {
     title: '操作',
     key: 'action',
-    width: 160,
+    width: 220,
   },
 ]
 
@@ -343,6 +385,76 @@ const doDelete = async (id?: string) => {
     }
   } catch (e: any) {
     message.error('删除失败：' + (e.message || '系统错误'))
+  }
+}
+
+// ==================== 重置密码弹窗 ====================
+
+const resetModalOpen = ref(false)
+const resetSubmitting = ref(false)
+const resetPasswordFormRef = ref<FormInstance>()
+
+const resetPasswordForm = reactive({
+  id: '',
+  userAccount: '',
+  userName: '',
+  newPassword: '',
+  confirmPassword: '',
+})
+
+const validateConfirmPassword = async (_rule: any, value: string) => {
+  if (!value) {
+    return Promise.reject('请再次输入新密码')
+  }
+  if (value !== resetPasswordForm.newPassword) {
+    return Promise.reject('两次输入的密码不一致')
+  }
+  return Promise.resolve()
+}
+
+const resetRules = {
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 6, max: 72, message: '新密码长度需在 6 到 72 个字符之间', trigger: 'blur' },
+  ],
+  confirmPassword: [{ validator: validateConfirmPassword, trigger: 'blur' }],
+}
+
+const openReset = (record: API.UserVO) => {
+  if (!record.id) {
+    return
+  }
+  resetPasswordForm.id = record.id
+  resetPasswordForm.userAccount = record.userAccount ?? ''
+  resetPasswordForm.userName = record.userName ?? ''
+  resetPasswordForm.newPassword = ''
+  resetPasswordForm.confirmPassword = ''
+  resetPasswordFormRef.value?.clearValidate()
+  resetModalOpen.value = true
+}
+
+const handleReset = async () => {
+  try {
+    await resetPasswordFormRef.value?.validate()
+  } catch {
+    return
+  }
+  resetSubmitting.value = true
+  try {
+    const res = await resetUserPassword({
+      id: resetPasswordForm.id,
+      newPassword: resetPasswordForm.newPassword,
+    })
+    if (res.data.code === 0) {
+      message.success('密码已重置，请通知用户使用新密码登录')
+      resetModalOpen.value = false
+    } else {
+      message.error('重置密码失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('重置密码失败：' + (e.message || '系统错误'))
+  } finally {
+    resetSubmitting.value = false
   }
 }
 

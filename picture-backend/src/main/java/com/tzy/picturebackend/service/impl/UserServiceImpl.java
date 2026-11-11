@@ -247,6 +247,31 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     }
 
     @Override
+    public boolean resetPassword(Long userId, String newPassword) {
+        if (userId == null || userId <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户 id 不能为空");
+        }
+        if (StrUtil.isBlank(newPassword)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码不能为空");
+        }
+        if (newPassword.length() < 6 || newPassword.length() > 72) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码长度需在 6 到 72 个字符之间");
+        }
+        User user = this.getById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+        User update = new User();
+        update.setId(userId);
+        update.setUserPassword(getEncryptPassword(newPassword));
+        boolean result = this.updateById(update);
+        if (!result) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "重置密码失败");
+        }
+        return true;
+    }
+
+    @Override
     public boolean updateProfile(User loginUser, UserUpdateProfileRequest request) {
         if (loginUser == null || loginUser.getId() == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);

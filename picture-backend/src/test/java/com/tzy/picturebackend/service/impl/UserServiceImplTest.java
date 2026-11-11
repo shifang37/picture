@@ -254,6 +254,58 @@ class UserServiceImplTest {
         assertTrue(encoder.matches("newpass1", captor.getValue().getUserPassword()));
     }
 
+    // ==================== 管理员重置密码 ====================
+
+    @Test
+    @DisplayName("重置密码：管理员重置后 BCrypt 可校验新密码")
+    void resetPassword_updatesBcryptHash() {
+        when(userMapper.selectById(1L)).thenReturn(userWithPassword(encoder.encode("123456")));
+        when(userMapper.updateById(any(User.class))).thenReturn(1);
+
+        assertTrue(userService.resetPassword(1L, "newpass1"));
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+        verify(userMapper).updateById(captor.capture());
+        User updated = captor.getValue();
+        assertEquals(Long.valueOf(1L), updated.getId());
+        assertTrue(updated.getUserPassword().startsWith("$2a$"));
+        assertTrue(encoder.matches("newpass1", updated.getUserPassword()));
+    }
+
+    @Test
+    @DisplayName("重置密码：用户不存在应抛 40400")
+    void resetPassword_rejectsMissingUser() {
+        when(userMapper.selectById(1L)).thenReturn(null);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.resetPassword(1L, "newpass1"));
+        assertEquals("用户不存在", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("重置密码：新密码少于 6 位应拒绝")
+    void resetPassword_rejectsShortPassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.resetPassword(1L, "123"));
+        assertEquals("新密码长度需在 6 到 72 个字符之间", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("重置密码：新密码超过 72 位应拒绝")
+    void resetPassword_rejectsTooLongPassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.resetPassword(1L, "p".repeat(73)));
+        assertEquals("新密码长度需在 6 到 72 个字符之间", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("重置密码：空密码应拒绝")
+    void resetPassword_rejectsBlankPassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.resetPassword(1L, "   "));
+        assertEquals("新密码不能为空", e.getMessage());
+    }
+
     // ==================== 个人资料 ====================
 
     @Test
