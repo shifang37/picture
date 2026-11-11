@@ -200,6 +200,16 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - **构建体积**：入口 chunk 从改造前的 1,664 kB（gzip 518 kB）降到 740 kB（gzip 238 kB），管理端页面均为独立 chunk；
 - 前端测试：10 个 Vitest 用例 + 5 个 Playwright 用例。
 
+## 并发模型（虚拟线程评估）
+
+JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enabled` 保持默认关闭：
+
+- 压测对象 `GET /api/picture/get/vo`（每次请求 2 条 SQL），本地 500 张图片；
+- 300 并发 × 3000 请求：平台线程 2.0–2.8k rps、p95 308–408 ms；虚拟线程 1.5–1.7k rps、p95 424–495 ms；
+- 500 并发 × 3000 请求：两者吞吐接近（约 1.4–1.5k rps），虚拟线程 p95 略高（746 ms vs 604–694 ms）；
+- 上传路径加 `-Djdk.tracePinnedThreads=short` 后观察到 `org.apache.http.pool.AbstractConnPool`（COS SDK 使用的 Apache HttpClient 连接池）与 `ConcurrentHashMap.computeIfAbsent` 的 MONITOR pinning；
+- 结论：瓶颈是 HikariCP 的 10 个数据库连接而不是线程数，虚拟线程没有可测收益且上传路径存在 pinning，因此不保留该配置。并发模型变化后可复用同一压测方法复测。
+
 ## 生产部署（Docker / 反向代理 / 监控）
 
 1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码和腾讯云 COS 配置
