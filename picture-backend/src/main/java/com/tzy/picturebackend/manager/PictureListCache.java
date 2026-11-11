@@ -154,6 +154,9 @@ public class PictureListCache {
         fields.put("reviewStatus", request.getReviewStatus());
         fields.put("current", request.getCurrent());
         fields.put("pageSize", request.getPageSize());
+        // 排序字段必须参与 key：同一批图片按不同字段排序会得到不同顺序
+        fields.put("sortField", request.getSortField());
+        fields.put("sortOrder", request.getSortOrder());
         try {
             return objectMapper.writeValueAsString(fields);
         } catch (JsonProcessingException e) {

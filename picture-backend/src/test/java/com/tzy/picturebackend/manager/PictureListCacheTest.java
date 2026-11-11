@@ -67,6 +67,26 @@ class PictureListCacheTest {
     }
 
     @Test
+    @DisplayName("key：排序字段或方向不同必须区分，否则会命中错误的排序结果")
+    void keyOf_includesSortFieldAndOrder() {
+        PictureQueryRequest base = request(1, 10);
+        base.setSortField("createTime");
+        base.setSortOrder("descend");
+
+        PictureQueryRequest otherField = request(1, 10);
+        otherField.setSortField("name");
+        otherField.setSortOrder("descend");
+
+        PictureQueryRequest otherOrder = request(1, 10);
+        otherOrder.setSortField("createTime");
+        otherOrder.setSortOrder("ascend");
+
+        assertNotEquals(cache.keyOf(base), cache.keyOf(otherField));
+        assertNotEquals(cache.keyOf(base), cache.keyOf(otherOrder));
+        assertNotEquals(cache.keyOf(otherField), cache.keyOf(otherOrder));
+    }
+
+    @Test
     @DisplayName("L1：写入后即使 Redis 数据损坏也能命中本地缓存")
     void get_hitsLocalCacheFirst() {
         PictureQueryRequest request = request(1, 10);
