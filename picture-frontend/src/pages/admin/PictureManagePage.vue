@@ -32,6 +32,8 @@
       :columns="columns"
       :data-source="dataList"
       :pagination="pagination"
+      :loading="loading"
+      row-key="id"
       @change="doTableChange"
     >
       <template #bodyCell="{ column, record }">
@@ -63,7 +65,14 @@
             <a-button type="link" :href="`/add_picture?id=${record.id}`" target="_blank"
               >编辑</a-button
             >
-            <a-button type="link" danger @click="doDelete(record.id)">删除</a-button>
+            <a-popconfirm
+              title="确定删除这张图片吗？删除后不可恢复。"
+              ok-text="删除"
+              cancel-text="取消"
+              @confirm="doDelete(record.id)"
+            >
+              <a-button type="link" danger>删除</a-button>
+            </a-popconfirm>
           </a-space>
         </template>
       </template>
@@ -129,6 +138,7 @@ const columns = [
 // 数据
 const dataList = ref<API.Picture[]>([])
 const total = ref(0)
+const loading = ref(false)
 
 // 搜索条件
 const searchParams = reactive<API.PictureQueryRequest>({
@@ -151,14 +161,21 @@ const pagination = computed(() => {
 
 // 获取数据
 const fetchData = async () => {
-  const res = await listPictureByPage({
-    ...searchParams,
-  })
-  if (res.data.data) {
-    dataList.value = res.data.data.records ?? []
-    total.value = res.data.data.total ?? 0
-  } else {
-    message.error('获取数据失败，' + res.data.message)
+  loading.value = true
+  try {
+    const res = await listPictureByPage({
+      ...searchParams,
+    })
+    if (res.data.code === 0 && res.data.data) {
+      dataList.value = res.data.data.records ?? []
+      total.value = Number(res.data.data.total) || 0
+    } else {
+      message.error('获取数据失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error: any) {
+    message.error('获取数据失败：' + (error.message || '系统错误'))
+  } finally {
+    loading.value = false
   }
 }
 
@@ -181,13 +198,21 @@ const doDelete = async (id: string) => {
   if (!id) {
     return
   }
-  const res = await deletePicture({ id })
-  if (res.data.code === 0) {
-    message.success('删除成功')
-    // 刷新数据
-    fetchData()
-  } else {
-    message.error('删除失败')
+  try {
+    const res = await deletePicture({ id })
+    if (res.data.code === 0) {
+      message.success('删除成功')
+      // 删除当前页最后一条时回到上一页
+      if (dataList.value.length <= 1 && (searchParams.current ?? 1) > 1) {
+        searchParams.current = (searchParams.current ?? 1) - 1
+      }
+      // 刷新数据
+      await fetchData()
+    } else {
+      message.error('删除失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error: any) {
+    message.error('删除失败：' + (error.message || '系统错误'))
   }
 }
 // 页面加载时请求一次
