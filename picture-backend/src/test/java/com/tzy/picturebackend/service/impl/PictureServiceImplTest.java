@@ -2,6 +2,7 @@ package com.tzy.picturebackend.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
@@ -68,6 +69,8 @@ class PictureServiceImplTest {
 
     private PictureListCache pictureListCache;
 
+    private PictureEventPublisher pictureEventPublisher;
+
     @BeforeEach
     void setUp() {
         pictureService = new PictureServiceImpl();
@@ -77,12 +80,14 @@ class PictureServiceImplTest {
         pictureReviewLogService = mock(PictureReviewLogService.class);
         tagCategoryService = mock(TagCategoryService.class);
         pictureListCache = mock(PictureListCache.class);
+        pictureEventPublisher = mock(PictureEventPublisher.class);
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
         ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);
         ReflectionTestUtils.setField(pictureService, "tagCategoryService", tagCategoryService);
         ReflectionTestUtils.setField(pictureService, "pictureListCache", pictureListCache);
+        ReflectionTestUtils.setField(pictureService, "pictureEventPublisher", pictureEventPublisher);
     }
 
     // ==================== 可见性 ====================
@@ -157,7 +162,11 @@ class PictureServiceImplTest {
         User normalUser = user(100L, "user");
         when(userService.isAdmin(normalUser)).thenReturn(false);
         when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
-        when(pictureMapper.insert(any(Picture.class))).thenReturn(1);
+        when(pictureMapper.insert(any(Picture.class))).thenAnswer(invocation -> {
+            Picture saved = invocation.getArgument(0);
+            saved.setId(1L);
+            return 1;
+        });
 
         PictureVO pictureVO = pictureService.uploadPicture(jpegFile(), null, normalUser);
 
@@ -170,6 +179,7 @@ class PictureServiceImplTest {
         assertEquals(Long.valueOf(100L), saved.getUserId());
         assertEquals(Integer.valueOf(PictureReviewStatusEnum.REVIEWING.getValue()), pictureVO.getReviewStatus());
         verifyNoInteractions(pictureReviewLogService);
+        verify(pictureEventPublisher).pictureUploaded(1L);
     }
 
     @Test
@@ -195,6 +205,7 @@ class PictureServiceImplTest {
         verify(pictureReviewLogService).record(1L, admin.getId(),
                 PictureReviewStatusEnum.PASS.getValue(), "管理员上传，自动通过");
         verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).pictureUploaded(1L);
     }
 
     @Test
@@ -224,6 +235,7 @@ class PictureServiceImplTest {
         assertTrue(sqlSet.contains("reviewerId"), "实际 SET: " + sqlSet);
         assertTrue(sqlSet.contains("reviewTime"), "实际 SET: " + sqlSet);
         verifyNoInteractions(pictureReviewLogService);
+        verify(pictureEventPublisher).pictureUploaded(1L);
     }
 
     @Test
@@ -246,6 +258,7 @@ class PictureServiceImplTest {
         assertEquals(admin.getId(), updated.getReviewerId());
         verify(pictureReviewLogService).record(1L, admin.getId(),
                 PictureReviewStatusEnum.PASS.getValue(), "管理员上传，自动通过");
+        verify(pictureEventPublisher).pictureUploaded(1L);
     }
 
     @Test
@@ -259,6 +272,7 @@ class PictureServiceImplTest {
         assertThrows(BusinessException.class,
                 () -> pictureService.uploadPicture(jpegFile(), uploadRequest(1L), otherUser));
         verifyNoInteractions(fileManager);
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -267,6 +281,7 @@ class PictureServiceImplTest {
         assertThrows(BusinessException.class,
                 () -> pictureService.uploadPicture(jpegFile(), null, null));
         verifyNoInteractions(fileManager);
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     // ==================== 删除 ====================
@@ -285,6 +300,7 @@ class PictureServiceImplTest {
         verify(pictureMapper).deleteById(1L);
         verify(fileManager).deletePicture(existing.getUrl());
         verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     @Test
@@ -301,6 +317,7 @@ class PictureServiceImplTest {
 
         verify(pictureMapper).deleteById(1L);
         verify(fileManager).deletePicture(existing.getUrl());
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     @Test
@@ -312,6 +329,7 @@ class PictureServiceImplTest {
 
         verify(pictureMapper, never()).deleteById(any());
         verifyNoInteractions(fileManager);
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -325,6 +343,7 @@ class PictureServiceImplTest {
 
         verify(pictureMapper, never()).deleteById(any());
         verifyNoInteractions(fileManager);
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -339,6 +358,7 @@ class PictureServiceImplTest {
         assertThrows(BusinessException.class, () -> pictureService.deletePicture(1L, owner));
 
         verifyNoInteractions(fileManager);
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -353,6 +373,7 @@ class PictureServiceImplTest {
                 () -> pictureService.uploadPicture(jpegFile(), null, normalUser));
 
         verify(fileManager).deletePicture("https://example.com/new.jpg");
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -367,6 +388,7 @@ class PictureServiceImplTest {
                 () -> pictureService.uploadPicture(jpegFile(), null, normalUser));
 
         verify(fileManager).deletePicture("https://example.com/new.jpg");
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -383,6 +405,7 @@ class PictureServiceImplTest {
         pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser);
 
         verify(fileManager).deletePicture("https://example.com/old.jpg");
+        verify(pictureEventPublisher).pictureUploaded(1L);
     }
 
     @Test
@@ -401,6 +424,7 @@ class PictureServiceImplTest {
 
         verify(fileManager).deletePicture("https://example.com/new.jpg");
         verify(fileManager, never()).deletePicture("https://example.com/old.jpg");
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     // ==================== 编辑 ====================
@@ -436,6 +460,7 @@ class PictureServiceImplTest {
                 "reviewStatus 应被置为待审核，实际参数: " + wrapper.getParamNameValuePairs());
         verify(pictureMapper, never()).updateById(any(Picture.class));
         verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     @Test
@@ -457,6 +482,7 @@ class PictureServiceImplTest {
         assertNull(entityCaptor.getValue().getReviewStatus(), "内容未变化时不得改动审核状态");
         verify(pictureMapper, never()).update(any(Picture.class), any(Wrapper.class));
         verify(pictureListCache, never()).invalidate();
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -475,6 +501,7 @@ class PictureServiceImplTest {
         verify(pictureMapper).updateById(entityCaptor.capture());
         assertNull(entityCaptor.getValue().getReviewStatus(), "管理员编辑不应改动审核状态");
         verify(pictureMapper, never()).update(any(Picture.class), any(Wrapper.class));
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     @Test
@@ -494,6 +521,7 @@ class PictureServiceImplTest {
         assertTrue(wrapper.getParamNameValuePairs()
                         .containsValue(PictureReviewStatusEnum.REVIEWING.getValue()),
                 "已拒绝的图片改内容后应回到待审核");
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     @Test
@@ -509,6 +537,7 @@ class PictureServiceImplTest {
 
         verify(pictureMapper, never()).updateById(any(Picture.class));
         verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -517,6 +546,7 @@ class PictureServiceImplTest {
         assertThrows(BusinessException.class,
                 () -> pictureService.editPicture(editRequest("匿名改名"), null));
         verify(pictureMapper, never()).selectById(any());
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     // ==================== 审核 ====================
@@ -550,6 +580,7 @@ class PictureServiceImplTest {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> pictureService.doPictureReview(request, admin()));
         assertEquals("请勿重复审核", e.getMessage());
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -561,6 +592,7 @@ class PictureServiceImplTest {
         when(pictureMapper.selectById(1L)).thenReturn(null);
 
         assertThrows(BusinessException.class, () -> pictureService.doPictureReview(request, admin()));
+        verifyNoInteractions(pictureEventPublisher);
     }
 
     @Test
@@ -591,6 +623,7 @@ class PictureServiceImplTest {
         verify(pictureReviewLogService).record(1L, admin.getId(),
                 PictureReviewStatusEnum.REJECT.getValue(), "内容不合规");
         verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     @Test
@@ -715,6 +748,7 @@ class PictureServiceImplTest {
         assertEquals(1, result.getFailCount());
         assertEquals(1, result.getErrors().size());
         assertTrue(result.getErrors().get(0).contains("图片 2"));
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     // ==================== 字段长度校验 ====================

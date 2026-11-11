@@ -92,6 +92,12 @@
             <artifactId>spring-session-data-redis</artifactId>
         </dependency>
 
+        <!-- 消息队列：上传、审核、删除等图片事件异步投递到 RabbitMQ -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+
         <!-- 缓存：标签字典用 Spring Cache + Redis，公开列表的本地一级缓存用 Caffeine -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

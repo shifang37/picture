@@ -1,6 +1,7 @@
 package com.tzy.picturebackend.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
@@ -9,6 +10,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureListPage;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
+import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -55,15 +57,19 @@ class PictureControllerTest {
 
     private PictureListCache pictureListCache;
 
+    private PictureEventPublisher pictureEventPublisher;
+
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
         userService = mock(UserService.class);
         pictureListCache = mock(PictureListCache.class);
+        pictureEventPublisher = mock(PictureEventPublisher.class);
         PictureController pictureController = new PictureController();
         ReflectionTestUtils.setField(pictureController, "pictureService", pictureService);
         ReflectionTestUtils.setField(pictureController, "userService", userService);
         ReflectionTestUtils.setField(pictureController, "pictureListCache", pictureListCache);
+        ReflectionTestUtils.setField(pictureController, "pictureEventPublisher", pictureEventPublisher);
         mockMvc = MockMvcBuilders.standaloneSetup(pictureController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -196,6 +202,26 @@ class PictureControllerTest {
         verify(pictureService).editPicture(requestCaptor.capture(), eq(normalUser));
         assertEquals(Long.valueOf(1L), requestCaptor.getValue().getId());
         assertEquals("新名称", requestCaptor.getValue().getName());
+    }
+
+    @Test
+    @DisplayName("更新：管理员直接更新图片后发布 changed 事件并失效缓存")
+    void updatePicture_publishesChangedEvent() throws Exception {
+        Picture existing = new Picture();
+        existing.setId(1L);
+        when(pictureService.getById(1L)).thenReturn(existing);
+        when(pictureService.updateById(any(Picture.class))).thenReturn(true);
+
+        mockMvc.perform(post("/picture/update")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\",\"name\":\"新名称\",\"tags\":[\"标签A\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+
+        verify(pictureService).updateById(any(Picture.class));
+        verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     // ==================== 公开列表缓存 ====================

@@ -4,6 +4,12 @@ spring:
     url: ${DB_URL:jdbc:mysql://mysql:3306/picture?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:root}
+  # 图片事件与消费者连接 RabbitMQ（compose 内网服务名 rabbitmq）
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:picture}
+    password: ${RABBITMQ_PASSWORD:picture}
   servlet:
     multipart:
       max-file-size: 2MB

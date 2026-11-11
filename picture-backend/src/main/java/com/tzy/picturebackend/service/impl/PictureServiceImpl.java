@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
@@ -82,6 +83,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private TagCategoryService tagCategoryService;
+
+    /**
+     * 发布图片事件（Spring 应用事件，由监听器转发到 RabbitMQ）
+     */
+    @Resource
+    private PictureEventPublisher pictureEventPublisher;
 
     @Override
     public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
@@ -178,6 +185,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         // 新增或重传都会改变公开列表内容（重传会让已通过图片重新进入待审核）
         pictureListCache.invalidate();
+        // 新上传或重传成功：通知机审与搜索索引
+        pictureEventPublisher.pictureUploaded(picture.getId());
         return PictureVO.objToVo(picture);
     }
 
@@ -223,6 +232,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (contentChanged) {
             // 名称、简介、分类、标签变化都会影响公开列表
             pictureListCache.invalidate();
+            // 内容变化也要同步搜索索引
+            pictureEventPublisher.pictureChanged(id);
         }
         return true;
     }
@@ -305,6 +316,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
         deletePictureFile(oldPicture.getUrl());
         pictureListCache.invalidate();
+        // 删除后索引侧也要移除文档
+        pictureEventPublisher.pictureChanged(id);
         return true;
     }
 
@@ -507,6 +520,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         pictureReviewLogService.record(id, loginUser.getId(), reviewStatus, reviewMessage);
         // 通过/拒绝都会改变公开列表（以及名称、简介等展示内容）
         pictureListCache.invalidate();
+        // 审核结果（可见性）变化要同步搜索索引
+        pictureEventPublisher.pictureChanged(id);
     }
 
     @Override

@@ -20,6 +20,30 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       timeout: 2s
+  # 图片事件投递到 RabbitMQ，本地开发用 docker-compose.infra.yml 启动
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    # 连接失败要快速返回：发布失败只记日志，不能长时间拖住上传请求
+    connection-timeout: 2s
+    # 发布确认与无法路由回调：失败只记日志（见 PictureMqConfig）
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+    listener:
+      simple:
+        acknowledge-mode: auto
+        # 消费者最多尝试 3 次（含首次），仍失败则拒绝消息，由队列的死信配置转入 *.dlq，而不是无限重新入队
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2
+          max-interval: 10s
   # 登录态存放在 Redis，重启后端不会丢会话
   session:
     # 决策 D2：显式设置为 7 天

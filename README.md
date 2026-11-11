@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 | --- | --- |
-| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine |
+| 后端 | Java 21、Spring Boot 3.5.16、MyBatis-Plus 3.5.18.1、MySQL 8、Flyway、Redis + Spring Session、Caffeine、RabbitMQ |
 | 对象存储 | 腾讯云 COS（含数据万象图片处理） |
 | 接口文档 | springdoc-openapi 2.10.0（Swagger UI） |
 | 前端 | Vue 3.5、Vite 7、TypeScript 5.9、Ant Design Vue 4、Pinia、Vue Router、ESLint |
@@ -23,6 +23,8 @@ picture/
 │       ├── service/                 # 业务层（接口 + impl）
 │       ├── mapper/                  # MyBatis-Plus Mapper
 │       ├── manager/                 # COS 文件上传封装
+│       ├── event/                   # 图片事件模型与 Spring 事件转发
+│       ├── mq/                      # RabbitMQ 拓扑与队列消费者
 │       ├── model/                   # entity / dto / vo / enums
 │       ├── aop/                     # @AuthCheck 权限切面
 │       ├── config/                  # CORS、MyBatis-Plus、Jackson、springdoc
@@ -44,7 +46,7 @@ picture/
 - JDK 21
 - Node.js `^20.19.0 || >=22.12.0`
 - MySQL 8.x
-- Redis 7（本地用 `docker-compose.infra.yml` 启动）
+- Redis 7、RabbitMQ 4（本地用 `docker-compose.infra.yml` 启动）
 - 一个腾讯云 COS 存储桶（用于图片存储）
 
 ### 1. 初始化数据库
@@ -74,13 +76,13 @@ cp application-local.yml.example application-local.yml
 
 ### 3. 启动本地基础设施
 
-登录态、会话失效版本和接口限流都依赖 Redis：
+登录态、会话失效版本、接口限流和图片事件都依赖中间件：
 
 ```bash
 docker compose -f docker-compose.infra.yml up -d
 ```
 
-本地 Redis 只绑定 `127.0.0.1:6379` 且默认无密码，与 `application.yml` 中的默认配置一致。
+本地 Redis 只绑定 `127.0.0.1:6379` 且默认无密码，与 `application.yml` 中的默认配置一致；RabbitMQ 只绑定 `127.0.0.1:5672`，管理界面为 `http://127.0.0.1:15672`（默认 `guest / guest`，仅本机可登录）。
 
 ### 4. 启动后端
 
@@ -191,6 +193,36 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 - **降级**：缓存只保存公开可见的数据；Redis 读写异常时直接回源数据库，列表接口不受影响。
 - 实测（300 张图片、50 次请求）：公开列表热缓存 p95 约 8.5 ms，每次失效回源 p95 约 19 ms。
 
+## 图片事件与消息队列（RabbitMQ）
+
+上传请求只做「校验、压缩、存 COS、入库」；机审、AI 标签与搜索索引同步由图片事件驱动，在请求之外完成，失败可重试且互不影响。
+
+### 拓扑
+
+- 业务交换机 `picture.event`（topic），死信交换机 `picture.dlx`；
+- 每条业务队列都绑定自己的死信队列 `*.dlq`，消费者重试耗尽后转入死信，不会无限重新入队。
+
+| 路由键 | 触发时机 | 消费队列 |
+| --- | --- | --- |
+| `picture.uploaded` | 新上传或重传成功 | `picture.moderation.q`、`picture.search.q` |
+| `picture.moderated` | 机审完成 | `picture.ai.q` |
+| `picture.changed` | 人工审核、编辑、删除 | `picture.search.q` |
+
+### 事件模型
+
+- 消息体只带标识：`{ eventId, type, pictureId, occurredAt }`，不带名称、简介、状态等业务数据；消费者一律按 `pictureId` 回查数据库，重复投递和乱序都不会写入过期数据；
+- `PictureServiceImpl` 只发布 Spring 应用事件（`PictureEventPublisher`），由 `PictureEventRelay` 用 `@TransactionalEventListener(fallbackExecution = true)` 转发到 RabbitMQ。Service 单元测试只需要验证事件是否发出，不依赖 RabbitMQ；
+- 当前代码没有事务，事件会立即转发；将来给业务方法加上事务后，会自动变成「事务提交后再发」，避免消息先于数据落库。
+
+### 可靠性
+
+- 生产者开启 `publisher-confirm-type: correlated` 与 `publisher-returns`，确认失败或无法路由只记录日志；RabbitMQ 停机时上传、审核等主流程仍然成功（发布失败只留错误日志，接口正常返回）；
+- 消费者失败最多尝试 3 次（首次后按 1s、2s 退避），仍失败则拒绝消息，由队列的 `x-dead-letter-exchange` 转入 `${queue}.dlq`；消息体无法解析等「毒消息」同样进死信，不会无限重入队；
+- 消费者按 id 回查并检查状态：图片已删除、已审核或状态已变化时直接确认消息，避免重复处理；
+- 当前三个消费者只完成状态校验与事件记录：机审（`picture.moderation.q`）、AI 标签（`picture.ai.q`）、搜索索引（`picture.search.q`）在此基础上接入。机审字段落地后，还会增加「扫描创建超过 5 分钟、仍待审核且机审字段为空」的兜底任务，重新发布遗漏事件。
+
+管理界面可以查看队列、绑定与死信：`http://127.0.0.1:15672`（本地默认 `guest / guest`）。生产环境不映射 15672 到宿主机。
+
 ## 前端构建与代码检查
 
 - **路由懒加载**：只有首页静态导入，其余页面（含全部管理端页面）按路由拆包，首屏不再加载管理端代码；
@@ -212,7 +244,7 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 
 ## 生产部署（Docker / 反向代理 / 监控）
 
-1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码和腾讯云 COS 配置
+1. 复制 `.env.example` 为 `.env`，填写数据库密码、Redis 密码、RabbitMQ 账号密码和腾讯云 COS 配置
 2. 执行 `docker compose up -d --build`
 3. 访问 `http://localhost:8080`；前端 nginx 会把 `/api` 反向代理到后端 `8123`
 
@@ -224,6 +256,8 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
 - **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增 `V2__xxx.sql`
 - **Redis 与会话**：compose 内置 `redis` 服务（AOF 持久化 + 密码认证，密码由 `REDIS_PASSWORD` 指定，务必改掉默认值）；`redis-data` 卷保存会话与失效版本，删除该卷会让所有用户重新登录
+- **RabbitMQ**：compose 内置 `rabbitmq` 服务（`rabbitmq:4-management`，持久化卷 `rabbitmq-data`，只在内网可达，不映射 5672/15672 到宿主机）。账号密码由 `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` 指定；**不要使用 `guest`**，RabbitMQ 的 guest 只允许本机回环地址登录，容器间连不上。账号只在数据卷首次初始化时生效，修改 `.env` 后需要删除 `rabbitmq-data` 卷（会丢失队列与死信）或进入容器手工改密码
+- **图片事件**：队列与交换机在应用启动时由 `RabbitAdmin` 幂等声明；RabbitMQ 不可用时上传与审核仍然成功，只是事件投递失败并记录日志。当前兜底扫描任务尚未接入，RabbitMQ 长时间中断期间产生的事件不会自动补发（随机审功能一起落地）
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
 ## 常用命令
@@ -255,7 +289,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **227 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **246 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

@@ -7,6 +7,7 @@ import com.tzy.picturebackend.common.BaseResponse;
 import com.tzy.picturebackend.common.DeleteRequest;
 import com.tzy.picturebackend.common.ResultUtils;
 import com.tzy.picturebackend.constant.UserConstant;
+import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
@@ -45,6 +46,9 @@ public class PictureController {
 
     @Resource
     private PictureListCache pictureListCache;
+
+    @Resource
+    private PictureEventPublisher pictureEventPublisher;
 
 
 
@@ -104,6 +108,8 @@ public class PictureController {
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         // 管理员直接改图也可能改变首页展示内容
         pictureListCache.invalidate();
+        // 管理端直接更新绕过了 service 的编辑逻辑，这里补发内容变更事件
+        pictureEventPublisher.pictureChanged(id);
         return ResultUtils.success(true);
     }
 
