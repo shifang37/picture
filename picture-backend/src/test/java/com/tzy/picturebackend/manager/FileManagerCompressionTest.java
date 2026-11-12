@@ -3,11 +3,13 @@ package com.tzy.picturebackend.manager;
 import com.tzy.picturebackend.config.UploadProperties;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.metrics.PictureMetrics;
+import com.tzy.picturebackend.model.dto.file.PreparedUpload;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import javax.imageio.ImageIO;
@@ -25,6 +27,9 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -171,6 +176,76 @@ class FileManagerCompressionTest {
         assertSame(source, fileManager.compressIfNeeded(source, "gif"));
         assertSame(source, fileManager.compressIfNeeded(source, ""));
         assertSame(source, fileManager.compressIfNeeded(source, null));
+    }
+
+    // ==================== 准备阶段：哈希与临时文件 ====================
+
+    @Test
+    @DisplayName("SHA-256：与标准测试向量一致")
+    void sha256_matchesKnownVector() throws Exception {
+        File file = createTempFile("fm-hash-", ".txt");
+        Files.write(file.toPath(), "abc".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                FileManager.sha256(file));
+    }
+
+    @Test
+    @DisplayName("准备阶段：压缩后计算哈希，体积与最终文件一致，清理后临时文件被删除")
+    void prepareUpload_hashesFinalFileAndCleanup() throws Exception {
+        File source = writeJpeg(3000, 2000);
+        byte[] bytes = Files.readAllBytes(source.toPath());
+        MockMultipartFile multipartFile = new MockMultipartFile(
+                "file", "photo.JPG", "image/jpeg", bytes);
+
+        PreparedUpload prepared = fileManager.prepareUpload(multipartFile, "public/1");
+
+        File uploadFile = prepared.getUploadFile();
+        assertNotNull(uploadFile);
+        assertTrue(uploadFile.exists());
+        assertEquals(uploadFile.length(), prepared.getPicSize());
+        // 大图会被压缩，哈希必须对应压缩后的最终文件，而不是原始上传文件
+        assertNotEquals(bytes.length, prepared.getPicSize().intValue());
+        assertEquals(FileManager.sha256(uploadFile), prepared.getFileHash());
+        assertEquals(64, prepared.getFileHash().length());
+        assertEquals("jpg", prepared.getSuffix());
+        assertEquals("photo", prepared.getPicName());
+        assertTrue(prepared.getUploadPath().startsWith("public/1/"));
+        assertTrue(prepared.getUploadPath().endsWith(".jpg"));
+
+        List<File> tempFiles = new ArrayList<>(prepared.getTempFiles());
+        assertEquals(2, tempFiles.size(), "原文件与压缩产物都应在清理列表中");
+        prepared.cleanup();
+        for (File tempFile : tempFiles) {
+            assertFalse(tempFile.exists(), "清理后临时文件应被删除: " + tempFile);
+        }
+    }
+
+    @Test
+    @DisplayName("准备阶段：非法文件在创建临时文件前就被拒绝，不产生残留")
+    void prepareUpload_rejectsInvalidFile() {
+        MockMultipartFile multipartFile = new MockMultipartFile(
+                "file", "a.jpg", "image/jpeg", "not-an-image".getBytes(StandardCharsets.UTF_8));
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> fileManager.prepareUpload(multipartFile, "public/1"));
+        assertEquals("文件内容不是受支持的图片", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("准备阶段：未注入 UploadProperties 时按 10MB 上限校验")
+    void prepareUpload_usesDefaultSizeLimit() {
+        // 10MB + 1 的假 JPEG：只需要文件头正确，大小校验会先命中
+        byte[] bytes = new byte[(10 * 1024 * 1024) + 1];
+        bytes[0] = (byte) 0xFF;
+        bytes[1] = (byte) 0xD8;
+        bytes[2] = (byte) 0xFF;
+        MockMultipartFile multipartFile = new MockMultipartFile(
+                "file", "big.jpg", "image/jpeg", bytes);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> fileManager.prepareUpload(multipartFile, "public/1"));
+        assertEquals("文件大小不能超过 10MB", e.getMessage());
     }
 
     // ==================== 辅助方法 ====================

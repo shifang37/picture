@@ -13,6 +13,7 @@ import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.metrics.PictureMetrics;
+import com.tzy.picturebackend.model.dto.file.PreparedUpload;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -28,7 +29,12 @@ import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -96,62 +102,141 @@ public class FileManager {
     private UploadProperties uploadProperties;
 
     /**
-     * 上传图片
+     * 上传图片（兼容入口）：等价于「准备 + 上传 + 清理临时文件」。
+     * <p>
+     * 需要秒传/配额判断的调用方请直接使用 {@link #prepareUpload(MultipartFile, String)}
+     * 与 {@link #uploadPrepared(PreparedUpload)}，避免在命中秒传时仍然上传对象。
      *
      * @param multipartFile    文件
      * @param uploadPathPrefix 上传路径前缀
-     * @return
+     * @return 上传结果
      */
     public UploadPictureResult uploadPicture(MultipartFile multipartFile, String uploadPathPrefix) {
+        PreparedUpload prepared = prepareUpload(multipartFile, uploadPathPrefix);
+        try {
+            return uploadPrepared(prepared);
+        } finally {
+            prepared.cleanup();
+        }
+    }
+
+    /**
+     * 上传准备：校验、方向纠正、压缩、哈希，全程不调用对象存储。
+     *
+     * @param multipartFile    文件
+     * @param uploadPathPrefix 上传路径前缀，例如 {@code public/1}
+     * @return 准备结果（必须由调用方清理临时文件）
+     */
+    public PreparedUpload prepareUpload(MultipartFile multipartFile, String uploadPathPrefix) {
         // 校验图片
         validPicture(multipartFile);
         // 图片上传地址
         String uuid = RandomUtil.randomString(16);
         String originFilename = multipartFile.getOriginalFilename();
-        String uploadFilename = String.format("%s_%s.%s", DateUtil.formatDate(new Date()),uuid,
-                FileUtil.getSuffix(originFilename));
+        String suffix = FileUtil.getSuffix(originFilename).toLowerCase(Locale.ROOT);
+        String uploadFilename = String.format("%s_%s.%s", DateUtil.formatDate(new Date()), uuid, suffix);
         // 注意：这里的路径不能以 "/" 开头，否则拼接 host 后会生成 "https://xxx//public/..." 的双斜杠地址
         String uploadPath = String.format("%s/%s", uploadPathPrefix, uploadFilename);
-        File file = null;
-        File compressedFile = null;
+        List<File> tempFiles = new ArrayList<>();
         try {
-            // 创建临时文件
-            file =File.createTempFile(uploadPath, null);
+            // 用固定前缀创建临时文件：原实现把上传路径当文件名前缀，遇到路径分隔符会创建失败
+            File file = File.createTempFile("picture-upload-", "." + suffix);
+            tempFiles.add(file);
             multipartFile.transferTo(file);
-            // 上传前按需压缩原图；WebP 没有 JDK 内置编码器，保持原文件
-            String suffix = FileUtil.getSuffix(originFilename).toLowerCase(Locale.ROOT);
+            // M4 阶段在压缩前先按 EXIF 方向纠正（见 rotateIfNeeded）
             File uploadFile = compressIfNeeded(file, suffix);
-            if (!uploadFile.equals(file)) {
-                compressedFile = uploadFile;
+            if (!tempFiles.contains(uploadFile)) {
+                tempFiles.add(uploadFile);
             }
-            // 上传图片
-            PutObjectResult putObjectResult = cosManager.putPictureObject(uploadPath, uploadFile);
+            PreparedUpload prepared = new PreparedUpload();
+            prepared.setUploadPath(uploadPath);
+            prepared.setPicName(FileUtil.mainName(originFilename));
+            prepared.setPicSize(FileUtil.size(uploadFile));
+            prepared.setFileHash(sha256(uploadFile));
+            prepared.setSuffix(suffix);
+            prepared.setUploadFile(uploadFile);
+            prepared.setTempFiles(tempFiles);
+            return prepared;
+        } catch (BusinessException e) {
+            // 业务校验异常（例如图片像素过大）需要保留原始错误信息
+            deleteTempFiles(tempFiles);
+            throw e;
+        } catch (Exception e) {
+            log.error("图片上传准备失败", e);
+            deleteTempFiles(tempFiles);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
+        }
+    }
+
+    /**
+     * 上传准备结果到对象存储，并解析万象返回的宽高与格式。
+     *
+     * @param prepared 准备结果
+     * @return 上传结果
+     */
+    public UploadPictureResult uploadPrepared(PreparedUpload prepared) {
+        if (prepared == null || prepared.getUploadFile() == null) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传准备结果为空");
+        }
+        try {
+            PutObjectResult putObjectResult = cosManager.putPictureObject(
+                    prepared.getUploadPath(), prepared.getUploadFile());
             ImageInfo imageInfo = putObjectResult.getCiUploadResult().getOriginalInfo().getImageInfo();
-            // 封装返回结果：宽高/格式以实际上传文件为准，体积使用压缩后的文件大小
+            // 封装返回结果：宽高/格式以实际上传文件为准，体积使用最终文件大小
             UploadPictureResult uploadPictureResult = new UploadPictureResult();
             int picWidth = imageInfo.getWidth();
             int picHeight = imageInfo.getHeight();
-            double picScale = NumberUtil.round(picWidth * 1.0 / picHeight, 2).doubleValue();
-            uploadPictureResult.setPicName(FileUtil.mainName(originFilename));
+            uploadPictureResult.setPicName(prepared.getPicName());
             uploadPictureResult.setPicWidth(picWidth);
             uploadPictureResult.setPicHeight(picHeight);
-            uploadPictureResult.setPicScale(picScale);
+            uploadPictureResult.setPicScale(NumberUtil.round(picWidth * 1.0 / picHeight, 2).doubleValue());
             uploadPictureResult.setPicFormat(imageInfo.getFormat());
-            uploadPictureResult.setPicSize(FileUtil.size(uploadFile));
-            uploadPictureResult.setUrl(cosClientConfig.getHost() + "/" + uploadPath);
+            uploadPictureResult.setPicSize(prepared.getPicSize());
+            uploadPictureResult.setUrl(cosClientConfig.getHost() + "/" + prepared.getUploadPath());
             return uploadPictureResult;
         } catch (BusinessException e) {
-            // 业务校验异常（例如图片像素过大）需要保留原始错误信息
             throw e;
         } catch (Exception e) {
-            log.error("图片上传到存储失败",e);
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR,"上传失败");
-        } finally {
-            this.deleteTempFile(file);
-            if (compressedFile != null) {
-                this.deleteTempFile(compressedFile);
+            log.error("图片上传到存储失败", e);
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
+        }
+    }
+
+    /**
+     * 计算文件 SHA-256（小写十六进制），用于同一用户的秒传去重
+     *
+     * @param file 文件
+     * @return 64 位十六进制字符串
+     */
+    static String sha256(File file) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            // 所有受支持的 JDK 都内置 SHA-256，这里只是把受检异常转换成 IO 异常
+            throw new IOException("当前运行环境不支持 SHA-256", e);
+        }
+        try (InputStream input = Files.newInputStream(file.toPath())) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
             }
         }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    /**
+     * 批量删除临时文件（best-effort）
+     */
+    private void deleteTempFiles(List<File> files) {
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            deleteTempFile(file);
+        }
+        files.clear();
     }
 
     /**
