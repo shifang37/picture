@@ -9,7 +9,19 @@ export interface BatchUploadResult {
   /** 新建/重传后的图片 id，用于上传完成后的批量设置信息 */
   pictureId?: string
   reviewStatus?: number
+  /** 是否命中同用户秒传 */
+  duplicated?: boolean
   message?: string
+}
+
+/**
+ * 上传过程回调：页面据此更新进度条与状态文案
+ */
+export interface BatchUploadReporter {
+  /** 上传进度：0–100 */
+  progress: (percent: number) => void
+  /** 阶段文案，例如「HEIC 转换中...」「已压缩 3.2MB → 1.8MB」 */
+  status: (message: string) => void
 }
 
 export type BatchUploadStatus = 'waiting' | 'uploading' | 'success' | 'error'
@@ -20,6 +32,8 @@ export interface BatchUploadItem {
   file: File
   status: BatchUploadStatus
   message?: string
+  /** 上传进度 0–100 */
+  progress: number
   pictureId?: string
   reviewStatus?: number
 }
@@ -28,7 +42,7 @@ export interface BatchUploadSchedulerOptions {
   /**
    * 真正的上传逻辑，失败时抛错即可
    */
-  upload: (file: File) => Promise<BatchUploadResult>
+  upload: (file: File, reporter: BatchUploadReporter) => Promise<BatchUploadResult>
   /**
    * 最大并发数，默认 {@link MAX_CONCURRENT_UPLOADS}
    */
@@ -88,9 +102,20 @@ export function createBatchUploadScheduler(
     activeCount++
     item.status = 'uploading'
     item.message = undefined
+    item.progress = 0
+    const reporter: BatchUploadReporter = {
+      progress: (percent: number) => {
+        // 只接受 0–100 的整数，避免异常回调把进度条撑爆
+        item.progress = Math.min(100, Math.max(0, Math.round(percent)))
+      },
+      status: (message: string) => {
+        item.message = message
+      },
+    }
     try {
-      const result = await options.upload(item.file)
+      const result = await options.upload(item.file, reporter)
       item.status = 'success'
+      item.progress = 100
       item.pictureId = result.pictureId
       item.reviewStatus = result.reviewStatus
       item.message = result.message
@@ -111,6 +136,7 @@ export function createBatchUploadScheduler(
         name: file.name,
         file,
         status: 'waiting',
+        progress: 0,
       })
       // 新加入的文件排在最前面，方便查看
       items.unshift(item)
@@ -126,6 +152,7 @@ export function createBatchUploadScheduler(
     }
     item.status = 'waiting'
     item.message = undefined
+    item.progress = 0
     pending.push(item)
     pump()
   }

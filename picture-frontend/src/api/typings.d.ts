@@ -315,6 +315,8 @@ declare namespace API {
     reviewMessage?: string
     reviewerId?: string
     reviewTime?: string
+    // 是否命中同用户秒传：true 表示返回的是已存在的图片
+    duplicated?: boolean
     user?: PublicUserVO
   }
 
@@ -393,6 +395,11 @@ declare namespace API {
     userAvatar?: string
     userProfile?: string
     userRole?: string
+    // 配额：已用/上限，管理员在用户列表里查看与调整
+    storageQuota?: string
+    storageUsed?: string
+    pictureQuota?: number
+    pictureUsed?: number
     createTime?: string
   }
 }

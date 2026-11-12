@@ -192,6 +192,12 @@ export async function listMyPictureVoByPage(
   })
 }
 
+export interface PictureUploadOptions {
+  /** 上传进度回调，参数为 0–100 的整数 */
+  onUploadProgress?: (percent: number) => void
+  [key: string]: any
+}
+
 /**
  * 上传图片（multipart/form-data）
  * 后端接收 file 图片文件，id 可选（重新上传已有图片时传）
@@ -199,17 +205,27 @@ export async function listMyPictureVoByPage(
 export async function uploadPicture(
   file: File,
   pictureUploadRequest?: API.PictureUploadRequest,
-  options?: { [key: string]: any },
+  options?: PictureUploadOptions,
 ) {
   const formData = new FormData()
   formData.append('file', file)
   if (pictureUploadRequest?.id) {
     formData.append('id', pictureUploadRequest.id)
   }
+  const { onUploadProgress, ...rest } = options ?? {}
   return request<API.BaseResponsePictureVO>('/picture/upload', {
     method: 'POST',
     data: formData,
+    ...rest,
     // 不要手动设置 Content-Type，浏览器会自动补上带 boundary 的 multipart 头
-    ...(options || {}),
+    onUploadProgress: (event: any) => {
+      if (!onUploadProgress) {
+        return
+      }
+      const total = event?.total && event.total > 0 ? event.total : file.size
+      const loaded = typeof event?.loaded === 'number' ? event.loaded : 0
+      const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0
+      onUploadProgress(percent)
+    },
   })
 }
