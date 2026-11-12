@@ -63,46 +63,13 @@
     <!-- 瀑布流：按图片宽高比分配列，图片加载前即占好高度，避免布局跳动 -->
     <div v-show="dataList.length" ref="listRef" class="waterfall" data-testid="waterfall">
       <div v-for="(column, columnIndex) in columns" :key="columnIndex" class="waterfall-column">
-        <a-card
+        <PictureCard
           v-for="picture in column"
           :key="picture.id"
-          hoverable
-          class="picture-card"
-          data-testid="picture-card"
-          @click="doClickPicture(picture)"
-        >
-          <template #cover>
-            <div
-              class="picture-cover"
-              :style="{ aspectRatio: `1 / ${getPictureAspectRatio(picture)}` }"
-            >
-              <img
-                :alt="picture.name || '图片'"
-                :src="getThumbnailUrl(picture.url, thumbnailSize)"
-                loading="lazy"
-                decoding="async"
-              />
-            </div>
-          </template>
-          <a-card-meta :title="picture.name || '未命名'">
-            <template #description>
-              <div class="picture-tags">
-                <a-tag color="green">
-                  {{ picture.category ?? '默认' }}
-                </a-tag>
-                <a-tag v-for="tag in picture.tags" :key="tag">
-                  {{ tag }}
-                </a-tag>
-              </div>
-              <!-- 互动计数：收藏/点赞/下载，热度排序时用户能直观看到排序依据 -->
-              <div class="picture-stats">
-                <span>收藏 {{ formatCount(picture.favoriteCount) }}</span>
-                <span>点赞 {{ formatCount(picture.likeCount) }}</span>
-                <span>下载 {{ formatCount(picture.downloadCount) }}</span>
-              </div>
-            </template>
-          </a-card-meta>
-        </a-card>
+          :picture="picture"
+          :thumbnail-size="thumbnailSize"
+          @open="doClickPicture"
+        />
       </div>
     </div>
 
@@ -127,8 +94,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useDevicePixelRatio, useElementSize, useInfiniteScroll } from '@vueuse/core'
 import { listPictureTagCategory, listPictureVoByPage } from '@/api/pictureController'
-import { getThumbnailUrl } from '@/utils'
-import { formatCount } from '@/utils/interaction'
+import PictureCard from '@/components/PictureCard.vue'
 import {
   distributeToColumns,
   getColumnCount,
@@ -450,14 +416,6 @@ onDeactivated(() => {
   color: #666;
 }
 
-.picture-stats {
-  display: flex;
-  gap: 12px;
-  margin-top: 4px;
-  color: #999;
-  font-size: 12px;
-}
-
 .state-block {
   display: flex;
   justify-content: center;
@@ -476,29 +434,6 @@ onDeactivated(() => {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
-}
-
-.picture-card {
-  cursor: pointer;
-}
-
-.picture-cover {
-  width: 100%;
-  overflow: hidden;
-  background: #f2f2f2;
-}
-
-.picture-cover img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.picture-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
 }
 
 .load-more {

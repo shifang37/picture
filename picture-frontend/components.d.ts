@@ -65,6 +65,7 @@ declare module 'vue' {
     GlobalHeader: typeof import('./src/components/GlobalHeader.vue')['default']
     InteractionButtons: typeof import('./src/components/InteractionButtons.vue')['default']
     NotificationBell: typeof import('./src/components/NotificationBell.vue')['default']
+    PictureCard: typeof import('./src/components/PictureCard.vue')['default']
     PictureUpload: typeof import('./src/components/PictureUpload.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

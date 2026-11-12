@@ -168,3 +168,102 @@ test('审核通知 → 图片详情：铃铛显示未读并能跳转', async ({ 
   // 点击后标记已读：接口被调用，红点归零
   await expect.poll(() => markedRead).toBe(true)
 })
+
+test('首页卡片 → 收藏：悬浮出现互动按钮，收藏后计数 +1 且不跳转', async ({ page }) => {
+  const status = { favorite: false, like: false, favoriteCount: '2', likeCount: '0' }
+
+  await mockImages(page)
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: loginUser })
+      return
+    }
+    if (url.includes('/picture/list/page/vo')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: { records: [mockPicture({ favoriteCount: '2' })], total: 1 },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/picture/tag_category')) {
+      await route.fulfill({
+        json: { code: 0, data: { categoryList: ['风景'], tagList: ['测试'] }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/interaction/status')) {
+      await route.fulfill({ json: { code: 0, data: status, message: 'ok' } })
+      return
+    }
+    if (url.includes('/interaction/add')) {
+      status.favorite = true
+      status.favoriteCount = '3'
+      await route.fulfill({ json: { code: 0, data: status, message: 'ok' } })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/')
+  const card = page.getByTestId('picture-card').first()
+  await expect(card).toBeVisible()
+
+  // 互动入口默认隐藏，悬浮后才出现，避免卡片上一直挂两个按钮
+  await card.hover()
+  const favoriteButton = page.getByTestId('card-favorite-button').first()
+  await expect(favoriteButton).toBeVisible()
+
+  await favoriteButton.click()
+  await expect(favoriteButton).toContainText('3')
+  // 点击互动按钮不应触发卡片跳转（@click.stop）
+  await expect(page).not.toHaveURL(/\/picture\//)
+})
+
+test('首页卡片没有互动按钮时也能正常进入详情', async ({ page }) => {
+  await mockImages(page)
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: { code: 0, data: null, message: '未登录' } })
+      return
+    }
+    if (url.includes('/picture/list/page/vo')) {
+      await route.fulfill({
+        json: { code: 0, data: { records: [mockPicture()], total: 1 }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/picture/tag_category')) {
+      await route.fulfill({
+        json: { code: 0, data: { categoryList: [], tagList: [] }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/interaction/status')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: { favorite: false, like: false, favoriteCount: '0', likeCount: '0' },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/')
+  await page
+    .getByTestId('picture-card')
+    .first()
+    .click({ position: { x: 10, y: 10 } })
+  await expect(page).toHaveURL(/\/picture\/1$/)
+})
