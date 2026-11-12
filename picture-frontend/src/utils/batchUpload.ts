@@ -6,6 +6,8 @@ import { reactive } from 'vue'
 export const MAX_CONCURRENT_UPLOADS = 3
 
 export interface BatchUploadResult {
+  /** 新建/重传后的图片 id，用于上传完成后的批量设置信息 */
+  pictureId?: string
   reviewStatus?: number
   message?: string
 }
@@ -18,6 +20,7 @@ export interface BatchUploadItem {
   file: File
   status: BatchUploadStatus
   message?: string
+  pictureId?: string
   reviewStatus?: number
 }
 
@@ -88,6 +91,7 @@ export function createBatchUploadScheduler(
     try {
       const result = await options.upload(item.file)
       item.status = 'success'
+      item.pictureId = result.pictureId
       item.reviewStatus = result.reviewStatus
       item.message = result.message
     } catch (e: any) {

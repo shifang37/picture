@@ -30,6 +30,9 @@
       <a-button :disabled="failedCount === 0" @click="retryAllFailed">
         重试全部失败（{{ failedCount }}）
       </a-button>
+      <a-button :disabled="!successPictureIds.length" @click="batchEditOpen = true">
+        批量设置信息（{{ successPictureIds.length }}）
+      </a-button>
       <span v-if="uploadingCount > 0" class="uploading-text">
         正在上传 {{ uploadingCount }} 张...
       </span>
@@ -62,15 +65,22 @@
         </template>
       </template>
     </a-table>
+
+    <BatchEditModal
+      v-model:open="batchEditOpen"
+      :ids="successPictureIds"
+      @success="handleBatchEdited"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { InboxOutlined } from '@ant-design/icons-vue'
 import { useRouter } from 'vue-router'
 import { uploadPicture } from '@/api/pictureExtra'
+import BatchEditModal from '@/components/BatchEditModal.vue'
 import {
   createBatchUploadScheduler,
   type BatchUploadItem,
@@ -78,6 +88,8 @@ import {
 } from '@/utils/batchUpload'
 
 const router = useRouter()
+
+const batchEditOpen = ref(false)
 
 const columns = [
   { title: '文件名', dataIndex: 'name', key: 'name' },
@@ -96,6 +108,7 @@ const scheduler = createBatchUploadScheduler({
     if (res.data.code === 0 && res.data.data) {
       const reviewStatus = res.data.data.reviewStatus
       return {
+        pictureId: res.data.data.id,
         reviewStatus,
         message: reviewStatus === 1 ? '已自动通过审核' : '已提交，等待管理员审核',
       }
@@ -109,6 +122,12 @@ const uploadingCount = computed(
 )
 const failedCount = computed(() => scheduler.items.filter((item) => item.status === 'error').length)
 const hasRecords = computed(() => scheduler.items.length > 0)
+// 上传成功后才有图片 id，可用于一次性批量设置分类/标签/简介
+const successPictureIds = computed(() =>
+  scheduler.items
+    .filter((item) => item.status === 'success' && item.pictureId)
+    .map((item) => String(item.pictureId)),
+)
 
 const statusText = (status: BatchUploadStatus) => {
   return { waiting: '排队中', uploading: '上传中', success: '成功', error: '失败' }[status]
@@ -153,6 +172,11 @@ const retryAllFailed = () => {
 
 const goMyPictures = () => {
   router.push('/my_pictures')
+}
+
+const handleBatchEdited = () => {
+  // 批量编辑的提示由弹窗给出，这里不再重复提示
+  batchEditOpen.value = false
 }
 </script>
 

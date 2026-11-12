@@ -402,6 +402,66 @@ app:
 | `app.notification.max-unread` | `NOTIFICATION_MAX_UNREAD` | 200 |
 | `app.notification.purge-batch-size` | `NOTIFICATION_PURGE_BATCH_SIZE` | 1000 |
 
+## 作者主页（M2）
+
+任意访客都可以访问 `/author/:id` 查看作者的公开主页，图片详情页的作者名也可以直接点击进入。
+
+- 数据来自 `GET /api/user/public/{id}`：公开资料（昵称、头像、简介、加入时间）与作品数、总下载、总收藏、总点赞；
+- 聚合 SQL 固定为 `isDelete = 0 AND reviewStatus = 1`，账号、角色、配额等内部字段不会出现在响应里；
+- 统计结果缓存 5 分钟（`userProfile`），上传/审核/互动带来的变化由 TTL 兜底；删除用户时立即失效，并清理其专辑；
+- 作品列表复用公开列表接口（按 `userId` 过滤、`createTime` 倒序），前端用通用 `PictureWaterfall` 组件无限滚动；空状态、404 与加载失败都有独立页面态。
+
+## 批量后处理（M2）
+
+「我的图片」可以表格多选后批量编辑分类/标签/简介、批量删除；「批量上传」完成后也能对成功项一次性设置信息。
+
+### 接口与语义
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/picture/batch/edit` | 登录 | 批量编辑分类/标签/简介，**整批原子**，任一图片不存在/无权操作则整批不修改 |
+| POST | `/api/picture/batch/delete` | 登录 | 批量删除（移入回收站），逐项返回失败明细，单张失败不影响其他图片 |
+
+- 批量编辑只更新请求中出现的字段：`null` / 未传表示不修改，`tags` 传空数组表示清空标签；标签关系表与 `picture.tags` 在同一事务里整体替换；
+- 只有值真的发生变化的图片才更新，未变化的图片不刷新 `editTime`、不重置审核状态；普通用户改动已过审图片的内容后重新进入待审核，管理员操作不改变审核状态；
+- 批量删除复用回收站逻辑：逻辑删除 + 清理 AI 建议与标签关系，整批只失效一次列表缓存、只发一条批量事件；
+- 批量写接口按用户限流 30 次/分钟，指标 `picture_batch_seconds{operation=edit/delete}`；接口返回 `PictureBatchResult`（与审核结果字段一致但独立定义）；
+- 前端标签只有「动过但为空」时才提交空数组，转换逻辑收敛在 `utils/batchEdit.ts` 并有 Vitest 用例；批量上传通过上传结果里的 `pictureId` 收集成功项，一次性调用批量编辑。
+
+## 图片专辑（M2）
+
+上传者可以把作品按主题分组（如「风景」「人像」），公开专辑可以分享给他人；专辑只负责组织，不会移动或删除图片。
+
+### 数据模型（`V12__album.sql`）
+
+- `album`：`userId`、`name`、`description`、`coverPictureId`、`pictureCount`（作者视角总数，含未过审）、`isPublic`、时间戳与 `isDelete`；索引 `(userId, isDelete, createTime)`、`(isPublic, isDelete, createTime)`；
+- `album_picture`：联合主键 `(albumId, pictureId)`，纯关系表不做逻辑删除，重复加图由 `INSERT IGNORE` 跳过；`pictureId` 索引支撑按图片反查与级联清理；
+- `pictureCount` 与关系表在同一事务内用 `UPDATE album SET pictureCount = GREATEST(0, pictureCount + ?)` 原子增减；管理员可用 `POST /api/album/recount` 按关系表重算修复漂移；
+- 公开口径只统计已过审图片：`publicCount` 在查询时按 `reviewStatus = 1` 聚合，公开图片列表与封面回退同样只看已过审图片；
+- 封面：配置了 `coverPictureId` 且图片可见时直接使用；否则公开视角回退到最新一张已过审图片、作者视角回退到最新一张，封面被移除时自动置空/回退；
+- 私密专辑对非作者统一返回 40400；删除专辑只删除专辑与关系、不删除图片；删除用户时级联清理其专辑。
+
+### 接口
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/album/add` | 登录 | 创建专辑（默认私密） |
+| POST | `/api/album/update` | 作者/管理员 | 改名、简介、公开状态、封面（封面必须已在专辑内） |
+| POST | `/api/album/delete` | 作者/管理员 | 删除专辑与关系，图片保留 |
+| GET | `/api/album/get?id=` | 公开 | 专辑详情；私密专辑仅作者/管理员 |
+| POST | `/api/album/my/page` | 登录 | 我的专辑（含私密），每页最多 20 |
+| GET | `/api/album/public/page?userId=&current=&pageSize=` | 公开 | 公开专辑；`userId` 为空时返回全站 |
+| POST | `/api/album/picture/add` | 作者/管理员 | 批量加图，≤100 张，重复自动跳过 |
+| POST | `/api/album/picture/remove` | 作者/管理员 | 批量移图，不删除图片 |
+| GET | `/api/album/picture/page?albumId=&current=&pageSize=` | 公开/登录 | 专辑内图片；匿名/他人只看到已过审图片 |
+| POST | `/api/album/recount?albumId=` | 管理员 | 不传 id 则全量分批重算 `pictureCount` |
+
+### 前端
+
+- `/my/albums`：专辑卡片列表、创建/编辑/删除、公开/私密标记、公开数与总数；
+- `/album/:id`：专辑详情，浏览模式为作品瀑布流，作者/管理员可切换到管理模式设置封面、移除作品；
+- 「我的图片」多选后可「加入专辑」，弹窗选择目标专辑；加入成功后自动跳过重复项。
+
 ## 下载与下载次数统计口径
 
 详情页的「免费下载」走同源后端接口 `GET /api/picture/download/{id}`：
@@ -682,11 +742,11 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 ```
 
 > `npm run openapi` 需要后端已启动，它从 `http://localhost:8123/api/v3/api-docs` 拉取接口定义。
-> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传与「我的图片」封装、以及 `src/api/userExtra.ts` 中的个人中心/修改密码封装不会被覆盖。
+> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传、「我的图片」与批量编辑/删除封装，`src/api/userExtra.ts` 中的个人中心/修改密码/作者主页封装，以及 `src/api/albumExtra.ts`、`src/api/interactionExtra.ts`、`src/api/notificationExtra.ts` 不会被覆盖。
 
 ## 测试
 
-后端目前包含 **495 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、收藏点赞写接口的按用户限流与用户隔离、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **550 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、收藏点赞写接口的按用户限流与用户隔离、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，M2 的作者主页统计口径与缓存失效、批量编辑的整批原子/只改变化项/重新审核规则、批量删除的归属过滤与并发失败明细、专辑的可见性/权限/幂等加图/计数与封面回退，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
@@ -694,9 +754,9 @@ cd picture-backend
 ./mvnw verify   # 单元测试 + Testcontainers 集成测试，需要本机 Docker
 ```
 
-集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP，以及 M1 的互动/通知：10 线程并发收藏只落 1 行关系且计数为 1、通知唯一键去重、只能读自己的通知、物理清理级联删除互动关系。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
+集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP，M1 的互动/通知（10 线程并发收藏只落 1 行关系且计数为 1、通知唯一键去重、只能读自己的通知、物理清理级联删除互动关系），以及 M2 的作者主页统计与缓存失效、V12 专辑表创建、专辑「创建 → 加图 → 公开统计 → 移图」的计数与封面回退。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
-前端测试：Vitest 50 个用例（含计数格式化、乐观更新与回滚、`useInteraction` 的连点保护/回滚/登录拦截、通知轮询在页面隐藏时暂停），Playwright 14 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：其中 M1 覆盖「收藏 → 我的收藏」「审核通知 → 图片详情」「首页卡片悬浮收藏」「卡片点击进入详情」四条主链路。
+前端测试：Vitest 56 个用例（含计数格式化、乐观更新与回滚、`useInteraction` 的连点保护/回滚/登录拦截、通知轮询在页面隐藏时暂停、批量编辑字段转换、批量上传的图片 id 收集），Playwright 22 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：M1 覆盖「收藏 → 我的收藏」「审核通知 → 图片详情」「首页卡片悬浮收藏」「卡片点击进入详情」四条主链路，M2 覆盖「详情页作者入口 → 作者主页统计与作品」「作者不存在 404」「作者主页空状态」「批量编辑」「批量删除」「创建专辑」「专辑管理模式移除作品」「我的图片加入专辑」八条主链路。
 
 ## 持续集成与依赖更新
 

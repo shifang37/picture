@@ -90,9 +90,7 @@ const optionsLoaded = ref(false)
 const categoryOptions = computed(() =>
   categoryList.value.map((category) => ({ label: category, value: category })),
 )
-const tagOptions = computed(() =>
-  tagList.value.map((tag) => ({ label: tag, value: tag })),
-)
+const tagOptions = computed(() => tagList.value.map((tag) => ({ label: tag, value: tag })))
 
 const resetForm = () => {
   form.category = undefined

@@ -115,6 +115,14 @@ const goAll = () => {
   cursor: pointer;
 }
 
+/*
+ * 未读数字浮在铃铛右上角，默认会吃掉落在它上面的点击。
+ * 关闭指针事件后，点击「红点」也能正常展开面板，命中区域更符合直觉。
+ */
+:deep(.ant-scroll-number) {
+  pointer-events: none;
+}
+
 .notification-panel {
   width: 320px;
 }

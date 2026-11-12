@@ -27,12 +27,7 @@
     <template v-else>
       <a-row :gutter="[16, 16]">
         <a-col v-for="album in albums" :key="album.id" :xs="24" :sm="12" :md="8" :lg="6">
-          <a-card
-            hoverable
-            class="album-card"
-            data-testid="album-card"
-            @click="openAlbum(album)"
-          >
+          <a-card hoverable class="album-card" data-testid="album-card" @click="openAlbum(album)">
             <template #cover>
               <div class="album-cover">
                 <img
@@ -42,10 +37,7 @@
                   loading="lazy"
                 />
                 <div v-else class="album-cover-empty">暂无封面</div>
-                <a-tag
-                  class="album-visibility"
-                  :color="album.isPublic === 1 ? 'green' : 'default'"
-                >
+                <a-tag class="album-visibility" :color="album.isPublic === 1 ? 'green' : 'default'">
                   {{ album.isPublic === 1 ? '公开' : '私密' }}
                 </a-tag>
               </div>
@@ -134,13 +126,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { DeleteOutlined, EditOutlined } from '@ant-design/icons-vue'
-import {
-  addAlbum,
-  deleteAlbum,
-  listMyAlbumPage,
-  updateAlbum,
-  type AlbumVO,
-} from '@/api/albumExtra'
+import { addAlbum, deleteAlbum, listMyAlbumPage, updateAlbum, type AlbumVO } from '@/api/albumExtra'
 import { formatCount } from '@/utils/interaction'
 import { getThumbnailUrl } from '@/utils'
 

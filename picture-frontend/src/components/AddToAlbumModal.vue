@@ -10,7 +10,10 @@
     @cancel="close"
   >
     <a-spin :spinning="loading">
-      <a-empty v-if="!albums.length && !loading" description="还没有专辑，先去「我的专辑」创建一个吧" />
+      <a-empty
+        v-if="!albums.length && !loading"
+        description="还没有专辑，先去「我的专辑」创建一个吧"
+      />
       <template v-else>
         <div class="tip">已选择 {{ props.pictureIds.length }} 张图片，重复加入会自动跳过。</div>
         <a-select

@@ -72,6 +72,18 @@ describe('batchUpload scheduler', () => {
     expect(attempts).toBe(1)
   })
 
+  it('成功项保存图片 id，供上传完成后批量设置信息', async () => {
+    const scheduler = createBatchUploadScheduler({
+      upload: async () => ({ pictureId: '100', reviewStatus: 0, message: '待审核' }),
+    })
+
+    scheduler.addFiles([createFile('a.jpg')])
+    await scheduler.idle()
+
+    expect(scheduler.items[0].status).toBe('success')
+    expect(scheduler.items[0].pictureId).toBe('100')
+  })
+
   it('清空记录会移除已完成项，不打断上传中的任务', async () => {
     let resolveUpload: (() => void) | undefined
     const scheduler = createBatchUploadScheduler({

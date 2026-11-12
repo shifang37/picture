@@ -340,8 +340,14 @@ test('专辑详情：管理模式可移除作品', async ({ page }) => {
   // 切换到管理模式，表格里把作品从专辑移除
   await page.locator('.ant-radio-button-wrapper').filter({ hasText: '管理' }).click()
   await expect(page.getByText('专辑作品管理')).toBeVisible()
-  await page.locator('.ant-table-tbody').getByRole('button', { name: /移\s*除/ }).click()
-  await page.getByRole('tooltip').getByRole('button', { name: /移\s*除/ }).click()
+  await page
+    .locator('.ant-table-tbody')
+    .getByRole('button', { name: /移\s*除/ })
+    .click()
+  await page
+    .getByRole('tooltip')
+    .getByRole('button', { name: /移\s*除/ })
+    .click()
 
   await expect(page.getByText('已从专辑移除，图片本身不受影响')).toBeVisible()
   expect(removeBody?.albumId).toBe('10')

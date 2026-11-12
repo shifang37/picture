@@ -68,7 +68,11 @@
           </a-empty>
         </div>
         <div v-else-if="!pictures.length" class="state-block" data-testid="album-empty">
-          <a-empty :description="album.canManage ? '专辑还没有图片，去「我的图片」里加入吧' : '这个专辑还没有公开作品'" />
+          <a-empty
+            :description="
+              album.canManage ? '专辑还没有图片，去「我的图片」里加入吧' : '这个专辑还没有公开作品'
+            "
+          />
         </div>
         <PictureWaterfall v-else :pictures="pictures" @open="openPicture" />
         <div v-if="pictures.length" class="load-more" data-testid="album-load-more">
@@ -95,7 +99,11 @@
         >
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'cover'">
-              <img class="manage-cover" :src="getThumbnailUrl(record.url, 160)" :alt="record.name" />
+              <img
+                class="manage-cover"
+                :src="getThumbnailUrl(record.url, 160)"
+                :alt="record.name"
+              />
             </template>
             <template v-else-if="column.key === 'name'">
               <div>{{ record.name || '未命名' }}</div>
@@ -351,8 +359,7 @@ watch(mode, (value) => {
 useInfiniteScroll(typeof window === 'undefined' ? null : window, () => fetchPage(), {
   distance: 400,
   interval: 200,
-  canLoadMore: () =>
-    !manageMode.value && hasMore.value && !fetching.value && !loadError.value,
+  canLoadMore: () => !manageMode.value && hasMore.value && !fetching.value && !loadError.value,
 })
 
 const openPicture = (picture: API.PictureVO) => {
