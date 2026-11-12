@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.binder.cache.CaffeineCacheMetrics;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -74,6 +75,11 @@ public class PictureMetrics {
      * 站内通知已读计数器
      */
     public static final String NOTIFICATION_READ = "notification.read";
+
+    /**
+     * 批量编辑 / 批量删除耗时（operation=edit/delete）
+     */
+    public static final String BATCH = "picture.batch";
 
     private final MeterRegistry registry;
 
@@ -198,6 +204,24 @@ public class PictureMetrics {
                 .description("站内通知已读次数")
                 .register(registry)
                 .increment(count);
+    }
+
+    /**
+     * 记录一次批量操作的耗时
+     *
+     * @param operation edit / delete
+     * @param nanos     耗时（纳秒）
+     */
+    public void batch(String operation, long nanos) {
+        if (nanos < 0) {
+            return;
+        }
+        Timer.builder(BATCH)
+                .description("图片批量操作耗时")
+                .tag("operation", operation == null ? "unknown" : operation)
+                .publishPercentileHistogram()
+                .register(registry)
+                .record(nanos, TimeUnit.NANOSECONDS);
     }
 
     /**

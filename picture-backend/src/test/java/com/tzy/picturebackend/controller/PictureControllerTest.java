@@ -7,6 +7,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.manager.PictureDownloadManager;
 import com.tzy.picturebackend.manager.PictureListCache;
+import com.tzy.picturebackend.model.dto.picture.PictureBatchEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureListPage;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
@@ -15,6 +16,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
+import com.tzy.picturebackend.model.vo.PictureBatchResult;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -555,6 +557,81 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.data.length()").value(1))
                 .andExpect(jsonPath("$.data[0].reviewerName").value("管理员"))
                 .andExpect(jsonPath("$.data[0].reviewerAccount").value("admin"));
+    }
+
+    @Test
+    @DisplayName("批量编辑：登录用户提交后返回实际更新数量")
+    void batchEdit_returnsUpdatedCount() throws Exception {
+        User normalUser = user(100L, "user");
+        when(userService.getLoginUser(any())).thenReturn(normalUser);
+        PictureBatchResult result = new PictureBatchResult();
+        result.setSuccessCount(2);
+        when(pictureService.batchEdit(any(), eq(normalUser))).thenReturn(result);
+
+        mockMvc.perform(post("/picture/batch/edit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[\"1\",\"2\"],\"category\":\"风景\",\"tags\":[\"夜景\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.successCount").value(2));
+
+        ArgumentCaptor<PictureBatchEditRequest> requestCaptor =
+                ArgumentCaptor.forClass(PictureBatchEditRequest.class);
+        verify(pictureService).batchEdit(requestCaptor.capture(), eq(normalUser));
+        assertEquals(List.of(1L, 2L), requestCaptor.getValue().getIds());
+        assertEquals("风景", requestCaptor.getValue().getCategory());
+        assertEquals(List.of("夜景"), requestCaptor.getValue().getTags());
+        verify(pictureService, never()).batchDelete(any(), any());
+    }
+
+    @Test
+    @DisplayName("批量编辑：未选择图片返回 40000，不调用 service")
+    void batchEdit_rejectsEmptyIds() throws Exception {
+        when(userService.getLoginUser(any())).thenReturn(user(100L, "user"));
+
+        mockMvc.perform(post("/picture/batch/edit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[],\"category\":\"风景\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(pictureService, never()).batchEdit(any(), any());
+    }
+
+    @Test
+    @DisplayName("批量编辑：未登录返回 40100")
+    void batchEdit_requiresLogin() throws Exception {
+        when(userService.getLoginUser(any()))
+                .thenThrow(new BusinessException(ErrorCode.NOT_LOGIN_ERROR));
+
+        mockMvc.perform(post("/picture/batch/edit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[\"1\"],\"category\":\"风景\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40100));
+
+        verify(pictureService, never()).batchEdit(any(), any());
+    }
+
+    @Test
+    @DisplayName("批量删除：返回成功与失败统计")
+    void batchDelete_returnsResult() throws Exception {
+        User normalUser = user(100L, "user");
+        when(userService.getLoginUser(any())).thenReturn(normalUser);
+        PictureBatchResult result = new PictureBatchResult();
+        result.setSuccessCount(1);
+        result.setFailCount(1);
+        result.getErrors().add("图片 3：无权删除");
+        when(pictureService.batchDelete(any(), eq(normalUser))).thenReturn(result);
+
+        mockMvc.perform(post("/picture/batch/delete")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"ids\":[\"1\",\"3\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.successCount").value(1))
+                .andExpect(jsonPath("$.data.failCount").value(1))
+                .andExpect(jsonPath("$.data.errors[0]").value("图片 3：无权删除"));
     }
 
     private User user(Long id, String role) {

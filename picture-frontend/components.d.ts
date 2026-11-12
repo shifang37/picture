@@ -62,6 +62,7 @@ declare module 'vue' {
     ATooltip: typeof import('ant-design-vue/es')['Tooltip']
     AUpload: typeof import('ant-design-vue/es')['Upload']
     AUploadDragger: typeof import('ant-design-vue/es')['UploadDragger']
+    BatchEditModal: typeof import('./src/components/BatchEditModal.vue')['default']
     GlobalHeader: typeof import('./src/components/GlobalHeader.vue')['default']
     InteractionButtons: typeof import('./src/components/InteractionButtons.vue')['default']
     NotificationBell: typeof import('./src/components/NotificationBell.vue')['default']

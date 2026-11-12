@@ -107,6 +107,126 @@ test('作者主页：详情页作者入口 → 主页统计与作品', async ({ 
   await expect(page.getByTestId('picture-card').first()).toBeVisible()
 })
 
+test('我的图片：批量编辑单次提交选中图片与标签', async ({ page }) => {
+  let batchEditBody: Record<string, unknown> | undefined
+
+  await mockImages(page)
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: loginUser })
+      return
+    }
+    if (url.includes('/picture/my/page/vo')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: {
+            records: [mockPicture({ id: '1' }), mockPicture({ id: '2', name: '第二张' })],
+            total: 2,
+          },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/picture/tag_category')) {
+      await route.fulfill({
+        json: { code: 0, data: { categoryList: ['风景'], tagList: ['测试'] }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/picture/batch/edit')) {
+      batchEditBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({
+        json: { code: 0, data: { successCount: 2, failCount: 0, errors: [] }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/my_pictures')
+  await expect(page.getByRole('heading', { name: '我的图片' })).toBeVisible()
+
+  // 全选当前页
+  await page.locator('.ant-table-thead .ant-checkbox-wrapper').click()
+  await expect(page.getByText('已选择 2 张')).toBeVisible()
+  await page.getByRole('button', { name: '批量编辑' }).click()
+
+  // 在标签选择框里输入一个新标签（mode=tags 回车即新增）
+  const tagSelect = page
+    .locator('.ant-form-item')
+    .filter({ hasText: '标签' })
+    .locator('.ant-select')
+  await tagSelect.click()
+  await page.keyboard.type('旅行')
+  await page.keyboard.press('Enter')
+  // Ant Design 会在两个汉字的按钮文字之间插入空格，可访问名是「保 存」
+  await page.getByRole('button', { name: /保\s*存/ }).click()
+
+  await expect(page.getByText('已更新 2 张图片')).toBeVisible()
+  expect(batchEditBody?.ids).toEqual(['1', '2'])
+  expect(batchEditBody?.tags).toEqual(['旅行'])
+  // 未填写的字段不提交，避免误覆盖
+  expect(batchEditBody?.category).toBeUndefined()
+  expect(batchEditBody?.introduction).toBeUndefined()
+})
+
+test('我的图片：批量删除选中图片并刷新列表', async ({ page }) => {
+  let batchDeleteBody: Record<string, unknown> | undefined
+
+  await mockImages(page)
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: loginUser })
+      return
+    }
+    if (url.includes('/picture/my/page/vo')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: {
+            records: [mockPicture({ id: '1' }), mockPicture({ id: '2', name: '第二张' })],
+            total: 2,
+          },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/picture/batch/delete')) {
+      batchDeleteBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({
+        json: { code: 0, data: { successCount: 2, failCount: 0, errors: [] }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/my_pictures')
+  await page.locator('.ant-table-thead .ant-checkbox-wrapper').click()
+  await page.getByRole('button', { name: '批量删除' }).click()
+  // 二次确认的「删除」只在批量删除的 Popconfirm 里，避免和表格行内删除按钮重名
+  await page
+    .getByRole('tooltip')
+    .getByRole('button', { name: /删\s*除/ })
+    .click()
+
+  await expect(page.getByText('已删除 2 张图片')).toBeVisible()
+  expect(batchDeleteBody?.ids).toEqual(['1', '2'])
+})
+
 test('作者主页：作者不存在展示 404', async ({ page }) => {
   await page.route(API_PATTERN, async (route) => {
     const url = route.request().url()

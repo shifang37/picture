@@ -19,6 +19,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
+import com.tzy.picturebackend.model.vo.PictureBatchResult;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -368,6 +369,34 @@ public class PictureController {
         ThrowUtils.throwIf(pictureReviewBatchRequest == null, ErrorCode.PARAMS_ERROR);
         User loginUser = userService.getLoginUser(request);
         return ResultUtils.success(pictureService.batchReview(pictureReviewBatchRequest, loginUser));
+    }
+
+    /**
+     * 批量编辑图片的分类、标签、简介（登录用户，只能操作自己的图片，管理员例外）
+     * <p>
+     * 整批原子：任一图片不存在或无权操作时整批不修改；普通用户改动已过审图片的内容后会重新进入待审核。
+     */
+    @PostMapping("/batch/edit")
+    public BaseResponse<PictureBatchResult> batchEdit(
+            @Valid @RequestBody PictureBatchEditRequest pictureBatchEditRequest,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureBatchEditRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(pictureService.batchEdit(pictureBatchEditRequest, loginUser));
+    }
+
+    /**
+     * 批量删除图片（登录用户，只能删除自己的图片，管理员例外）
+     * <p>
+     * 删除即移入回收站，保留期内可由管理员恢复；单张失败不影响其他图片。
+     */
+    @PostMapping("/batch/delete")
+    public BaseResponse<PictureBatchResult> batchDelete(
+            @Valid @RequestBody PictureBatchDeleteRequest pictureBatchDeleteRequest,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureBatchDeleteRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        return ResultUtils.success(pictureService.batchDelete(pictureBatchDeleteRequest, loginUser));
     }
 
     /**

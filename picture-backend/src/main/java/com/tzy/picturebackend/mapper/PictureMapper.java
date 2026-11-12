@@ -54,6 +54,21 @@ public interface PictureMapper extends BaseMapper<Picture> {
                           @Param("deletedAt") Date deletedAt);
 
     /**
+     * 批量移入回收站：一条 UPDATE 写入整批记录的删除时间与操作人。
+     * <p>
+     * 条件包含 {@code isDelete = 0}，并发删除同一张图时只有一方成功，
+     * 调用方用返回行数与请求数量比对，得到准确的失败明细。
+     *
+     * @param ids       图片 id 集合
+     * @param deletedBy 删除操作人 id
+     * @param deletedAt 移入回收站时间
+     * @return 受影响行数
+     */
+    int logicalDeleteByIds(@Param("ids") Collection<Long> ids,
+                           @Param("deletedBy") Long deletedBy,
+                           @Param("deletedAt") Date deletedAt);
+
+    /**
      * 按 id 查询回收站中的图片；普通查询会被逻辑删除插件自动过滤，恢复时必须绕开。
      *
      * @param id 图片 id

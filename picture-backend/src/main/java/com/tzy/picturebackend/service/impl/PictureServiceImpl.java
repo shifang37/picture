@@ -21,6 +21,8 @@ import com.tzy.picturebackend.mapper.PictureInteractionMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
+import com.tzy.picturebackend.model.dto.picture.PictureBatchDeleteRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureBatchEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
@@ -32,6 +34,7 @@ import com.tzy.picturebackend.model.entity.PictureAiSuggestion;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
+import com.tzy.picturebackend.model.vo.PictureBatchResult;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -1002,6 +1005,190 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      * 追加一条批量审核失败明细
      */
     private static void addBatchFailure(PictureReviewBatchResult result, Long pictureId, String message) {
+        result.setFailCount(result.getFailCount() + 1);
+        result.getErrors().add(pictureId == null ? message : "图片 " + pictureId + "：" + message);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PictureBatchResult batchEdit(PictureBatchEditRequest request, User loginUser) {
+        long startNanos = System.nanoTime();
+        try {
+            ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+            ThrowUtils.throwIf(request == null || CollUtil.isEmpty(request.getIds()),
+                    ErrorCode.PARAMS_ERROR, "请选择要编辑的图片");
+            // 只更新请求中出现的字段：null 表示不修改，空数组表示清空标签
+            boolean updateCategory = request.getCategory() != null;
+            boolean updateIntroduction = request.getIntroduction() != null;
+            List<String> normalizedTags = request.getTags() == null ? null : normalizeTags(request.getTags());
+            boolean updateTags = normalizedTags != null;
+            ThrowUtils.throwIf(!updateCategory && !updateIntroduction && !updateTags,
+                    ErrorCode.PARAMS_ERROR, "没有需要更新的字段");
+
+            Set<Long> pictureIds = new LinkedHashSet<>();
+            for (Long id : request.getIds()) {
+                ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "存在非法图片 id");
+                pictureIds.add(id);
+            }
+            boolean isAdmin = userService.isAdmin(loginUser);
+            // 一条 IN 查询拿到整批图片，替代逐张 getById
+            Map<Long, Picture> pictureMap = this.listByIds(pictureIds).stream()
+                    .collect(Collectors.toMap(Picture::getId, Function.identity(), (left, right) -> left));
+            // 原子校验：任一图片不存在或不属于当前用户，整批都不修改，避免「改了一半」
+            for (Long id : pictureIds) {
+                Picture picture = pictureMap.get(id);
+                ThrowUtils.throwIf(picture == null, ErrorCode.PARAMS_ERROR,
+                        "图片 " + id + " 不存在，整批未修改");
+                if (!isAdmin && !Objects.equals(picture.getUserId(), loginUser.getId())) {
+                    throw new BusinessException(ErrorCode.NO_AUTH_ERROR,
+                            "图片 " + id + " 不属于你，整批未修改");
+                }
+            }
+
+            String newCategory = updateCategory ? normalizeText(request.getCategory()) : null;
+            String newIntroduction = updateIntroduction ? normalizeText(request.getIntroduction()) : null;
+            String tagsJson = updateTags ? JSONUtil.toJsonStr(normalizedTags) : null;
+            List<Long> changedIds = new ArrayList<>(pictureIds.size());
+            List<Long> reReviewIds = new ArrayList<>();
+            for (Long id : pictureIds) {
+                Picture oldPicture = pictureMap.get(id);
+                // 只有值真的发生变化才更新：未变化的图片不刷新 editTime，也不重置审核状态
+                boolean changed = (updateCategory
+                        && !Objects.equals(newCategory, normalizeText(oldPicture.getCategory())))
+                        || (updateIntroduction
+                        && !Objects.equals(newIntroduction, normalizeText(oldPicture.getIntroduction())))
+                        || (updateTags
+                        && !toTagSet(normalizedTags).equals(toTagSet(parseTags(oldPicture.getTags()))));
+                if (!changed) {
+                    continue;
+                }
+                changedIds.add(id);
+                // 普通用户改动已审核图片的内容后必须重新审核（与单张编辑规则一致）
+                if (!isAdmin && isReviewed(oldPicture)) {
+                    reReviewIds.add(id);
+                }
+            }
+            PictureBatchResult result = new PictureBatchResult();
+            result.setSuccessCount(changedIds.size());
+            if (changedIds.isEmpty()) {
+                return result;
+            }
+            UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
+                    .in("id", changedIds)
+                    .set("editTime", new Date());
+            if (updateCategory) {
+                updateWrapper.set("category", newCategory);
+            }
+            if (updateIntroduction) {
+                updateWrapper.set("introduction", newIntroduction);
+            }
+            if (updateTags) {
+                // 空数组写入 "[]"，与单张编辑清空标签后的存储形式一致
+                updateWrapper.set("tags", tagsJson);
+            }
+            ThrowUtils.throwIf(!this.update(updateWrapper), ErrorCode.OPERATION_ERROR, "批量编辑失败");
+            // 标签关系表与 picture.tags 在同一事务内整体替换
+            if (updateTags) {
+                pictureTagMapper.deleteByPictureIds(changedIds);
+                if (!normalizedTags.isEmpty()) {
+                    for (Long id : changedIds) {
+                        pictureTagMapper.insertBatch(id, normalizedTags);
+                    }
+                }
+            }
+            if (!reReviewIds.isEmpty()) {
+                // updateById 会忽略 null，清空审核信息必须用 UpdateWrapper.set 显式置空
+                this.update(new UpdateWrapper<Picture>()
+                        .in("id", reReviewIds)
+                        .set("reviewStatus", PictureReviewStatusEnum.REVIEWING.getValue())
+                        .set("reviewMessage", null)
+                        .set("reviewerId", null)
+                        .set("reviewTime", null));
+            }
+            // 整批只失效一次列表缓存、只发一条批量事件
+            pictureListCache.invalidate();
+            pictureEventPublisher.picturesChanged(changedIds);
+            return result;
+        } finally {
+            pictureMetrics.batch("edit", System.nanoTime() - startNanos);
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PictureBatchResult batchDelete(PictureBatchDeleteRequest request, User loginUser) {
+        long startNanos = System.nanoTime();
+        try {
+            ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
+            ThrowUtils.throwIf(request == null || CollUtil.isEmpty(request.getIds()),
+                    ErrorCode.PARAMS_ERROR, "请选择要删除的图片");
+            PictureBatchResult result = new PictureBatchResult();
+            Set<Long> pictureIds = new LinkedHashSet<>();
+            for (Long id : request.getIds()) {
+                if (id == null || id <= 0) {
+                    addBatchFailure(result, null, "存在非法图片 id");
+                } else {
+                    pictureIds.add(id);
+                }
+            }
+            if (pictureIds.isEmpty()) {
+                return result;
+            }
+            boolean isAdmin = userService.isAdmin(loginUser);
+            Map<Long, Picture> pictureMap = this.listByIds(pictureIds).stream()
+                    .collect(Collectors.toMap(Picture::getId, Function.identity(), (left, right) -> left));
+            List<Long> deletableIds = new ArrayList<>(pictureIds.size());
+            for (Long id : pictureIds) {
+                Picture picture = pictureMap.get(id);
+                if (picture == null) {
+                    addBatchFailure(result, id, "图片不存在");
+                    continue;
+                }
+                if (!isAdmin && !Objects.equals(picture.getUserId(), loginUser.getId())) {
+                    addBatchFailure(result, id, "无权删除");
+                    continue;
+                }
+                deletableIds.add(id);
+            }
+            if (deletableIds.isEmpty()) {
+                return result;
+            }
+            // 一条 UPDATE 把整批移入回收站，并带上 isDelete = 0 条件防并发重复删除
+            int deleted = baseMapper.logicalDeleteByIds(deletableIds, loginUser.getId(), new Date());
+            List<Long> deletedIds = deletableIds;
+            if (deleted != deletableIds.size()) {
+                // 少量图片已被其他请求删除：回查仍存在的 id，给出准确的失败明细
+                Set<Long> aliveIds = this.list(new QueryWrapper<Picture>()
+                                .in("id", deletableIds))
+                        .stream()
+                        .map(Picture::getId)
+                        .collect(Collectors.toSet());
+                deletedIds = deletableIds.stream()
+                        .filter(id -> !aliveIds.contains(id))
+                        .toList();
+                aliveIds.forEach(id ->
+                        addBatchFailure(result, id, "图片已被删除，请刷新后重试"));
+            }
+            if (deletedIds.isEmpty()) {
+                return result;
+            }
+            // 级联清理与单张删除一致：AI 建议立即删除，标签关系不随回收站保留
+            pictureAiSuggestionMapper.delete(new QueryWrapper<PictureAiSuggestion>()
+                    .in("pictureId", deletedIds));
+            pictureTagMapper.deleteByPictureIds(deletedIds);
+            result.setSuccessCount(deletedIds.size());
+            pictureListCache.invalidate();
+            pictureEventPublisher.picturesChanged(deletedIds);
+            return result;
+        } finally {
+            pictureMetrics.batch("delete", System.nanoTime() - startNanos);
+        }
+    }
+
+    /**
+     * 追加一条批量编辑 / 删除失败明细
+     */
+    private static void addBatchFailure(PictureBatchResult result, Long pictureId, String message) {
         result.setFailCount(result.getFailCount() + 1);
         result.getErrors().add(pictureId == null ? message : "图片 " + pictureId + "：" + message);
     }

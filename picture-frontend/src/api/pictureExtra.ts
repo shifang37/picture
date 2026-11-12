@@ -8,6 +8,62 @@ export interface PictureReviewBatchResult {
   errors?: string[]
 }
 
+/**
+ * 批量编辑 / 批量删除结果：字段与批量审核结果一致
+ */
+export interface PictureBatchResult {
+  successCount?: number
+  failCount?: number
+  errors?: string[]
+}
+
+export interface PictureBatchEditParams {
+  ids: string[]
+  /** null / undefined 表示不修改分类 */
+  category?: string
+  /** 传空数组表示清空标签，不传表示不修改 */
+  tags?: string[]
+  /** null / undefined 表示不修改简介 */
+  introduction?: string
+}
+
+/**
+ * 批量编辑图片的分类、标签、简介（整批原子）
+ */
+export async function batchEditPictures(
+  body: PictureBatchEditParams,
+  options?: { [key: string]: any },
+) {
+  return request<{ code?: number; data?: PictureBatchResult; message?: string }>(
+    '/picture/batch/edit',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      data: body,
+      ...(options || {}),
+    },
+  )
+}
+
+/**
+ * 批量删除图片（移入回收站）
+ */
+export async function batchDeletePictures(ids: string[], options?: { [key: string]: any }) {
+  return request<{ code?: number; data?: PictureBatchResult; message?: string }>(
+    '/picture/batch/delete',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      data: { ids },
+      ...(options || {}),
+    },
+  )
+}
+
 export interface PictureReviewBatchParams {
   ids: string[]
   reviewStatus: number

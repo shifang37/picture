@@ -76,6 +76,19 @@
           AND isDelete = 0
     </update>
 
+    <!-- 批量移入回收站：与单张删除语义一致，只处理仍在正常状态的行 -->
+    <update id="logicalDeleteByIds">
+        UPDATE picture
+        SET isDelete  = 1,
+            deletedAt = #{deletedAt},
+            deletedBy = #{deletedBy}
+        WHERE isDelete = 0
+          AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
     <!-- 回收站查询必须绕过逻辑删除插件的 isDelete = 0 过滤 -->
     <select id="selectDeletedById" resultMap="BaseResultMap">
         SELECT

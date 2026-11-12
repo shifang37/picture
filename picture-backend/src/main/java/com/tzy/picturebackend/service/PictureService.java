@@ -2,6 +2,8 @@ package com.tzy.picturebackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.tzy.picturebackend.model.dto.picture.PictureBatchDeleteRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureBatchEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
@@ -11,6 +13,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PictureBatchResult;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -224,5 +227,30 @@ public interface PictureService extends IService<Picture> {
      * @return 成功/失败统计
      */
     PictureReviewBatchResult batchReview(PictureReviewBatchRequest request, User loginUser);
+
+    /**
+     * 批量编辑图片的分类、标签、简介。
+     * <p>
+     * <b>整批原子</b>：只要有一张图片不存在或不属于当前用户（管理员例外），整批都不修改，
+     * 避免出现「改了一半」的中间状态。只更新请求中非空的字段；普通用户改动已审核图片的
+     * 内容后，图片会重新进入待审核，未发生实际变化的图片不会重置审核状态。
+     *
+     * @param request   批量编辑请求
+     * @param loginUser 当前登录用户
+     * @return 实际更新数量（内容没有变化时为 0）
+     */
+    PictureBatchResult batchEdit(PictureBatchEditRequest request, User loginUser);
+
+    /**
+     * 批量删除图片（移入回收站）。
+     * <p>
+     * 与批量审核一致采用「单张失败不影响其他图片」的语义：不存在的图片、他人的图片会计入
+     * 失败明细，其余图片正常删除；整批只做一次缓存失效与一次批量事件。
+     *
+     * @param request   批量删除请求
+     * @param loginUser 当前登录用户
+     * @return 成功/失败统计
+     */
+    PictureBatchResult batchDelete(PictureBatchDeleteRequest request, User loginUser);
 
 }

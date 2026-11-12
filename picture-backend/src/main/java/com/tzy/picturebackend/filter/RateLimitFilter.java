@@ -53,6 +53,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
      */
     private static final int INTERACTION_LIMIT_PER_MINUTE = 120;
 
+    /**
+     * 单个用户每分钟最多 30 次批量编辑/删除：单次最多 100 张，正常操作远低于该阈值
+     */
+    private static final int BATCH_LIMIT_PER_MINUTE = 30;
+
     @Resource
     private RateLimitManager rateLimitManager;
 
@@ -79,6 +84,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
                     // 收藏/点赞写操作按用户限流；未登录时退化为按 IP
                     rateLimitManager.check(userKey(request, "interaction"),
                             INTERACTION_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
+                } else if ("/picture/batch/edit".equals(path) || "/picture/batch/delete".equals(path)) {
+                    // 批量操作单次最多 100 张，按用户限制调用频率，避免脚本刷接口
+                    rateLimitManager.check(userKey(request, "pictureBatch"),
+                            BATCH_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
                 }
             } else if ("GET".equalsIgnoreCase(method) && "/user/captcha".equals(path)) {
                 rateLimitManager.check("captcha:ip:" + clientIp(request),
@@ -103,6 +112,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case "/user/captcha" -> "captcha";
             case "/picture/upload" -> "upload";
             case "/interaction/add", "/interaction/remove" -> "interaction";
+            case "/picture/batch/edit", "/picture/batch/delete" -> "pictureBatch";
             default -> "other";
         };
     }

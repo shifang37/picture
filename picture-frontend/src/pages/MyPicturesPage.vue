@@ -15,11 +15,33 @@
       <a-tab-pane key="2" tab="已拒绝" />
     </a-tabs>
 
+    <div class="batch-toolbar">
+      <span class="selected-text">已选择 {{ selectedRowKeys.length }} 张</span>
+      <a-space>
+        <a-button :disabled="!selectedRowKeys.length" @click="batchEditOpen = true">
+          批量编辑
+        </a-button>
+        <a-popconfirm
+          title="确定删除选中的图片吗？删除后进入回收站，可在保留期内由管理员恢复。"
+          ok-text="删除"
+          cancel-text="取消"
+          :disabled="!selectedRowKeys.length"
+          @confirm="doBatchDelete"
+        >
+          <a-button danger :disabled="!selectedRowKeys.length">批量删除</a-button>
+        </a-popconfirm>
+        <a-button v-if="selectedRowKeys.length" type="link" @click="clearSelection">
+          清空选择
+        </a-button>
+      </a-space>
+    </div>
+
     <a-table
       :data-source="dataList"
       :columns="columns"
       :loading="loading"
       :pagination="pagination"
+      :row-selection="rowSelection"
       row-key="id"
     >
       <template #bodyCell="{ column, record }">
@@ -63,6 +85,12 @@
         </template>
       </template>
     </a-table>
+
+    <BatchEditModal
+      v-model:open="batchEditOpen"
+      :ids="selectedRowKeys"
+      @success="handleBatchEdited"
+    />
   </div>
 </template>
 
@@ -73,8 +101,9 @@ import { message } from 'ant-design-vue'
 import { InfoCircleOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { deletePicture } from '@/api/pictureController'
-import { listMyPictureVoByPage } from '@/api/pictureExtra'
+import { batchDeletePictures, listMyPictureVoByPage } from '@/api/pictureExtra'
 import { formatSize, getThumbnailUrl } from '@/utils'
+import BatchEditModal from '@/components/BatchEditModal.vue'
 
 const router = useRouter()
 
@@ -99,6 +128,21 @@ const dataList = ref<API.PictureVO[]>([])
 const total = ref(0)
 const loading = ref(false)
 
+// 批量操作：表格多选与批量编辑弹窗
+const selectedRowKeys = ref<string[]>([])
+const batchEditOpen = ref(false)
+const rowSelection = computed(() => ({
+  selectedRowKeys: selectedRowKeys.value,
+  preserveSelectedRowKeys: false,
+  onChange: (keys: (string | number)[]) => {
+    selectedRowKeys.value = keys.map((key) => String(key))
+  },
+}))
+
+const clearSelection = () => {
+  selectedRowKeys.value = []
+}
+
 const pagination = computed(() => {
   return {
     current: query.current ?? 1,
@@ -107,6 +151,7 @@ const pagination = computed(() => {
     showSizeChanger: false,
     onChange: (page: number) => {
       query.current = page
+      clearSelection()
       fetchData()
     },
   }
@@ -151,6 +196,7 @@ const fetchData = async () => {
 
 const handleStatusChange = () => {
   query.current = 1
+  clearSelection()
   fetchData()
 }
 
@@ -185,6 +231,43 @@ const doDelete = async (record: API.PictureVO) => {
   } catch (error: any) {
     message.error('删除失败：' + (error.message || '系统错误'))
   }
+}
+
+const doBatchDelete = async () => {
+  if (!selectedRowKeys.value.length) {
+    return
+  }
+  const ids = [...selectedRowKeys.value]
+  try {
+    const res = await batchDeletePictures(ids)
+    if (res.data.code === 0) {
+      const result = res.data.data
+      if (result?.failCount) {
+        message.warning(
+          `已删除 ${result.successCount ?? 0} 张，失败 ${result.failCount}：${result.errors?.join('；')}`,
+        )
+      } else {
+        message.success(`已删除 ${result?.successCount ?? 0} 张图片`)
+      }
+      // 当前页可能被删空，回到上一页避免出现空白页
+      const deletedCount = result?.successCount ?? 0
+      if (deletedCount >= dataList.value.length && (query.current ?? 1) > 1) {
+        query.current = (query.current ?? 1) - 1
+      }
+      clearSelection()
+      await fetchData()
+    } else {
+      message.error('批量删除失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (error: any) {
+    message.error('批量删除失败：' + (error.message || '系统错误'))
+  }
+}
+
+// 批量编辑成功：清空选择并刷新当前页
+const handleBatchEdited = async () => {
+  clearSelection()
+  await fetchData()
 }
 
 onMounted(() => {
@@ -229,5 +312,18 @@ onMounted(() => {
 
 .status-icon {
   color: #faad14;
+}
+
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.selected-text {
+  color: #666;
+  font-size: 13px;
 }
 </style>

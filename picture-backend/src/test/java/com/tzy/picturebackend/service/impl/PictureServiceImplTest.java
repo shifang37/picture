@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.event.NotificationEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
@@ -15,6 +16,8 @@ import com.tzy.picturebackend.mapper.PictureTagMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
+import com.tzy.picturebackend.model.dto.picture.PictureBatchDeleteRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureBatchEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
@@ -25,6 +28,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
+import com.tzy.picturebackend.model.vo.PictureBatchResult;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -59,10 +63,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -1472,6 +1478,237 @@ class PictureServiceImplTest {
         assertTrue(captor.getValue().stream().allMatch(message ->
                 NotificationTypeEnum.REVIEW_PASS.equals(message.getType())));
         verify(notificationEventPublisher, never()).publish(any());
+    }
+
+    // ==================== M2：批量后处理 ====================
+
+    @Test
+    @DisplayName("批量编辑：整批更新分类与标签，只失效一次缓存、只发一条批量事件")
+    void batchEdit_updatesChangedPicturesInOneBatch() {
+        Picture first = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        first.setCategory("风景");
+        first.setTags("[\"旧标签\"]");
+        Picture second = picture(2L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        second.setCategory("人像");
+        second.setTags("[\"旧标签\"]");
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(first, second));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
+
+        PictureBatchEditRequest request = new PictureBatchEditRequest();
+        request.setIds(List.of(1L, 2L));
+        request.setCategory("建筑");
+        request.setTags(List.of("新标签"));
+
+        PictureBatchResult result = pictureService.batchEdit(request, user(100L, "user"));
+
+        assertEquals(2, result.getSuccessCount());
+        assertEquals(0, result.getFailCount());
+        // 第一次 UPDATE 写字段，第二次把已审核图片重置为待审核
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper, times(2))
+                .update(org.mockito.ArgumentMatchers.isNull(), wrapperCaptor.capture());
+        UpdateWrapper<Picture> updateWrapper = (UpdateWrapper<Picture>) wrapperCaptor.getAllValues().get(0);
+        String sqlSet = updateWrapper.getSqlSet();
+        assertTrue(sqlSet.contains("category"), "实际 SET: " + sqlSet);
+        assertTrue(sqlSet.contains("tags"), "实际 SET: " + sqlSet);
+        assertTrue(updateWrapper.getParamNameValuePairs().containsValue("建筑"),
+                "分类应写入新值，实际参数: " + updateWrapper.getParamNameValuePairs());
+        assertTrue(updateWrapper.getParamNameValuePairs().containsValue("[\"新标签\"]"),
+                "标签关系与 JSON 副本都要更新");
+        // 标签关系整体替换
+        verify(pictureTagMapper).deleteByPictureIds(List.of(1L, 2L));
+        verify(pictureTagMapper, times(2)).insertBatch(anyLong(), anyCollection());
+        // 整批只刷新一次缓存、只发一条事件
+        verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).picturesChanged(List.of(1L, 2L));
+    }
+
+    @Test
+    @DisplayName("批量编辑：普通用户改动已过审图片后重新进入待审核，待审核图片不受影响")
+    void batchEdit_resetsReviewOnlyForReviewedPictures() {
+        Picture passed = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        passed.setCategory("风景");
+        Picture rejected = picture(2L, 100L, PictureReviewStatusEnum.REJECT.getValue());
+        rejected.setCategory("风景");
+        Picture reviewing = picture(3L, 100L, PictureReviewStatusEnum.REVIEWING.getValue());
+        reviewing.setCategory("风景");
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(passed, rejected, reviewing));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
+
+        PictureBatchEditRequest request = new PictureBatchEditRequest();
+        request.setIds(List.of(1L, 2L, 3L));
+        request.setCategory("建筑");
+
+        assertEquals(3, pictureService.batchEdit(request, user(100L, "user")).getSuccessCount());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper, times(2))
+                .update(org.mockito.ArgumentMatchers.isNull(), wrapperCaptor.capture());
+        UpdateWrapper<Picture> reReviewWrapper =
+                (UpdateWrapper<Picture>) wrapperCaptor.getAllValues().get(1);
+        assertTrue(reReviewWrapper.getSqlSet().contains("reviewStatus"));
+        // getSqlSegment 才会把 IN 条件的占位参数写入 paramNameValuePairs，必须先取一次
+        assertTrue(reReviewWrapper.getSqlSegment().contains("IN"),
+                "重置审核应使用 IN 条件，实际 SQL: " + reReviewWrapper.getSqlSegment());
+        // 只有 PASS / REJECT 两张需要重新审核，REVIEWING 不重复重置
+        Collection<Object> parameters = reReviewWrapper.getParamNameValuePairs().values();
+        assertTrue(parameters.contains(1L) && parameters.contains(2L),
+                "IN 条件应包含图片 1、2，实际参数: " + parameters);
+        assertFalse(parameters.contains(3L), "待审核图片不应重复重置，实际参数: " + parameters);
+    }
+
+    @Test
+    @DisplayName("批量编辑：管理员改动不重置审核状态")
+    void batchEdit_adminKeepsReviewStatus() {
+        Picture picture = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        picture.setCategory("风景");
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(picture));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
+        when(userService.isAdmin(any(User.class))).thenReturn(true);
+
+        PictureBatchEditRequest request = new PictureBatchEditRequest();
+        request.setIds(List.of(1L));
+        request.setCategory("建筑");
+
+        pictureService.batchEdit(request, admin());
+
+        verify(pictureMapper, times(1))
+                .update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    @DisplayName("批量编辑：内容没有变化时不写库、不失效缓存")
+    void batchEdit_skipsUpdateWhenContentUnchanged() {
+        Picture picture = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        picture.setCategory("风景");
+        picture.setIntroduction("简介");
+        picture.setTags("[\"标签A\",\"标签B\"]");
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(picture));
+
+        PictureBatchEditRequest request = new PictureBatchEditRequest();
+        request.setIds(List.of(1L));
+        request.setCategory("风景");
+        request.setIntroduction("简介");
+        request.setTags(List.of("标签B", "标签A"));
+
+        PictureBatchResult result = pictureService.batchEdit(request, user(100L, "user"));
+
+        assertEquals(0, result.getSuccessCount());
+        verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+        verifyNoInteractions(pictureTagMapper, pictureListCache, pictureEventPublisher);
+    }
+
+    @Test
+    @DisplayName("批量编辑：空标签数组表示清空标签")
+    void batchEdit_emptyTagsClearsRelations() {
+        Picture picture = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        picture.setTags("[\"旧标签\"]");
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(picture));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
+
+        PictureBatchEditRequest request = new PictureBatchEditRequest();
+        request.setIds(List.of(1L));
+        request.setTags(List.of());
+
+        PictureBatchResult result = pictureService.batchEdit(request, user(100L, "user"));
+
+        assertEquals(1, result.getSuccessCount());
+        verify(pictureTagMapper).deleteByPictureIds(List.of(1L));
+        verify(pictureTagMapper, never()).insertBatch(anyLong(), anyCollection());
+    }
+
+    @Test
+    @DisplayName("批量编辑：任一图片不属于当前用户时整批失败，不写库")
+    void batchEdit_rejectsWholeBatchWhenAnyPictureNotOwned() {
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()),
+                picture(2L, 999L, PictureReviewStatusEnum.PASS.getValue())));
+        PictureBatchEditRequest request = new PictureBatchEditRequest();
+        request.setIds(List.of(1L, 2L));
+        request.setCategory("建筑");
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> pictureService.batchEdit(request, user(100L, "user")));
+
+        assertEquals(ErrorCode.NO_AUTH_ERROR.getCode(), e.getCode());
+        verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+        verifyNoInteractions(pictureTagMapper, pictureListCache, pictureEventPublisher);
+    }
+
+    @Test
+    @DisplayName("批量编辑：没有需要更新的字段时拒绝")
+    void batchEdit_rejectsEmptyPatch() {
+        PictureBatchEditRequest request = new PictureBatchEditRequest();
+        request.setIds(List.of(1L));
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> pictureService.batchEdit(request, user(100L, "user")));
+
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), e.getCode());
+        verifyNoInteractions(pictureMapper);
+    }
+
+    @Test
+    @DisplayName("批量删除：只删自己的图片，他人的与不存在的计入失败明细")
+    void batchDelete_deletesOwnedPicturesAndReportsFailures() {
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()),
+                picture(2L, 999L, PictureReviewStatusEnum.PASS.getValue())));
+        when(pictureMapper.logicalDeleteByIds(anyCollection(), eq(100L), any(Date.class))).thenReturn(1);
+
+        PictureBatchDeleteRequest request = new PictureBatchDeleteRequest();
+        request.setIds(List.of(1L, 2L, 3L));
+
+        PictureBatchResult result = pictureService.batchDelete(request, user(100L, "user"));
+
+        assertEquals(1, result.getSuccessCount());
+        assertEquals(2, result.getFailCount());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("无权删除")));
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("图片不存在")));
+        verify(pictureMapper).logicalDeleteByIds(eq(List.of(1L)), eq(100L), any(Date.class));
+        verify(pictureTagMapper).deleteByPictureIds(List.of(1L));
+        verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).picturesChanged(List.of(1L));
+    }
+
+    @Test
+    @DisplayName("批量删除：并发下部分图片已被删除时只统计实际删除数量")
+    void batchDelete_handlesConcurrentDeletion() {
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()),
+                picture(2L, 100L, PictureReviewStatusEnum.PASS.getValue())));
+        // 只有 1 张真正被删除，2 已被其他请求删除
+        when(pictureMapper.logicalDeleteByIds(anyCollection(), eq(100L), any(Date.class))).thenReturn(1);
+        when(pictureMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                picture(2L, 100L, PictureReviewStatusEnum.PASS.getValue())));
+
+        PictureBatchDeleteRequest request = new PictureBatchDeleteRequest();
+        request.setIds(List.of(1L, 2L));
+
+        PictureBatchResult result = pictureService.batchDelete(request, user(100L, "user"));
+
+        assertEquals(1, result.getSuccessCount());
+        assertEquals(1, result.getFailCount());
+        assertTrue(result.getErrors().get(0).contains("图片已被删除"));
+        verify(pictureTagMapper).deleteByPictureIds(List.of(1L));
+    }
+
+    @Test
+    @DisplayName("批量删除：无权删除任何图片时不写库")
+    void batchDelete_reportsAllFailuresWithoutWriting() {
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 999L, PictureReviewStatusEnum.PASS.getValue())));
+        PictureBatchDeleteRequest request = new PictureBatchDeleteRequest();
+        request.setIds(List.of(1L));
+
+        PictureBatchResult result = pictureService.batchDelete(request, user(100L, "user"));
+
+        assertEquals(0, result.getSuccessCount());
+        assertEquals(1, result.getFailCount());
+        verify(pictureMapper, never()).logicalDeleteByIds(anyCollection(), anyLong(), any(Date.class));
+        verifyNoInteractions(pictureTagMapper, pictureListCache, pictureEventPublisher);
     }
 
     // ==================== 辅助方法 ====================
