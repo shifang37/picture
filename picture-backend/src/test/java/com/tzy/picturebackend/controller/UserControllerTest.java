@@ -2,6 +2,7 @@ package com.tzy.picturebackend.controller;
 
 import com.tzy.picturebackend.annotation.AuthCheck;
 import com.tzy.picturebackend.constant.UserConstant;
+import com.tzy.picturebackend.event.NotificationEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
@@ -9,10 +10,13 @@ import com.tzy.picturebackend.manager.CaptchaManager;
 import com.tzy.picturebackend.manager.RegistrationGuard;
 import com.tzy.picturebackend.manager.SessionInvalidationManager;
 import com.tzy.picturebackend.model.dto.user.UserResetPasswordRequest;
+import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.vo.CaptchaVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.NotificationService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.support.InMemoryRedis;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,17 +62,25 @@ class UserControllerTest {
 
     private CaptchaManager captchaManager;
 
+    private NotificationService notificationService;
+
+    private NotificationEventPublisher notificationEventPublisher;
+
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
         pictureService = mock(PictureService.class);
         registrationGuard = mock(RegistrationGuard.class);
         captchaManager = mock(CaptchaManager.class);
+        notificationService = mock(NotificationService.class);
+        notificationEventPublisher = mock(NotificationEventPublisher.class);
         UserController userController = new UserController();
         ReflectionTestUtils.setField(userController, "userService", userService);
         ReflectionTestUtils.setField(userController, "pictureService", pictureService);
         ReflectionTestUtils.setField(userController, "registrationGuard", registrationGuard);
         ReflectionTestUtils.setField(userController, "captchaManager", captchaManager);
+        ReflectionTestUtils.setField(userController, "notificationService", notificationService);
+        ReflectionTestUtils.setField(userController, "notificationEventPublisher", notificationEventPublisher);
         ReflectionTestUtils.setField(userController, "sessionInvalidationManager",
                 new SessionInvalidationManager(InMemoryRedis.createTemplate(new ConcurrentHashMap<>())));
 
@@ -309,6 +321,11 @@ class UserControllerTest {
         assertEquals("admin", updated.getUserRole());
         assertNull(updated.getUserAccount(), "不允许通过该接口改账号");
         assertNull(updated.getUserPassword(), "不允许通过该接口改密码");
+        // 角色发生变化时提醒本人，避免被提权/降权而无人知晓
+        ArgumentCaptor<NotificationMessage> messageCaptor =
+                ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(notificationEventPublisher).publish(messageCaptor.capture());
+        assertEquals(NotificationTypeEnum.ROLE_CHANGED, messageCaptor.getValue().getType());
     }
 
     @Test
@@ -457,6 +474,12 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.data").value(true));
 
         verify(userService).resetPassword(1L, "newpass1");
+        // 安全提醒：重置成功后给目标用户发一条站内通知（不含新密码）
+        ArgumentCaptor<NotificationMessage> messageCaptor =
+                ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(notificationEventPublisher).publish(messageCaptor.capture());
+        assertEquals(NotificationTypeEnum.PASSWORD_RESET, messageCaptor.getValue().getType());
+        assertEquals(1L, messageCaptor.getValue().getUserId());
     }
 
     @Test

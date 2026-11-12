@@ -53,6 +53,16 @@ public class PictureVO implements Serializable {
     private Long downloadCount;
 
     /**
+     * 收藏数（公开字段，列表展示与热度排序用）
+     */
+    private Long favoriteCount;
+
+    /**
+     * 点赞数（公开字段，列表展示与热度排序用）
+     */
+    private Long likeCount;
+
+    /**
      * 图片宽度
      */
     private Integer picWidth;

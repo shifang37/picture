@@ -99,4 +99,36 @@ public interface PictureMapper extends BaseMapper<Picture> {
      */
     int deletePhysicallyByIds(@Param("ids") Collection<Long> ids);
 
+    /**
+     * 原子调整互动计数列（收藏数 / 点赞数）。
+     * <p>
+     * {@code column} 只能来自 {@code PictureInteractionTypeEnum#getCounterColumn()}，不接受客户端输入；
+     * {@code delta} 为负时用 {@code GREATEST(0, ...)} 兜底，避免并发取消导致计数变成负数。
+     *
+     * @param id     图片 id
+     * @param column 计数列名（favoriteCount / likeCount）
+     * @param delta  增量，可为负
+     * @return 受影响行数；0 表示图片已被删除
+     */
+    int adjustInteractionCount(@Param("id") Long id,
+                               @Param("column") String column,
+                               @Param("delta") int delta);
+
+    /**
+     * 按主键游标分批取图片 id，供计数重算使用
+     *
+     * @param afterId 只取 id 大于该值的记录（首次传 0）
+     * @param limit   单批条数
+     */
+    List<Long> selectIdsForRecount(@Param("afterId") Long afterId,
+                                   @Param("limit") int limit);
+
+    /**
+     * 按关系表重算一批图片的收藏数 / 点赞数，用于修正计数漂移
+     *
+     * @param ids 单批图片 id
+     * @return 受影响行数
+     */
+    int recountInteractions(@Param("ids") Collection<Long> ids);
+
 }

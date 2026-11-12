@@ -96,6 +96,18 @@ const router = createRouter({
       meta: { requiresLogin: true },
     },
     {
+      path: '/my/favorites',
+      name: '我的收藏',
+      component: () => import('@/pages/MyFavoritesPage.vue'),
+      meta: { requiresLogin: true },
+    },
+    {
+      path: '/notifications',
+      name: '通知中心',
+      component: () => import('@/pages/NotificationPage.vue'),
+      meta: { requiresLogin: true },
+    },
+    {
       path: '/picture/:id',
       name: '图片详情',
       component: () => import('@/pages/PictureDetailPage.vue'),

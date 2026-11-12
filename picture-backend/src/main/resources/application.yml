@@ -142,6 +142,13 @@ app:
     purge-enabled: ${RECYCLE_PURGE_ENABLED:true}
     # 单批物理清理条数
     purge-batch-size: ${RECYCLE_PURGE_BATCH_SIZE:100}
+  notification:
+    # 已读通知保留天数；到期由定时任务物理删除，未读通知永远保留
+    retention-days: ${NOTIFICATION_RETENTION_DAYS:90}
+    # 单用户未读上限：超过时把最旧的未读自动置为已读，避免红点永远消不掉
+    max-unread: ${NOTIFICATION_MAX_UNREAD:200}
+    # 单批清理条数
+    purge-batch-size: ${NOTIFICATION_PURGE_BATCH_SIZE:1000}
   upload:
     # 图片解码并发上限：容器 mem_limit 768MB，同时解码多张大图会成倍占用堆内存
     max-concurrent-decodes: ${UPLOAD_MAX_CONCURRENT_DECODES:2}

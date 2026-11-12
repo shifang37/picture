@@ -245,6 +245,8 @@ public class ElasticsearchPictureSearchService implements PictureSearchService {
                         .properties("userId", property -> property.long_(number -> number))
                         .properties("picSize", property -> property.long_(number -> number))
                         .properties("downloadCount", property -> property.long_(number -> number))
+                        .properties("favoriteCount", property -> property.long_(number -> number))
+                        .properties("likeCount", property -> property.long_(number -> number))
                         .properties("picWidth", property -> property.integer(number -> number))
                         .properties("picHeight", property -> property.integer(number -> number))
                         .properties("picScale", property -> property.float_(number -> number))

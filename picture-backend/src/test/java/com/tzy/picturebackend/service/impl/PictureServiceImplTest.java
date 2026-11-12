@@ -4,14 +4,17 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.event.PictureEventPublisher;
+import com.tzy.picturebackend.event.NotificationEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
+import com.tzy.picturebackend.mapper.PictureInteractionMapper;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.mapper.PictureTagMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
+import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
@@ -21,6 +24,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -78,6 +82,8 @@ class PictureServiceImplTest {
 
     private PictureAiSuggestionMapper pictureAiSuggestionMapper;
 
+    private PictureInteractionMapper pictureInteractionMapper;
+
     private FileManager fileManager;
 
     private PictureReviewLogService pictureReviewLogService;
@@ -88,6 +94,8 @@ class PictureServiceImplTest {
 
     private PictureEventPublisher pictureEventPublisher;
 
+    private NotificationEventPublisher notificationEventPublisher;
+
     private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
@@ -97,21 +105,25 @@ class PictureServiceImplTest {
         pictureMapper = mock(PictureMapper.class);
         pictureTagMapper = mock(PictureTagMapper.class);
         pictureAiSuggestionMapper = mock(PictureAiSuggestionMapper.class);
+        pictureInteractionMapper = mock(PictureInteractionMapper.class);
         fileManager = mock(FileManager.class);
         pictureReviewLogService = mock(PictureReviewLogService.class);
         tagCategoryService = mock(TagCategoryService.class);
         pictureListCache = mock(PictureListCache.class);
         pictureEventPublisher = mock(PictureEventPublisher.class);
+        notificationEventPublisher = mock(NotificationEventPublisher.class);
         meterRegistry = new SimpleMeterRegistry();
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "pictureTagMapper", pictureTagMapper);
         ReflectionTestUtils.setField(pictureService, "pictureAiSuggestionMapper", pictureAiSuggestionMapper);
+        ReflectionTestUtils.setField(pictureService, "pictureInteractionMapper", pictureInteractionMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
         ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);
         ReflectionTestUtils.setField(pictureService, "tagCategoryService", tagCategoryService);
         ReflectionTestUtils.setField(pictureService, "pictureListCache", pictureListCache);
         ReflectionTestUtils.setField(pictureService, "pictureEventPublisher", pictureEventPublisher);
+        ReflectionTestUtils.setField(pictureService, "notificationEventPublisher", notificationEventPublisher);
         ReflectionTestUtils.setField(pictureService, "pictureMetrics", new PictureMetrics(meterRegistry));
     }
 
@@ -583,6 +595,8 @@ class PictureServiceImplTest {
         assertEquals(2, idsCaptor.getValue().size());
         assertTrue(idsCaptor.getValue().containsAll(List.of(1L, 2L)));
         verify(pictureTagMapper).deleteByPictureIds(idsCaptor.getValue());
+        // 互动关系随图片物理删除；回收站阶段保留计数，恢复后收藏仍然有效
+        verify(pictureInteractionMapper).deleteByPictureIds(idsCaptor.getValue());
         verify(pictureAiSuggestionMapper).delete(any());
         // 审核日志按合规要求保留，物理清理不得触碰
         verifyNoInteractions(pictureReviewLogService);
@@ -1018,6 +1032,28 @@ class PictureServiceImplTest {
     }
 
     @Test
+    @DisplayName("排序：热度字段在排序时追加 id 次级排序，同值翻页不会重复或漏项")
+    void getQueryWrapper_hotSortAddsIdTieBreaker() {
+        for (String hotField : List.of("downloadCount", "favoriteCount", "likeCount")) {
+            String sql = pictureService.getQueryWrapper(queryRequest(hotField, "descend"))
+                    .getSqlSegment();
+
+            assertTrue(sql.contains("ORDER BY " + hotField + " DESC"), "实际 SQL 片段: " + sql);
+            assertTrue(sql.contains("id ASC"), "热度排序必须追加 id 次级排序: " + sql);
+        }
+    }
+
+    @Test
+    @DisplayName("排序：非热度字段不追加 id 次级排序，保持既有行为")
+    void getQueryWrapper_nonHotSortKeepsLegacyOrder() {
+        String sql = pictureService.getQueryWrapper(queryRequest("createTime", "descend"))
+                .getSqlSegment();
+
+        assertTrue(sql.contains("ORDER BY createTime DESC"), "实际 SQL 片段: " + sql);
+        assertFalse(sql.contains("id ASC"), "非热度排序不应改变既有 ORDER BY: " + sql);
+    }
+
+    @Test
     @DisplayName("分页查询：带标签时走 picture_tag JOIN，不拼 LIKE")
     void pagePictures_withTagsUsesJoinMapper() {
         PictureQueryRequest request = new PictureQueryRequest();
@@ -1347,8 +1383,98 @@ class PictureServiceImplTest {
         assertEquals("审核意见不能超过 512 个字符", e.getMessage());
     }
 
-    // ==================== 辅助方法 ====================
+    // ==================== M1：审核通知 ====================
 
+    @Test
+    @DisplayName("审核通知：审核通过后给作者发一条通知，dedupeKey 按图片去重")
+    void doPictureReview_publishesPassNotification() {
+        Picture picture = picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue());
+        picture.setName("风景照");
+        when(pictureMapper.selectById(1L)).thenReturn(picture);
+        when(pictureMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        PictureReviewRequest request = new PictureReviewRequest();
+        request.setId(1L);
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        pictureService.doPictureReview(request, admin());
+
+        ArgumentCaptor<NotificationMessage> captor = ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(notificationEventPublisher).publish(captor.capture());
+        NotificationMessage message = captor.getValue();
+        assertEquals(NotificationTypeEnum.REVIEW_PASS, message.getType());
+        assertEquals(100L, message.getUserId());
+        assertEquals(1L, message.getBizId());
+        assertEquals("REVIEW_PASS:1", message.getDedupeKey(), "重复审核不能产生第二条通知");
+        assertTrue(message.getContent().contains("风景照"), message.getContent());
+    }
+
+    @Test
+    @DisplayName("审核通知：拒绝时把审核意见带给作者，意见为空时给默认文案")
+    void doPictureReview_publishesRejectNotification() {
+        Picture picture = picture(2L, 100L, PictureReviewStatusEnum.REVIEWING.getValue());
+        picture.setName("海报");
+        when(pictureMapper.selectById(2L)).thenReturn(picture);
+        when(pictureMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        PictureReviewRequest request = new PictureReviewRequest();
+        request.setId(2L);
+        request.setReviewStatus(PictureReviewStatusEnum.REJECT.getValue());
+
+        pictureService.doPictureReview(request, admin());
+
+        ArgumentCaptor<NotificationMessage> captor = ArgumentCaptor.forClass(NotificationMessage.class);
+        verify(notificationEventPublisher).publish(captor.capture());
+        NotificationMessage message = captor.getValue();
+        assertEquals(NotificationTypeEnum.REVIEW_REJECT, message.getType());
+        assertEquals("REVIEW_REJECT:2", message.getDedupeKey());
+        assertTrue(message.getContent().contains("海报"), message.getContent());
+        assertTrue(message.getContent().contains("未填写审核意见"), message.getContent());
+    }
+
+    @Test
+    @DisplayName("审核通知：自己审核自己的图片不发通知")
+    void doPictureReview_skipsNotificationForOwnPicture() {
+        Picture picture = picture(1L, admin().getId(), PictureReviewStatusEnum.REVIEWING.getValue());
+        when(pictureMapper.selectById(1L)).thenReturn(picture);
+        when(pictureMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        PictureReviewRequest request = new PictureReviewRequest();
+        request.setId(1L);
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        pictureService.doPictureReview(request, admin());
+
+        verifyNoInteractions(notificationEventPublisher);
+    }
+
+    @Test
+    @DisplayName("审核通知：批量审核按整批聚合，只发一次事件并排除自己的图片")
+    void batchReview_publishesAggregatedNotifications() {
+        Picture ownPicture = picture(3L, admin().getId(), PictureReviewStatusEnum.REVIEWING.getValue());
+        ownPicture.setName("管理员的图");
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()),
+                picture(2L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()),
+                ownPicture));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(3);
+
+        PictureReviewBatchRequest request = new PictureReviewBatchRequest();
+        request.setIds(List.of(1L, 2L, 3L));
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        pictureService.batchReview(request, admin());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<NotificationMessage>> captor = ArgumentCaptor.forClass(Collection.class);
+        verify(notificationEventPublisher).publishAll(captor.capture());
+        List<Long> notifiedUserIds = captor.getValue().stream()
+                .map(NotificationMessage::getUserId)
+                .toList();
+        assertEquals(List.of(100L, 100L), notifiedUserIds, "自己的图片不通知，其余每张一条");
+        assertTrue(captor.getValue().stream().allMatch(message ->
+                NotificationTypeEnum.REVIEW_PASS.equals(message.getType())));
+        verify(notificationEventPublisher, never()).publish(any());
+    }
+
+    // ==================== 辅助方法 ====================
     private Picture validPictureEntity() {
         Picture picture = new Picture();
         picture.setId(1L);

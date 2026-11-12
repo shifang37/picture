@@ -51,7 +51,11 @@ public class PictureSearchQueryBuilder {
             Map.entry("updateTime", "updateTime"),
             Map.entry("reviewStatus", "reviewStatus"),
             Map.entry("reviewTime", "reviewTime"),
-            Map.entry("machineReviewStatus", "machineReviewStatus"));
+            Map.entry("machineReviewStatus", "machineReviewStatus"),
+            // 热度排序：与 MySQL 的 SORT_FIELD_WHITELIST 保持一致
+            Map.entry("downloadCount", "downloadCount"),
+            Map.entry("favoriteCount", "favoriteCount"),
+            Map.entry("likeCount", "likeCount"));
 
     /**
      * 构造一次公开列表查询；索引通过别名传入，便于以后切换索引版本

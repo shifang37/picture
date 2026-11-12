@@ -276,6 +276,9 @@ declare namespace API {
     category?: string
     picSize?: string
     downloadCount?: string
+    // 收藏数 / 点赞数：冗余计数，列表展示与热度排序用
+    favoriteCount?: string
+    likeCount?: string
     picWidth?: number
     picHeight?: number
     picScale?: number

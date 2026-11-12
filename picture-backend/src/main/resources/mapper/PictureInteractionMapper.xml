@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tzy.picturebackend.mapper.PictureInteractionMapper">
+
+    <!--
+        幂等插入：依赖 uk_picture_user_type(pictureId, userId, type)。
+        并发重复请求只有一个返回 1，其余返回 0，调用方据此决定是否累加计数。
+    -->
+    <insert id="insertIgnore">
+        INSERT IGNORE INTO picture_interaction (id, pictureId, userId, type, createTime)
+        VALUES (#{id}, #{pictureId}, #{userId}, #{type}, #{createTime})
+    </insert>
+
+    <!-- 取消收藏/点赞：关系行物理删除 -->
+    <delete id="deleteOne">
+        DELETE
+        FROM picture_interaction
+        WHERE pictureId = #{pictureId}
+          AND userId = #{userId}
+          AND type = #{type}
+    </delete>
+
+    <select id="selectByPictureAndUser" resultType="com.tzy.picturebackend.model.entity.PictureInteraction">
+        SELECT id, pictureId, userId, type, createTime
+        FROM picture_interaction
+        WHERE pictureId = #{pictureId}
+          AND userId = #{userId}
+    </select>
+
+    <!--
+        「我的收藏 / 我的点赞」：按互动时间倒序。
+        picture 的过滤条件（isDelete = 0、reviewStatus = 1）必须写死在这里：
+        自定义 SQL 不经过 MyBatis-Plus 的逻辑删除插件，「我的收藏」里出现已删除或未过审内容属于越权。
+    -->
+    <select id="selectMyPicturePage" resultType="com.tzy.picturebackend.model.entity.Picture">
+        SELECT p.*
+        FROM picture p
+        JOIN picture_interaction pi ON pi.pictureId = p.id
+        WHERE pi.userId = #{userId}
+          AND pi.type = #{type}
+          AND p.isDelete = 0
+          AND p.reviewStatus = 1
+        ORDER BY pi.createTime DESC, pi.id DESC
+    </select>
+
+    <!-- 物理删除图片时的级联清理；回收站阶段必须保留，恢复后计数不回退 -->
+    <delete id="deleteByPictureIds">
+        DELETE
+        FROM picture_interaction
+        WHERE pictureId IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+</mapper>

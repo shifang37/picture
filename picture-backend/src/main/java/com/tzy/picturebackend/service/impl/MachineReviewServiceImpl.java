@@ -3,13 +3,16 @@ package com.tzy.picturebackend.service.impl;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.tzy.picturebackend.config.MachineReviewProperties;
+import com.tzy.picturebackend.event.NotificationEventPublisher;
 import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.manager.MachineReviewManager;
 import com.tzy.picturebackend.manager.MachineReviewResult;
 import com.tzy.picturebackend.manager.PictureListCache;
+import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.enums.MachineReviewModeEnum;
 import com.tzy.picturebackend.model.enums.MachineReviewStatusEnum;
+import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.service.MachineReviewService;
 import com.tzy.picturebackend.service.PictureReviewLogService;
@@ -50,18 +53,22 @@ public class MachineReviewServiceImpl implements MachineReviewService {
 
     private final PictureEventPublisher pictureEventPublisher;
 
+    private final NotificationEventPublisher notificationEventPublisher;
+
     public MachineReviewServiceImpl(MachineReviewManager machineReviewManager,
                                     MachineReviewProperties machineReviewProperties,
                                     PictureService pictureService,
                                     PictureReviewLogService pictureReviewLogService,
                                     PictureListCache pictureListCache,
-                                    PictureEventPublisher pictureEventPublisher) {
+                                    PictureEventPublisher pictureEventPublisher,
+                                    NotificationEventPublisher notificationEventPublisher) {
         this.machineReviewManager = machineReviewManager;
         this.machineReviewProperties = machineReviewProperties;
         this.pictureService = pictureService;
         this.pictureReviewLogService = pictureReviewLogService;
         this.pictureListCache = pictureListCache;
         this.pictureEventPublisher = pictureEventPublisher;
+        this.notificationEventPublisher = notificationEventPublisher;
     }
 
     @Override
@@ -130,6 +137,14 @@ public class MachineReviewServiceImpl implements MachineReviewService {
         }
         pictureReviewLogService.record(picture.getId(), PictureReviewLogService.SYSTEM_REVIEWER_ID,
                 targetStatus, reviewMessage);
+        // 机审自动处置同样要告知作者：dedupeKey 与人工审核一致，重复审核不会产生第二条
+        if (picture.getUserId() != null) {
+            notificationEventPublisher.publish(NotificationMessage.review(
+                    targetStatus == PictureReviewStatusEnum.PASS.getValue()
+                            ? NotificationTypeEnum.REVIEW_PASS
+                            : NotificationTypeEnum.REVIEW_REJECT,
+                    picture.getUserId(), picture.getId(), picture.getName(), reviewMessage));
+        }
         // 审核状态变化会影响公开列表与搜索索引
         pictureListCache.invalidate();
         pictureEventPublisher.pictureChanged(picture.getId());

@@ -57,8 +57,18 @@
             <a-descriptions-item label="下载次数（按用户/日去重）">
               {{ picture.downloadCount ?? 0 }}
             </a-descriptions-item>
+            <a-descriptions-item label="收藏 / 点赞">
+              {{ formatCount(picture.favoriteCount) }} / {{ formatCount(picture.likeCount) }}
+            </a-descriptions-item>
           </a-descriptions>
           <a-space wrap>
+            <!-- 收藏 / 点赞：乐观更新 + 未登录跳登录并带回跳地址 -->
+            <InteractionButtons
+              v-if="picture.id"
+              :picture-id="String(picture.id)"
+              :favorite-count="picture.favoriteCount"
+              :like-count="picture.likeCount"
+            />
             <a-button v-if="canEdit" type="default" @click="doEdit">
               编辑
               <template #icon>
@@ -111,6 +121,8 @@ import {
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { getPictureVoById, deletePicture } from '@/api/pictureController'
 import { downloadPicture, formatSize } from '@/utils'
+import { formatCount } from '@/utils/interaction'
+import InteractionButtons from '@/components/InteractionButtons.vue'
 
 const loginUserStore = useLoginUserStore()
 // 是否具有编辑权限

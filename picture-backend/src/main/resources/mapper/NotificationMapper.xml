@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tzy.picturebackend.mapper.NotificationMapper">
+
+    <!--
+        批量幂等插入：uk_user_dedupe(userId, dedupeKey) 冲突时忽略。
+        dedupeKey 为 NULL 时 MySQL 唯一索引允许多行，因此密码重置、系统公告每次都提醒。
+        主键走自定义多行 INSERT，MyBatis-Plus 的 ASSIGN_ID 不生效，调用方需显式生成 id。
+    -->
+    <insert id="insertIgnoreBatch">
+        INSERT IGNORE INTO notification
+        (id, userId, type, title, content, bizType, bizId, dedupeKey, isRead, createTime)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.userId}, #{item.type}, #{item.title}, #{item.content},
+             #{item.bizType}, #{item.bizId}, #{item.dedupeKey}, #{item.isRead}, #{item.createTime})
+        </foreach>
+    </insert>
+
+    <select id="selectUserPage" resultType="com.tzy.picturebackend.model.entity.Notification">
+        SELECT id, userId, type, title, content, bizType, bizId, dedupeKey, isRead, createTime
+        FROM notification
+        WHERE userId = #{userId}
+        <if test="onlyUnread">
+            AND isRead = 0
+        </if>
+        ORDER BY createTime DESC, id DESC
+    </select>
+
+    <select id="countUnread" resultType="long">
+        SELECT COUNT(*)
+        FROM notification
+        WHERE userId = #{userId}
+          AND isRead = 0
+    </select>
+
+    <!-- 批量已读：条件带 userId，混入他人的 id 不会生效 -->
+    <update id="markRead">
+        UPDATE notification
+        SET isRead = 1
+        WHERE userId = #{userId}
+          AND isRead = 0
+          AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <update id="markAllRead">
+        UPDATE notification
+        SET isRead = 1
+        WHERE userId = #{userId}
+          AND isRead = 0
+    </update>
+
+    <delete id="deleteByIds">
+        DELETE
+        FROM notification
+        WHERE userId = #{userId}
+          AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
+
+    <!--
+        未读上限：保留最新 keepCount 条未读，其余自动置为已读。
+        MySQL 不允许 UPDATE 直接带 LIMIT + 子查询引用同一张表，因此用派生表包一层。
+    -->
+    <update id="markOldestRead">
+        UPDATE notification
+        SET isRead = 1
+        WHERE userId = #{userId}
+          AND isRead = 0
+          AND id NOT IN (
+            SELECT id FROM (
+                SELECT id
+                FROM notification
+                WHERE userId = #{userId}
+                  AND isRead = 0
+                ORDER BY createTime DESC, id DESC
+                LIMIT #{keepCount}
+            ) keep_rows
+        )
+    </update>
+
+    <!-- 只清理已读且超期的通知，未读通知不会被任务删除 -->
+    <delete id="deleteReadBefore">
+        DELETE
+        FROM notification
+        WHERE isRead = 1
+          AND createTime &lt; #{before}
+        ORDER BY createTime ASC
+        LIMIT #{limit}
+    </delete>
+
+    <delete id="deleteByUserId">
+        DELETE
+        FROM notification
+        WHERE userId = #{userId}
+    </delete>
+</mapper>

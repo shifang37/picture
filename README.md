@@ -303,6 +303,97 @@ app:
 - `picture.tags` 仍保留 JSON 副本供详情展示和 Elasticsearch 文档使用，但筛选以 `picture_tag` 为准；
 - 标签上限统一为**单个 32 字符、最多 20 个**（`PictureTagConstant`），DTO、数据库 `picture_tag.tag`、AI 提示词与模型输出清洗共用同一组值。
 
+## 收藏与点赞（M1）
+
+浏览者可以对**已通过审核**的图片收藏、点赞；作者与浏览者都能从列表/详情看到计数，首页支持按热度排序。
+
+### 数据模型
+
+- `picture_interaction(pictureId, userId, type, createTime)` 是权威关系数据，`type` 为 `favorite` / `like`；唯一键 `(pictureId, userId, type)` 保证同一用户对同一张图只有一条，取消操作直接删行（不做逻辑删除，避免唯一键与「重新收藏」冲突）；
+- `picture.favoriteCount` / `picture.likeCount` 是冗余计数，列表展示与排序直接读它，不再 `COUNT` 关系表；
+- `V10__picture_interaction.sql` 同时补了 `(isDelete, reviewStatus, favoriteCount|likeCount|downloadCount)` 三个索引，让「最新 / 最热 / 最多下载 / 最多收藏」都能走索引排序。
+
+### 接口
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/interaction/add` | 登录 | 收藏 / 点赞，幂等；已存在时直接返回当前状态 |
+| POST | `/api/interaction/remove` | 登录 | 取消收藏 / 取消点赞，幂等 |
+| GET | `/api/interaction/status?pictureId=` | 公开 | 状态与计数；未登录时选中状态恒为 `false` |
+| POST | `/api/interaction/my/page` | 登录 | 我的收藏 / 我的点赞，只返回已过审图片，按互动时间倒序 |
+| POST | `/api/interaction/recount?pictureId=` | 管理员 | 按关系表重算计数（不传 id 则全量分批重算） |
+
+### 一致性约定
+
+- **先写关系行、后改计数**，两者同事务：`INSERT IGNORE` 返回 0 表示已存在，此时不累加计数；并发重复请求只会加一次；
+- 计数用 `UPDATE picture SET x = GREATEST(0, x + ?)` 原子增减，取消操作不会把计数减成负数；图片已被物理删除时不更新；
+- 互动**不失效公开列表缓存**：列表里的计数最多滞后一个缓存周期（L1 30 秒 / L2 5 分钟），详情与状态接口实时；但会发一次 `picture.changed` 事件，让 Elasticsearch 的热度排序字段同步；
+- 计数漂移可用 `POST /api/interaction/recount` 修复（管理员），全量重算按主键游标每批 500 条，不会长时间锁表；
+- 只能对已过审图片互动；待审核/已拒绝图片对他人统一返回 40400（作者自己也一样），避免用互动接口探测未公开内容；
+- 写接口按用户限流 120 次/分钟（未登录按 IP），指标 `picture_interaction_total{action,type}`。
+
+### 热度排序
+
+公开列表复用 `POST /api/picture/list/page/vo`，`sortField` 新增三个取值：
+
+```json
+{ "sortField": "favoriteCount", "sortOrder": "descend" }
+```
+
+- MySQL 与 Elasticsearch 两条路径都支持 `downloadCount` / `favoriteCount` / `likeCount`，非法字段仍返回 40000；
+- 热度字段同值极多，排序时自动追加 `id ASC` 次级键，滚动分页不会重复或漏项；
+- ES 索引文档新增 `favoriteCount` / `likeCount` 字段（`long`），切换新索引时由全量重建写入；互动发生后会更新该图片的索引快照。
+
+## 站内通知（M1）
+
+审核结论、账号安全事件与系统公告会写入站内通知，顶栏铃铛显示未读数，`/notifications` 查看全部。
+
+### 数据模型
+
+`notification` 表（`V11__notification.sql`）：
+
+- `type` 取 `REVIEW_PASS` / `REVIEW_REJECT` / `PASSWORD_RESET` / `ROLE_CHANGED` / `SYSTEM`；
+- `dedupeKey` + 唯一键 `(userId, dedupeKey)` 做幂等：审核通知的键是 `REVIEW_PASS:<pictureId>` / `REVIEW_REJECT:<pictureId>`，重复投递、机审兜底重发都不会产生第二条；密码重置、角色变更、公告的 `dedupeKey` 为 `NULL`（MySQL 唯一索引允许多个 `NULL`），每次事件都提醒；
+- 索引 `(userId, isRead, createTime)` 同时支撑列表与未读数。
+
+### 触发点与可靠性
+
+| 事件 | 触发位置 | 通知内容 |
+| --- | --- | --- |
+| 人工审核（单张/批量） | `PictureServiceImpl#doPictureReview` / `#batchReview` | 通过：`你的图片《名称》已通过审核`；拒绝：附审核意见 |
+| 机审自动处置 | `MachineReviewServiceImpl#applyMode` | 与人工审核同一份文案与幂等键 |
+| 管理员重置密码 | `UserController#resetPassword` | 安全提醒（不包含新密码） |
+| 管理员调整角色 | `UserController#updateUser` | 只有角色真的变化时才提醒 |
+| 系统公告 | `POST /api/notification/broadcast` | 每个用户一行，限流 1 次/分钟 |
+
+- 业务代码只发 Spring 事件（`NotificationEventPublisher`），由 `NotificationEventListener` 以 `@TransactionalEventListener(AFTER_COMMIT, fallbackExecution = true)` 落库：审核回滚不会留下「操作失败但通知已发」，机审这类无事务调用也能收到；
+- 通知写入失败只记日志，绝不影响审核、重置密码等主流程；
+- 批量审核按作者聚合，整批只发一次事件、一次批量插入（每批 ≤ 500 条）；
+- 自己审核自己的图片不通知；`unread` 超过 `app.notification.max-unread`（默认 200）时把最旧的未读自动置为已读，保证红点一定能消掉；
+- 每天 04:10 清理「已读且超过 `retention-days`（默认 90 天）」的通知，未读通知永远保留。
+
+### 接口
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/notification/page` | 登录 | 分页，`onlyUnread` 只看未读 |
+| GET | `/api/notification/unread-count` | 登录 | 未读数 |
+| POST | `/api/notification/read` | 登录 | 批量标记已读 |
+| POST | `/api/notification/read/all` | 登录 | 全部已读 |
+| POST | `/api/notification/delete` | 登录 | 批量删除 |
+| POST | `/api/notification/broadcast` | 管理员 | 系统公告 |
+
+- 所有 SQL 都带 `userId` 条件，混入他人的通知 id 会被静默忽略，避免枚举；
+- 前端 `useNotificationStore` 登录后每 60 秒轮询一次未读数，页面不可见时暂停、切回前台立即刷新；通知点击跳转 `bizType=PICTURE` 对应的详情页并标记已读。
+
+### 配置项
+
+| 配置 | 环境变量 | 默认 |
+| --- | --- | --- |
+| `app.notification.retention-days` | `NOTIFICATION_RETENTION_DAYS` | 90 |
+| `app.notification.max-unread` | `NOTIFICATION_MAX_UNREAD` | 200 |
+| `app.notification.purge-batch-size` | `NOTIFICATION_PURGE_BATCH_SIZE` | 1000 |
+
 ## 下载与下载次数统计口径
 
 详情页的「免费下载」走同源后端接口 `GET /api/picture/download/{id}`：
@@ -320,7 +411,7 @@ app:
 - 登录态存放在 Redis（Spring Session），键前缀 `picture:session:`，**重启后端不会掉线**；
 - 会话 Cookie 名为 `SESSION`，有效期 7 天（`spring.session.timeout`）；
 - 修改或重置密码会让该用户的其他会话立即失效；失效版本同样在 Redis 中，重启后依旧有效；
-- 限流计数在 `picture:ratelimit:` 下：登录按 IP 10 次/分钟，上传按用户 60 次/分钟（未登录时按 IP）；
+- 限流计数在 `picture:ratelimit:` 下：登录按 IP 10 次/分钟，上传按用户 60 次/分钟，收藏/点赞按用户 120 次/分钟（未登录均退化为按 IP）；
 - Redis 是硬依赖：没有 Redis 时登录与鉴权不可用，本地开发请先执行 `docker compose -f docker-compose.infra.yml up -d`。
 
 ## 缓存策略
@@ -328,6 +419,7 @@ app:
 - **标签/分类字典**（`GET /api/picture/tag_category`）：Spring Cache 存 Redis（key 为 `tagCategory::…`），TTL 30 分钟；管理员新增、删除、同步字典后立即失效，首页分类 Tab 马上更新。
 - **公开图片列表**（`POST /api/picture/list/page/vo`）：两级缓存，L1 是 Caffeine（最多 500 项、写入后 30 秒过期），L2 是 Redis（5 分钟 + 0~60 秒随机抖动）。「我的图片」、管理列表、详情页都不缓存。
 - **失效**：审核通过/拒绝（批量审核整批只失效一次）、编辑、删除、回收站恢复、上传成功后对 `picture:list:ns` 自增，新请求换用新命名空间，旧 key 自然过期。因此审核结果立即可见，L1 最多比数据库滞后 30 秒。
+- **互动不失效列表**：收藏/点赞只改计数列，列表缓存里的计数最多滞后一个周期（L1 30 秒 / L2 5 分钟），详情页与互动状态接口实时读取；这样热门图片的互动不会把列表缓存反复打穿。
 - **降级**：缓存只保存公开可见的数据；Redis 读写异常时直接回源数据库，列表接口不受影响。
 - 实测（300 张图片、50 次请求）：公开列表热缓存 p95 约 8.5 ms，每次失效回源 p95 约 19 ms。
 
@@ -370,7 +462,7 @@ app:
 - **只接管公开列表**：「我的图片」和管理端列表继续走 MySQL；
 - **可降级**：Elasticsearch 调用异常时自动回落到原 MySQL 查询并记录 warn 日志，首页搜索保持可用；
 - **索引**：`picture_v1`，别名 `picture`；名称、简介使用内置 `cjk` 分析器（不需要 IK 插件），名称权重为 3；分类、标签、格式等使用 keyword；
-- **排序**：有搜索词时按相关度，否则按请求字段（默认 `createTime` 倒序），排序字段沿用原白名单；
+- **排序**：有搜索词时按相关度，否则按请求字段（默认 `createTime` 倒序）；排序字段沿用 MySQL 白名单，包含 `downloadCount` / `favoriteCount` / `likeCount` 三个热度字段；
 - **同步**：`picture.uploaded` / `picture.changed` / `picture.batch.changed` 事件驱动，`picture.search.q` 消费者按 id 回查：公开可见就写入索引，待审核、拒绝、删除则删除文档；
 - **全量重建**：`POST /api/search/reindex`（仅管理员），每批 500 条从 MySQL 写入临时索引，完成后原子切换别名再删除旧索引；首次启用、索引损坏或巡检不一致时使用；
 - **一致性巡检**：`SEARCH_ENGINE=es` 时每天 03:00 对比 MySQL 公开图片数与索引文档数，不一致时记录「搜索索引与数据库不一致」告警日志；
@@ -396,7 +488,8 @@ $env:SEARCH_ENGINE = 'es'
 - **布局**：用接口返回的 `picWidth` / `picHeight` 计算高宽比，按「放入当前最矮的一列」分配到 1–6 列，列数随容器宽度变化；封面用 `aspect-ratio` 在图片加载前占位，横图、竖图都不裁切，滚动时没有布局跳动；
 - **加载**：VueUse `useInfiniteScroll` 监听窗口滚动，距底部 400px 时请求下一页（每页 20 条），按 id 去重，避免滚动期间有新图过审导致重复；加载失败显示重试按钮，全部加载完显示「没有更多了」；
 - **图片**：`loading="lazy"`、`decoding="async"`，缩略图尺寸按列宽 × 设备像素比取 300–600 的档位，减少列表流量；
-- **状态进 URL**：搜索词、分类、标签写入查询参数，刷新或分享链接都能还原；切换条件时回到页面顶部；
+- **状态进 URL**：搜索词、分类、标签、排序写入查询参数，刷新或分享链接都能还原；切换条件时回到页面顶部；
+- **排序切换**：最新（默认）/ 最多收藏 / 最多点赞 / 最多下载，切换后回到顶部并重新分页；卡片上直接展示收藏、点赞、下载计数，让「最热」的排序依据可见；
 - **返回恢复**：首页通过路由 `meta.keepAlive` 缓存，从详情页返回时恢复原来的滚动位置；其他页面仍沿用浏览器前进后退的滚动位置。
 
 ## 管理端数据看板
@@ -516,6 +609,9 @@ Prometheus、8124 管理端口、RabbitMQ 15692 都只在 Compose 内网可达�
 | `picture_compress_seconds` | Timer | `FileManager#compressIfNeeded` | 开启直方图桶，可算 p95 |
 | `picture_review_pending` | Gauge | `PictureReviewPendingMetrics` | 每 60 秒查一次待审核数量，抓取时不打库 |
 | `picture_ai_tokens_total{direction}` | Counter | `DeepSeekPictureAiTagger` | 按 `prompt/completion` 累计 token，用于估算成本 |
+| `picture_interaction_total{action,type}` | Counter | `PictureInteractionServiceImpl` | 收藏/点赞的 add/remove 量，可用于排查异常刷量 |
+| `notification_sent_total{type}` | Counter | `NotificationServiceImpl` | 按通知类型统计发送量，`REVIEW_REJECT` 突增通常意味着审核或机审策略异常 |
+| `notification_read_total` | Counter | `NotificationServiceImpl` | 已读条数，粗略反映通知触达效果 |
 | `cache_gets_total{cache="picture.list.local"}` | Counter | `PictureListCache` | Caffeine 开启 `recordStats` 后由 Micrometer 导出，可算命中率 |
 
 `http_server_requests_seconds` 已开启 `percentiles-histogram`，接口 p95 延迟可直接用
@@ -580,7 +676,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **453 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **493 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
@@ -588,7 +684,9 @@ cd picture-backend
 ./mvnw verify   # 单元测试 + Testcontainers 集成测试，需要本机 Docker
 ```
 
-集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
+集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP，以及 M1 的互动/通知：10 线程并发收藏只落 1 行关系且计数为 1、通知唯一键去重、只能读自己的通知、物理清理级联删除互动关系。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
+
+前端测试：Vitest 42 个用例（含计数格式化、乐观更新与回滚、通知轮询在页面隐藏时暂停），Playwright 12 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：其中 M1 新增两条主链路「收藏 → 我的收藏」「审核通知 → 图片详情」。
 
 ## 持续集成与依赖更新
 

@@ -13,6 +13,8 @@
             <result property="tags" column="tags" />
             <result property="picSize" column="picSize" />
             <result property="downloadCount" column="downloadCount" />
+            <result property="favoriteCount" column="favoriteCount" />
+            <result property="likeCount" column="likeCount" />
             <result property="picWidth" column="picWidth" />
             <result property="picHeight" column="picHeight" />
             <result property="picScale" column="picScale" />
@@ -36,7 +38,7 @@
 
     <sql id="Base_Column_List">
         id,url,name,introduction,category,tags,
-        picSize,downloadCount,picWidth,picHeight,picScale,picFormat,
+        picSize,downloadCount,favoriteCount,likeCount,picWidth,picHeight,picScale,picFormat,
         userId,createTime,editTime,updateTime,isDelete,
         deletedAt,deletedBy,
         reviewStatus,reviewMessage,reviewerId,reviewTime,
@@ -123,4 +125,44 @@
             #{id}
         </foreach>
     </delete>
+
+    <!--
+        互动计数原子增减：column 来自枚举（favoriteCount / likeCount），不是客户端输入。
+        delta 为负时用 GREATEST 兜底，并发取消不会把计数减成负数；图片已删除时不更新。
+    -->
+    <update id="adjustInteractionCount">
+        UPDATE picture
+        SET ${column} = GREATEST(0, ${column} + #{delta})
+        WHERE id = #{id}
+          AND isDelete = 0
+    </update>
+
+    <!-- 计数重算：按主键游标分批，避免一次性锁住整张 picture 表 -->
+    <select id="selectIdsForRecount" resultType="java.lang.Long">
+        SELECT id
+        FROM picture
+        WHERE id &gt; #{afterId}
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+        用关系表的真实行数覆盖冗余计数列：
+        修复「取消收藏时进程崩溃」「历史数据缺列」等造成的漂移，管理端重算入口调用。
+    -->
+    <update id="recountInteractions">
+        UPDATE picture p
+        SET p.favoriteCount = (SELECT COUNT(*)
+                               FROM picture_interaction pi
+                               WHERE pi.pictureId = p.id
+                                 AND pi.type = 'favorite'),
+            p.likeCount     = (SELECT COUNT(*)
+                               FROM picture_interaction pi
+                               WHERE pi.pictureId = p.id
+                                 AND pi.type = 'like')
+        WHERE p.id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
 </mapper>

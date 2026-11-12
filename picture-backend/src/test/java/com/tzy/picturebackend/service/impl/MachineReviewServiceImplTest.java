@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.tzy.picturebackend.config.MachineReviewProperties;
 import com.tzy.picturebackend.event.PictureEventPublisher;
+import com.tzy.picturebackend.event.NotificationEventPublisher;
 import com.tzy.picturebackend.manager.MachineReviewException;
 import com.tzy.picturebackend.manager.MachineReviewManager;
 import com.tzy.picturebackend.manager.MachineReviewResult;
@@ -50,6 +51,8 @@ class MachineReviewServiceImplTest {
 
     private PictureEventPublisher pictureEventPublisher;
 
+    private NotificationEventPublisher notificationEventPublisher;
+
     private MachineReviewServiceImpl machineReviewService;
 
     @BeforeEach
@@ -62,9 +65,10 @@ class MachineReviewServiceImplTest {
         pictureReviewLogService = mock(PictureReviewLogService.class);
         pictureListCache = mock(PictureListCache.class);
         pictureEventPublisher = mock(PictureEventPublisher.class);
+        notificationEventPublisher = mock(NotificationEventPublisher.class);
         machineReviewService = new MachineReviewServiceImpl(machineReviewManager,
                 machineReviewProperties, pictureService, pictureReviewLogService,
-                pictureListCache, pictureEventPublisher);
+                pictureListCache, pictureEventPublisher, notificationEventPublisher);
     }
 
     @Test

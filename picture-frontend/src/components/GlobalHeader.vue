@@ -16,8 +16,9 @@
         @click="doMenuClick"
       />
     </a-col>
-    <a-col flex="160px">
+    <a-col flex="220px">
       <div class="user-login-status">
+        <NotificationBell v-if="loginUserStore.loginUser.id" class="notification-bell" />
         <div v-if="loginUserStore.loginUser.id">
           <a-dropdown>
             <ASpace>
@@ -46,15 +47,35 @@
   </a-row>
 </template>
 <script lang="ts" setup>
-import { h, ref, computed } from 'vue'
+import { h, ref, computed, onUnmounted, watch } from 'vue'
 import { HomeOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
 import type { MenuProps } from 'ant-design-vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
+import { useNotificationStore } from '@/stores/useNotificationStore'
 import { userLogout } from '@/api/userController'
+import NotificationBell from '@/components/NotificationBell.vue'
 
 const loginUserStore = useLoginUserStore()
+const notificationStore = useNotificationStore()
+
+// 登录后启动未读轮询、登出后停止：顶栏铃铛在任何页面都可用
+watch(
+  () => loginUserStore.loginUser.id,
+  (id) => {
+    if (id) {
+      notificationStore.startPolling()
+    } else {
+      notificationStore.reset()
+    }
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  notificationStore.stopPolling()
+})
 
 // 菜单列表
 const originItems = [
@@ -78,6 +99,11 @@ const originItems = [
     key: '/my_pictures',
     label: '我的图片',
     title: '我的图片',
+  },
+  {
+    key: '/my/favorites',
+    label: '我的收藏',
+    title: '我的收藏',
   },
   {
     key: '/admin/dashboard',
@@ -123,9 +149,12 @@ const filterMenus = (menus = [] as MenuProps['items']) => {
     if (menuKey.startsWith('/admin') && loginUser?.userRole !== 'admin') {
       return false
     }
-    // 上传和「我的图片」需要登录
+    // 上传、「我的图片」和「我的收藏」需要登录
     if (
-      (menuKey === '/add_picture' || menuKey === '/batch_upload' || menuKey === '/my_pictures') &&
+      (menuKey === '/add_picture' ||
+        menuKey === '/batch_upload' ||
+        menuKey === '/my_pictures' ||
+        menuKey === '/my/favorites') &&
       !loginUser?.id
     ) {
       return false
@@ -192,5 +221,17 @@ const doLogout = async () => {
 
 .logo {
   height: 48px;
+}
+
+.user-login-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  height: 100%;
+}
+
+.notification-bell {
+  cursor: pointer;
 }
 </style>

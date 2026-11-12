@@ -60,6 +60,21 @@ public class PictureMetrics {
      */
     public static final String AI_TOKENS = "picture.ai.tokens";
 
+    /**
+     * 收藏/点赞计数器（action=add/remove，type=favorite/like）
+     */
+    public static final String INTERACTION = "picture.interaction";
+
+    /**
+     * 站内通知发送计数器（type=REVIEW_PASS/REVIEW_REJECT/...）
+     */
+    public static final String NOTIFICATION_SENT = "notification.sent";
+
+    /**
+     * 站内通知已读计数器
+     */
+    public static final String NOTIFICATION_READ = "notification.read";
+
     private final MeterRegistry registry;
 
     /**
@@ -144,6 +159,45 @@ public class PictureMetrics {
                 .tag("direction", direction)
                 .register(registry)
                 .increment(tokens);
+    }
+
+    /**
+     * 记录一次收藏/点赞操作
+     *
+     * @param action add / remove
+     * @param type   favorite / like
+     */
+    public void interaction(String action, String type) {
+        Counter.builder(INTERACTION)
+                .description("图片收藏/点赞次数")
+                .tag("action", action)
+                .tag("type", type)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次站内通知发送（按通知类型区分，便于发现审核拒绝量突增）
+     */
+    public void notificationSent(String type) {
+        Counter.builder(NOTIFICATION_SENT)
+                .description("站内通知发送次数")
+                .tag("type", type == null ? "UNKNOWN" : type)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录已读通知数量（通知触达效果的粗略指标）
+     */
+    public void notificationRead(int count) {
+        if (count <= 0) {
+            return;
+        }
+        Counter.builder(NOTIFICATION_READ)
+                .description("站内通知已读次数")
+                .register(registry)
+                .increment(count);
     }
 
     /**

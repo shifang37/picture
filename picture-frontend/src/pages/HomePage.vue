@@ -11,11 +11,24 @@
       />
     </div>
 
-    <!-- 分类 + 标签 -->
+    <!-- 分类 + 标签 + 排序 -->
     <a-tabs v-model:activeKey="selectedCategory" @change="doSearch">
       <a-tab-pane key="all" tab="全部" />
       <a-tab-pane v-for="category in categoryList" :key="category" :tab="category" />
     </a-tabs>
+    <div class="sort-bar">
+      <span class="sort-bar-label">排序：</span>
+      <a-radio-group
+        v-model:value="sortField"
+        size="small"
+        button-style="solid"
+        @change="doSortChange"
+      >
+        <a-radio-button v-for="option in SORT_OPTIONS" :key="option.value" :value="option.value">
+          {{ option.label }}
+        </a-radio-button>
+      </a-radio-group>
+    </div>
     <div class="tag-bar">
       <span class="tag-bar-label">标签：</span>
       <a-space :size="[0, 8]" wrap>
@@ -81,6 +94,12 @@
                   {{ tag }}
                 </a-tag>
               </div>
+              <!-- 互动计数：收藏/点赞/下载，热度排序时用户能直观看到排序依据 -->
+              <div class="picture-stats">
+                <span>收藏 {{ formatCount(picture.favoriteCount) }}</span>
+                <span>点赞 {{ formatCount(picture.likeCount) }}</span>
+                <span>下载 {{ formatCount(picture.downloadCount) }}</span>
+              </div>
             </template>
           </a-card-meta>
         </a-card>
@@ -109,6 +128,7 @@ import { message } from 'ant-design-vue'
 import { useDevicePixelRatio, useElementSize, useInfiniteScroll } from '@vueuse/core'
 import { listPictureTagCategory, listPictureVoByPage } from '@/api/pictureController'
 import { getThumbnailUrl } from '@/utils'
+import { formatCount } from '@/utils/interaction'
 import {
   distributeToColumns,
   getColumnCount,
@@ -142,6 +162,15 @@ const selectedTags = ref<string[]>([])
 const categoryList = ref<string[]>([])
 const tagList = ref<string[]>([])
 
+// 排序：最新（默认）/ 最多收藏 / 最多点赞 / 最多下载
+const SORT_OPTIONS = [
+  { label: '最新', value: 'createTime' },
+  { label: '最多收藏', value: 'favoriteCount' },
+  { label: '最多点赞', value: 'likeCount' },
+  { label: '最多下载', value: 'downloadCount' },
+] as const
+const sortField = ref<string>('createTime')
+
 const showInitialLoading = computed(() => initialLoading.value && dataList.value.length === 0)
 
 // 瀑布流列数与缩略图尺寸
@@ -170,7 +199,7 @@ let requestSeq = 0
 const buildQuery = (page: number): API.PictureQueryRequest => ({
   current: page,
   pageSize: PAGE_SIZE,
-  sortField: 'createTime',
+  sortField: sortField.value,
   sortOrder: 'descend',
   searchText: searchText.value.trim() || undefined,
   category: selectedCategory.value === 'all' ? undefined : selectedCategory.value,
@@ -263,6 +292,9 @@ const applyQueryToState = () => {
     : typeof rawTags === 'string' && rawTags
       ? [rawTags]
       : []
+  // 排序也写进 URL：刷新或分享链接后能还原「最热」等视图
+  const rawSort = typeof query.sort === 'string' ? query.sort : ''
+  sortField.value = SORT_OPTIONS.some((option) => option.value === rawSort) ? rawSort : 'createTime'
 }
 
 // 搜索条件同步到 URL，刷新或分享链接后能还原
@@ -277,6 +309,9 @@ const syncQueryToUrl = () => {
   }
   if (selectedTags.value.length) {
     query.tags = [...selectedTags.value]
+  }
+  if (sortField.value !== 'createTime') {
+    query.sort = sortField.value
   }
   router.replace({ name: 'home', query }).catch(() => {
     // 地址栏同步失败不影响列表展示
@@ -299,6 +334,13 @@ const handleTagChange = (tag: string, checked: boolean) => {
   }
   selectedTags.value = [...next]
   doSearch()
+}
+
+// 切换排序：回到顶部并重新分页，避免停留在旧列表的滚动位置
+const doSortChange = () => {
+  syncQueryToUrl()
+  window.scrollTo({ top: 0, behavior: 'auto' })
+  fetchPage(true)
 }
 
 // 获取标签和分类选项
@@ -395,6 +437,25 @@ onDeactivated(() => {
 
 .tag-bar-label {
   margin-right: 8px;
+}
+
+.sort-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.sort-bar-label {
+  margin-right: 8px;
+  color: #666;
+}
+
+.picture-stats {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+  color: #999;
+  font-size: 12px;
 }
 
 .state-block {

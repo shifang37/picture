@@ -10,14 +10,17 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.tzy.picturebackend.constant.PictureTagConstant;
 import com.tzy.picturebackend.event.PictureEventPublisher;
+import com.tzy.picturebackend.event.NotificationEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
+import com.tzy.picturebackend.mapper.PictureInteractionMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
+import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
@@ -28,6 +31,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.PictureAiSuggestion;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
@@ -75,7 +79,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     static final Set<String> SORT_FIELD_WHITELIST = Set.of(
             "id", "name", "category", "picSize", "picWidth", "picHeight", "picScale", "picFormat",
             "userId", "createTime", "editTime", "updateTime", "reviewStatus", "reviewTime",
-            "machineReviewStatus");
+            "machineReviewStatus", "downloadCount", "favoriteCount", "likeCount");
+
+    /**
+     * 热度排序字段：收藏/点赞/下载大量同值，必须追加 id 次级排序，否则分页会出现重复或漏项
+     */
+    static final Set<String> HOT_SORT_FIELDS = Set.of("downloadCount", "favoriteCount", "likeCount");
 
     /**
      * 管理员上传自动通过时写入的审核意见
@@ -104,6 +113,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     private PictureAiSuggestionMapper pictureAiSuggestionMapper;
 
     @Resource
+    private PictureInteractionMapper pictureInteractionMapper;
+
+    @Resource
     private PictureMetrics pictureMetrics;
 
     /**
@@ -111,6 +123,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      */
     @Resource
     private PictureEventPublisher pictureEventPublisher;
+
+    /**
+     * 审核结论通知（Spring 应用事件，由监听器在事务提交后落库）
+     */
+    @Resource
+    private NotificationEventPublisher notificationEventPublisher;
 
     @Override
     public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
@@ -520,6 +538,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         try {
             // 防御性清理：正常删除流程已经处理过，这里覆盖历史数据与上次清理失败的记录
             pictureTagMapper.deleteByPictureIds(purgeableIds);
+            // 互动关系随图片一起物理删除：回收站阶段保留计数，恢复后收藏仍然有效
+            pictureInteractionMapper.deleteByPictureIds(purgeableIds);
             pictureAiSuggestionMapper.delete(new QueryWrapper<PictureAiSuggestion>()
                     .in("pictureId", purgeableIds));
             int deleted = baseMapper.deletePhysicallyByIds(purgeableIds);
@@ -590,6 +610,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             // 审核页按机审状态优先排序时，同状态内再按创建时间倒序，保证分页顺序稳定
             if ("machineReviewStatus".equals(sortField)) {
                 queryWrapper.orderByDesc("createTime");
+            }
+            // 热度排序同值极多（大量图片都是 0 收藏/0 下载），不加次级键时 LIMIT 分页会重复或漏项
+            if (HOT_SORT_FIELDS.contains(sortField)) {
+                queryWrapper.orderByAsc("id");
             }
         }
         return queryWrapper;
@@ -803,10 +827,57 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片已被其他操作处理，请刷新后重试");
         // 审核结果落库成功后再记录历史，失败不影响本次审核
         pictureReviewLogService.record(id, loginUser.getId(), reviewStatus, reviewMessage);
+        // 通知作者审核结论：落库成功后才发，通知失败不影响审核结果
+        publishReviewNotification(oldPicture, reviewStatus, reviewMessage, loginUser.getId());
         // 通过/拒绝都会改变公开列表（以及名称、简介等展示内容）
         pictureListCache.invalidate();
         // 审核结果（可见性）变化要同步搜索索引
         pictureEventPublisher.pictureChanged(id);
+    }
+
+    /**
+     * 发布审核结论通知。
+     * <p>
+     * 自己审核自己的图片不通知，避免管理员给自己的作品发无用消息；
+     * {@code dedupeKey = 结论:图片 id} 保证重复审核、机审兜底重发都不会产生第二条通知。
+     */
+    private void publishReviewNotification(Picture picture, Integer reviewStatus,
+                                           String reviewMessage, Long reviewerId) {
+        if (picture == null || picture.getUserId() == null) {
+            return;
+        }
+        if (Objects.equals(picture.getUserId(), reviewerId)) {
+            return;
+        }
+        NotificationTypeEnum type = Objects.equals(reviewStatus, PictureReviewStatusEnum.PASS.getValue())
+                ? NotificationTypeEnum.REVIEW_PASS
+                : NotificationTypeEnum.REVIEW_REJECT;
+        notificationEventPublisher.publish(NotificationMessage.review(
+                type, picture.getUserId(), picture.getId(), picture.getName(), reviewMessage));
+    }
+
+    /**
+     * 批量审核的审核结论通知：整批聚合成一次事件、一次批量插入
+     */
+    private void publishBatchReviewNotifications(Map<Long, Picture> pictureMap, List<Long> reviewedIds,
+                                                 Integer reviewStatus, String reviewMessage,
+                                                 Long reviewerId) {
+        List<NotificationMessage> messages = new ArrayList<>(reviewedIds.size());
+        NotificationTypeEnum type = Objects.equals(reviewStatus, PictureReviewStatusEnum.PASS.getValue())
+                ? NotificationTypeEnum.REVIEW_PASS
+                : NotificationTypeEnum.REVIEW_REJECT;
+        for (Long reviewedId : reviewedIds) {
+            Picture picture = pictureMap.get(reviewedId);
+            if (picture == null || picture.getUserId() == null) {
+                continue;
+            }
+            if (Objects.equals(picture.getUserId(), reviewerId)) {
+                continue;
+            }
+            messages.add(NotificationMessage.review(type, picture.getUserId(), picture.getId(),
+                    picture.getName(), reviewMessage));
+        }
+        notificationEventPublisher.publishAll(messages);
     }
 
     @Override
@@ -918,6 +989,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         // 整批只写一条批量审核历史
         pictureReviewLogService.recordBatch(reviewedIds, loginUser.getId(), reviewStatus, reviewMessage);
+        // 整批只发一条通知事件（事务提交后写入），避免 100 次单条 insert
+        publishBatchReviewNotifications(pictureMap, reviewedIds, reviewStatus, reviewMessage, loginUser.getId());
         // 整批只失效一次公开列表缓存
         pictureListCache.invalidate();
         // 整批只发一条批量事件；方法带事务，转发会等事务提交后再执行

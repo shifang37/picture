@@ -48,6 +48,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final int UPLOAD_LIMIT_PER_MINUTE = 60;
 
+    /**
+     * 单个用户每分钟最多 120 次收藏/点赞写操作：防连点与脚本刷量，正常浏览不会触达
+     */
+    private static final int INTERACTION_LIMIT_PER_MINUTE = 120;
+
     @Resource
     private RateLimitManager rateLimitManager;
 
@@ -70,6 +75,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 } else if ("/picture/upload".equals(path)) {
                     rateLimitManager.check(uploadKey(request), UPLOAD_LIMIT_PER_MINUTE,
                             Duration.ofMinutes(1));
+                } else if ("/interaction/add".equals(path) || "/interaction/remove".equals(path)) {
+                    // 收藏/点赞写操作按用户限流；未登录时退化为按 IP
+                    rateLimitManager.check(userKey(request, "interaction"),
+                            INTERACTION_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
                 }
             } else if ("GET".equalsIgnoreCase(method) && "/user/captcha".equals(path)) {
                 rateLimitManager.check("captcha:ip:" + clientIp(request),
@@ -93,19 +102,27 @@ public class RateLimitFilter extends OncePerRequestFilter {
             case "/user/register" -> "register";
             case "/user/captcha" -> "captcha";
             case "/picture/upload" -> "upload";
+            case "/interaction/add", "/interaction/remove" -> "interaction";
             default -> "other";
         };
     }
 
     private String uploadKey(HttpServletRequest request) {
+        return userKey(request, "upload");
+    }
+
+    /**
+     * 优先按登录用户限流，未登录（或会话尚未建立）时按 IP 兜底
+     */
+    private String userKey(HttpServletRequest request, String prefix) {
         HttpSession session = request.getSession(false);
         if (session != null) {
             Object userId = session.getAttribute(USER_LOGIN_ID);
             if (userId instanceof Long id) {
-                return "upload:user:" + id;
+                return prefix + ":user:" + id;
             }
         }
-        return "upload:ip:" + clientIp(request);
+        return prefix + ":ip:" + clientIp(request);
     }
 
     private String relativePath(HttpServletRequest request) {

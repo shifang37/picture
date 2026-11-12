@@ -66,6 +66,16 @@ public class PictureSearchDocument {
     private Long downloadCount;
 
     /**
+     * 收藏数（热度排序用）
+     */
+    private Long favoriteCount;
+
+    /**
+     * 点赞数（热度排序用）
+     */
+    private Long likeCount;
+
+    /**
      * 图片宽度
      */
     private Integer picWidth;
@@ -124,6 +134,8 @@ public class PictureSearchDocument {
         document.setUserId(picture.getUserId());
         document.setPicSize(picture.getPicSize());
         document.setDownloadCount(picture.getDownloadCount());
+        document.setFavoriteCount(picture.getFavoriteCount());
+        document.setLikeCount(picture.getLikeCount());
         document.setPicWidth(picture.getPicWidth());
         document.setPicHeight(picture.getPicHeight());
         document.setPicScale(picture.getPicScale() == null ? null : picture.getPicScale().floatValue());

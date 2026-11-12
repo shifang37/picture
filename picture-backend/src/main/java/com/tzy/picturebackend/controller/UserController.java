@@ -11,12 +11,15 @@ import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
+import com.tzy.picturebackend.event.NotificationEventPublisher;
 import com.tzy.picturebackend.manager.CaptchaManager;
 import com.tzy.picturebackend.manager.RegistrationGuard;
 import com.tzy.picturebackend.manager.SessionInvalidationManager;
+import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.dto.user.*;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
 import com.tzy.picturebackend.model.vo.CaptchaVO;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
@@ -24,6 +27,7 @@ import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserAddResult;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.NotificationService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.validation.PasswordPolicy;
 import jakarta.annotation.Resource;
@@ -33,6 +37,7 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/user")
@@ -52,6 +57,12 @@ public class UserController {
 
     @Resource
     private CaptchaManager captchaManager;
+
+    @Resource
+    private NotificationService notificationService;
+
+    @Resource
+    private NotificationEventPublisher notificationEventPublisher;
 
     /**
      * 获取注册用图形验证码。
@@ -132,6 +143,10 @@ public class UserController {
         boolean result = userService.resetPassword(userResetPasswordRequest.getId(),
                 userResetPasswordRequest.getNewPassword());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 安全提醒：不把新密码写进通知，只提示「已被重置」
+        notificationEventPublisher.publish(NotificationMessage.account(
+                NotificationTypeEnum.PASSWORD_RESET, userResetPasswordRequest.getId(),
+                "你的登录密码已被管理员重置，请使用新的初始密码登录，并按提示尽快修改为自己的密码。"));
         return ResultUtils.success(true);
     }
 
@@ -218,6 +233,8 @@ public class UserController {
         boolean result = userService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除用户失败");
         sessionInvalidationManager.forget(deleteRequest.getId());
+        // 用户已删除，其通知不会再有人查看，直接清理
+        notificationService.deleteByUserId(deleteRequest.getId());
         return ResultUtils.success(true);
     }
 
@@ -237,8 +254,10 @@ public class UserController {
         user.setUserAvatar(userUpdateRequest.getUserAvatar());
         user.setUserProfile(userUpdateRequest.getUserProfile());
         // 不传角色表示不修改，避免把管理员误降级为普通用户
+        boolean roleChanged = false;
+        String newRole = null;
         if (StrUtil.isNotBlank(userUpdateRequest.getUserRole())) {
-            String newRole = normalizeRole(userUpdateRequest.getUserRole());
+            newRole = normalizeRole(userUpdateRequest.getUserRole());
             boolean wasAdmin = UserRoleEnum.ADMIN.getValue().equals(oldUser.getUserRole());
             boolean willBeAdmin = UserRoleEnum.ADMIN.getValue().equals(newRole);
             if (wasAdmin && !willBeAdmin) {
@@ -247,9 +266,18 @@ public class UserController {
                 ThrowUtils.throwIf(adminCount <= 1, ErrorCode.PARAMS_ERROR, "系统至少需要保留一个管理员");
             }
             user.setUserRole(newRole);
+            // 角色真的发生变化才提醒，避免每次保存资料都发一条安全通知
+            roleChanged = !Objects.equals(oldUser.getUserRole(), newRole);
         }
         boolean result = userService.updateById(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        if (roleChanged) {
+            notificationEventPublisher.publish(NotificationMessage.account(
+                    NotificationTypeEnum.ROLE_CHANGED, userUpdateRequest.getId(),
+                    "你的账号角色已变更为「"
+                            + (UserRoleEnum.ADMIN.getValue().equals(newRole) ? "管理员" : "普通用户")
+                            + "」，如非本人操作请立即联系管理员。"));
+        }
         return ResultUtils.success(true);
     }
 

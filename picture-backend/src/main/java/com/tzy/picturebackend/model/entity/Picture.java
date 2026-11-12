@@ -57,6 +57,16 @@ public class Picture implements Serializable {
     private Long downloadCount;
 
     /**
+     * 收藏数（picture_interaction 的冗余汇总，列表排序与展示用）
+     */
+    private Long favoriteCount;
+
+    /**
+     * 点赞数（picture_interaction 的冗余汇总，列表排序与展示用）
+     */
+    private Long likeCount;
+
+    /**
      * 图片宽度
      */
     private Integer picWidth;

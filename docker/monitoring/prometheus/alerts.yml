@@ -48,3 +48,24 @@ groups:
         annotations:
           summary: '待审核图片积压'
           description: '待审核 {{ $value | humanize }} 张，持续 10 分钟；检查审核队列与管理员处理进度。'
+
+      # M1：审核拒绝通知突增，通常意味着审核口径变化或机审策略把正常图片判成违规
+      - alert: PictureReviewRejectNotificationSpike
+        expr: sum(rate(notification_sent_total{type="REVIEW_REJECT"}[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: '审核拒绝通知持续突增'
+          description: '过去 10 分钟拒绝通知速率 {{ $value | humanize }} 条/秒，检查机审模式（MACHINE_REVIEW_MODE）与人工审核意见。'
+
+      # M1：收藏/点赞写入的 p95 超过 200ms，通常是计数 SQL 没走索引或数据库在锁等。
+      # uri 标签是 Spring MVC 的路径模板，可能带也可能不带 /api 前缀，因此用宽松匹配
+      - alert: PictureInteractionLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job="picture-backend", uri=~".*/interaction/.*"}[5m]))) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: '收藏/点赞接口 p95 超过 200ms'
+          description: '当前 p95 为 {{ $value | humanizeDuration }}，检查 picture_interaction 唯一键与 picture 计数列更新是否走索引。'
