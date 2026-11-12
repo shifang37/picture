@@ -34,7 +34,8 @@ picture/
 │   └── src/
 │       ├── api/                     # OpenAPI 生成的前端请求客户端 + pictureExtra.ts / userExtra.ts 手工封装
 │       ├── pages/                   # 页面（含「我的图片」与 admin 下的管理页）
-│       ├── components/              # 公共组件
+│       ├── components/              # 公共组件（卡片、互动按钮、通知铃铛等）
+│       ├── composables/             # 组合式函数（收藏/点赞交互等）
 │       ├── router/  stores/  utils/
 │       └── request.ts               # axios 封装
 └── .gitignore
@@ -332,6 +333,13 @@ app:
 - 只能对已过审图片互动；待审核/已拒绝图片对他人统一返回 40400（作者自己也一样），避免用互动接口探测未公开内容；
 - 写接口按用户限流 120 次/分钟（未登录按 IP），指标 `picture_interaction_total{action,type}`。
 
+### 前端交互
+
+- 详情页与首页卡片共用 `useInteraction` 组合式函数：登录拦截、乐观更新、失败回滚只实现一次，卡片只是把按钮切成紧凑模式（只显示图标与计数）；
+- 首页卡片右上角的收藏/点赞入口在悬浮或键盘聚焦时出现（触屏设备常显），按钮 `@click.stop`，点互动不会误进详情页；
+- 点击后先本地 +1 / 选中，再用服务端返回的真实计数覆盖；失败回滚到点击前的快照并提示；
+- 未登录点击跳转 `/user/login?redirect=<当前地址>`，登录后回到原页面。
+
 ### 热度排序
 
 公开列表复用 `POST /api/picture/list/page/vo`，`sortField` 新增三个取值：
@@ -489,7 +497,7 @@ $env:SEARCH_ENGINE = 'es'
 - **加载**：VueUse `useInfiniteScroll` 监听窗口滚动，距底部 400px 时请求下一页（每页 20 条），按 id 去重，避免滚动期间有新图过审导致重复；加载失败显示重试按钮，全部加载完显示「没有更多了」；
 - **图片**：`loading="lazy"`、`decoding="async"`，缩略图尺寸按列宽 × 设备像素比取 300–600 的档位，减少列表流量；
 - **状态进 URL**：搜索词、分类、标签、排序写入查询参数，刷新或分享链接都能还原；切换条件时回到页面顶部；
-- **排序切换**：最新（默认）/ 最多收藏 / 最多点赞 / 最多下载，切换后回到顶部并重新分页；卡片上直接展示收藏、点赞、下载计数，让「最热」的排序依据可见；
+- **排序切换**：最新（默认）/ 最多收藏 / 最多点赞 / 最多下载，切换后回到顶部并重新分页；卡片上直接展示收藏、点赞、下载计数，悬浮时出现收藏/点赞按钮，让「最热」的排序依据可见且可操作；
 - **返回恢复**：首页通过路由 `meta.keepAlive` 缓存，从详情页返回时恢复原来的滚动位置；其他页面仍沿用浏览器前进后退的滚动位置。
 
 ## 管理端数据看板
@@ -593,7 +601,7 @@ cd picture-backend
 
 - Prometheus：<http://127.0.0.1:9090>，Targets 页面应看到 `picture-backend` 与 `rabbitmq` 为 UP；
   告警状态在 <http://127.0.0.1:9090/alerts>。
-- Grafana：<http://127.0.0.1:3000>，默认数据源与「云图库 · 服务概览」看板已预置。
+- Grafana：<http://127.0.0.1:3000>，默认数据源与「云图库 · 服务概览」看板已预置；看板包含收藏/点赞速率、互动接口 p95、通知发送（按类型）与通知已读速率等 M1 面板。
 - 后端启动参数等价于 `--management.server.port=8124 --management.endpoints.web.exposure.include=health,info,prometheus`。
 
 生产 Compose 启动后 Grafana 同样只监听宿主机回环地址 `127.0.0.1:3000`；
@@ -604,7 +612,7 @@ Prometheus、8124 管理端口、RabbitMQ 15692 都只在 Compose 内网可达�
 | 指标 | 类型 | 埋点位置 | 说明 |
 | --- | --- | --- | --- |
 | `picture_api_errors_total{code}` | Counter | `GlobalExceptionHandler` | 全部 13 个异常分支按业务码计数 |
-| `picture_rate_limited_total{type}` | Counter | `RateLimitFilter` | `type=login/upload`，限流响应不经过异常处理器 |
+| `picture_rate_limited_total{type}` | Counter | `RateLimitFilter` | `type=login/register/captcha/upload/interaction`，限流响应不经过异常处理器 |
 | `picture_upload_total{result}` | Counter | `PictureServiceImpl#uploadPicture` | 成功/失败，失败包含校验、COS、入库异常 |
 | `picture_compress_seconds` | Timer | `FileManager#compressIfNeeded` | 开启直方图桶，可算 p95 |
 | `picture_review_pending` | Gauge | `PictureReviewPendingMetrics` | 每 60 秒查一次待审核数量，抓取时不打库 |
@@ -643,6 +651,8 @@ Prometheus 的 `/alerts` 页面会显示 pending/firing，可再按需接钉钉�
 | `PictureDatabasePoolWaiting` | HikariCP 等待连接数 > 0 | 5 分钟 |
 | `PictureDeadLetterQueueNotEmpty` | 任一 `*.dlq` 队列消息数 > 0 | 1 分钟 |
 | `PictureReviewBacklog` | 待审核图片 > 100 张 | 10 分钟 |
+| `PictureReviewRejectNotificationSpike` | `notification_sent_total{type="REVIEW_REJECT"}` 5 分钟速率 > 1/s | 10 分钟 |
+| `PictureInteractionLatencyHigh` | 收藏/点赞接口 p95 > 200ms | 5 分钟 |
 
 > 8124、9090、15692 都不要映射到公网；Grafana 只绑定回环地址，并务必修改 `.env` 中的默认密码。
 
@@ -676,7 +686,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **493 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **495 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、收藏点赞写接口的按用户限流与用户隔离、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
@@ -686,7 +696,7 @@ cd picture-backend
 
 集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP，以及 M1 的互动/通知：10 线程并发收藏只落 1 行关系且计数为 1、通知唯一键去重、只能读自己的通知、物理清理级联删除互动关系。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
-前端测试：Vitest 42 个用例（含计数格式化、乐观更新与回滚、通知轮询在页面隐藏时暂停），Playwright 12 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：其中 M1 新增两条主链路「收藏 → 我的收藏」「审核通知 → 图片详情」。
+前端测试：Vitest 50 个用例（含计数格式化、乐观更新与回滚、`useInteraction` 的连点保护/回滚/登录拦截、通知轮询在页面隐藏时暂停），Playwright 14 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：其中 M1 覆盖「收藏 → 我的收藏」「审核通知 → 图片详情」「首页卡片悬浮收藏」「卡片点击进入详情」四条主链路。
 
 ## 持续集成与依赖更新
 
