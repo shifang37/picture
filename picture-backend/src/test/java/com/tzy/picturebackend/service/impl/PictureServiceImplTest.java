@@ -2,6 +2,7 @@ package com.tzy.picturebackend.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
@@ -17,6 +18,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
@@ -158,6 +160,82 @@ class PictureServiceImplTest {
     void checkPictureVisible_rejectsNullPicture() {
         assertThrows(BusinessException.class,
                 () -> pictureService.checkPictureVisible(null, new MockHttpServletRequest()));
+    }
+
+    // ==================== 审核信息可见性 ====================
+
+    @Test
+    @DisplayName("详情封装：匿名访客看不到审核意见、审核人和审核时间")
+    void getPictureVO_hidesReviewInfoFromAnonymous() {
+        Picture picture = rejectedPicture();
+        when(userService.getLoginUserOrNull(any())).thenReturn(null);
+
+        PictureVO pictureVO = pictureService.getPictureVO(picture, new MockHttpServletRequest());
+
+        assertFalse(pictureVO instanceof PictureDetailVO, "公开访客不能拿到详情 VO");
+    }
+
+    @Test
+    @DisplayName("详情封装：作者本人可以看到审核意见和审核人")
+    void getPictureVO_ownerSeesReviewInfo() {
+        Picture picture = rejectedPicture();
+        User owner = user(100L, "user");
+        when(userService.getLoginUserOrNull(any())).thenReturn(owner);
+        when(userService.isAdmin(owner)).thenReturn(false);
+
+        PictureVO pictureVO = pictureService.getPictureVO(picture, new MockHttpServletRequest());
+
+        assertTrue(pictureVO instanceof PictureDetailVO, "作者本人应拿到详情 VO");
+        PictureDetailVO detailVO = (PictureDetailVO) pictureVO;
+        assertEquals("内容不合规", detailVO.getReviewMessage());
+        assertEquals(Long.valueOf(99L), detailVO.getReviewerId());
+        assertNotNull(detailVO.getReviewTime());
+    }
+
+    @Test
+    @DisplayName("详情封装：管理员可以看到审核意见和审核人")
+    void getPictureVO_adminSeesReviewInfo() {
+        Picture picture = rejectedPicture();
+        User admin = admin();
+        when(userService.getLoginUserOrNull(any())).thenReturn(admin);
+        when(userService.isAdmin(admin)).thenReturn(true);
+
+        PictureVO pictureVO = pictureService.getPictureVO(picture, new MockHttpServletRequest());
+
+        assertTrue(pictureVO instanceof PictureDetailVO, "管理员应拿到详情 VO");
+        assertEquals("内容不合规", ((PictureDetailVO) pictureVO).getReviewMessage());
+    }
+
+    @Test
+    @DisplayName("公开列表封装：即使请求者是管理员也不返回审核内部字段")
+    void getPictureVOPage_neverIncludesReviewInfo() {
+        Picture picture = rejectedPicture();
+        User admin = admin();
+        when(userService.listByIds(any())).thenReturn(List.of(admin));
+        Page<Picture> picturePage = new Page<>(1, 10, 1);
+        picturePage.setRecords(List.of(picture));
+
+        Page<PictureVO> result = pictureService.getPictureVOPage(picturePage, new MockHttpServletRequest());
+
+        assertFalse(result.getRecords().get(0) instanceof PictureDetailVO,
+                "公开列表不能因为请求者是管理员就返回审核信息");
+    }
+
+    @Test
+    @DisplayName("我的图片封装：作者本人可以看到审核意见、审核人和审核时间")
+    void getPictureDetailVOPage_includesReviewInfo() {
+        Picture picture = rejectedPicture();
+        User owner = user(100L, "user");
+        when(userService.listByIds(any())).thenReturn(List.of(owner));
+        Page<Picture> picturePage = new Page<>(1, 10, 1);
+        picturePage.setRecords(List.of(picture));
+
+        Page<PictureDetailVO> result = pictureService.getPictureDetailVOPage(picturePage);
+
+        PictureDetailVO detailVO = result.getRecords().get(0);
+        assertEquals("内容不合规", detailVO.getReviewMessage());
+        assertEquals(Long.valueOf(99L), detailVO.getReviewerId());
+        assertNotNull(detailVO.getReviewTime());
     }
 
     // ==================== 上传 ====================
@@ -948,6 +1026,15 @@ class PictureServiceImplTest {
         picture.setId(id);
         picture.setUserId(userId);
         picture.setReviewStatus(reviewStatus);
+        return picture;
+    }
+
+    private Picture rejectedPicture() {
+        Picture picture = picture(1L, 100L, PictureReviewStatusEnum.REJECT.getValue());
+        picture.setName("被拒绝的图片");
+        picture.setReviewMessage("内容不合规");
+        picture.setReviewerId(99L);
+        picture.setReviewTime(new Date());
         return picture;
     }
 

@@ -10,6 +10,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
@@ -68,9 +69,33 @@ public interface PictureService extends IService<Picture> {
 
     QueryWrapper<Picture> getQueryWrapper(PictureQueryRequest pictureQueryRequest);
 
+    /**
+     * 图片详情封装：作者本人或管理员会额外得到审核意见、审核人等内部字段
+     *
+     * @param picture 图片实体
+     * @param request 当前请求
+     * @return 图片详情；无权限查看审核信息时退化为公开 {@link PictureVO}
+     */
     PictureVO getPictureVO(Picture picture, HttpServletRequest request);
 
+    /**
+     * 公开图片列表封装：只包含公开字段，不会返回审核意见和审核人
+     *
+     * @param picturePage 图片分页
+     * @param request     当前请求（保留参数以兼容现有调用）
+     * @return 公开图片分页
+     */
     Page<PictureVO> getPictureVOPage(Page<Picture> picturePage, HttpServletRequest request);
+
+    /**
+     * 作者本人图片列表封装：额外返回审核意见、审核人等内部字段
+     * <p>
+     * 只能用于已经确认记录属于当前用户的场景（如「我的图片」）。
+     *
+     * @param picturePage 图片分页
+     * @return 含审核详情的图片分页
+     */
+    Page<PictureDetailVO> getPictureDetailVOPage(Page<Picture> picturePage);
 
     void validPicture(Picture picture);
 

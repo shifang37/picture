@@ -55,7 +55,7 @@ export async function getUserVoById(
   params: API.getUserVOByIdParams,
   options?: { [key: string]: any },
 ) {
-  return request<API.BaseResponseUserVO>('/user/get/vo', {
+  return request<API.BaseResponsePublicUserVO>('/user/get/vo', {
     method: 'GET',
     params: {
       ...params,

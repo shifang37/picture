@@ -13,6 +13,7 @@ import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.mapper.UserMapper;
@@ -344,6 +345,25 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             return new ArrayList<>();
         }
         return userList.stream().map(this::getUserVO).collect(Collectors.toList());
+    }
+
+    @Override
+    public PublicUserVO getPublicUserVO(User user) {
+        if (user == null) {
+            return null;
+        }
+        // 只复制 id / userName / userAvatar / userProfile，账号和角色不会进入公开 VO
+        PublicUserVO publicUserVO = new PublicUserVO();
+        BeanUtils.copyProperties(user, publicUserVO);
+        return publicUserVO;
+    }
+
+    @Override
+    public List<PublicUserVO> getPublicUserVOList(List<User> userList) {
+        if (CollUtil.isEmpty(userList)) {
+            return new ArrayList<>();
+        }
+        return userList.stream().map(this::getPublicUserVO).collect(Collectors.toList());
     }
 
     @Override

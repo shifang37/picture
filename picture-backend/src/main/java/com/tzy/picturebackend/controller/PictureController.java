@@ -19,6 +19,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
+import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
@@ -143,6 +144,8 @@ public class PictureController {
 
     /**
      * 根据 id 获取图片（封装类）
+     * <p>
+     * 审核意见、审核人等内部字段仅作者本人和管理员可见，其他访客只能拿到公开字段。
      */
     @GetMapping("/get/vo")
     public BaseResponse<PictureVO> getPictureVOById(Long id, HttpServletRequest request) {
@@ -258,8 +261,9 @@ public class PictureController {
      * 用于普通用户在「我的图片」里管理自己上传的内容，不要求管理员权限。
      */
     @PostMapping("/my/page/vo")
-    public BaseResponse<Page<PictureVO>> listMyPictureVOByPage(@Valid @RequestBody PictureQueryRequest pictureQueryRequest,
-                                                               HttpServletRequest request) {
+    public BaseResponse<Page<PictureDetailVO>> listMyPictureVOByPage(
+            @Valid @RequestBody PictureQueryRequest pictureQueryRequest,
+            HttpServletRequest request) {
         ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
         long size = pictureQueryRequest.getPageSize();
         validPage(pictureQueryRequest.getCurrent(), size, 20);
@@ -269,8 +273,8 @@ public class PictureController {
         // 查询数据库
         Page<Picture> picturePage = pictureService.page(new Page<>(pictureQueryRequest.getCurrent(), size),
                 pictureService.getQueryWrapper(pictureQueryRequest));
-        // 获取封装类
-        return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
+        // 「我的图片」全部属于当前用户，可以返回审核意见等内部字段
+        return ResultUtils.success(pictureService.getPictureDetailVOPage(picturePage));
     }
 
     /**

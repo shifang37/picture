@@ -17,6 +17,7 @@ import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
@@ -159,14 +160,16 @@ public class UserController {
     }
 
     /**
-     * 根据 id 获取包装类
+     * 根据 id 获取公开用户信息（昵称、头像、简介）
+     * <p>
+     * 该接口无需登录即可访问，不能返回账号、角色等内部字段。
      */
     @GetMapping("/get/vo")
-    public BaseResponse<UserVO> getUserVOById(Long id) {
+    public BaseResponse<PublicUserVO> getUserVOById(Long id) {
         ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
         User user = userService.getById(id);
         ThrowUtils.throwIf(user == null, ErrorCode.NOT_FOUND_ERROR);
-        return ResultUtils.success(userService.getUserVO(user));
+        return ResultUtils.success(userService.getPublicUserVO(user));
     }
 
     /**

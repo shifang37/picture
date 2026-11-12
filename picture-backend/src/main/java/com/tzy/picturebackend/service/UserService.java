@@ -6,6 +6,7 @@ import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -65,9 +66,37 @@ public interface UserService extends IService<User> {
      */
     boolean updateProfile(User loginUser, UserUpdateProfileRequest request);
 
+    /**
+     * 管理端用户封装：包含账号、角色等内部字段，只能用于管理员接口
+     *
+     * @param user 用户实体
+     * @return 管理端用户信息
+     */
     UserVO getUserVO(User user);
 
+    /**
+     * 管理端用户列表封装：包含账号、角色等内部字段，只能用于管理员接口
+     *
+     * @param userList 用户实体列表
+     * @return 管理端用户信息列表
+     */
     List<UserVO> getUserVOList(List<User> userList);
+
+    /**
+     * 公开用户封装：只返回 id、昵称、头像、简介，供公开图片接口使用
+     *
+     * @param user 用户实体
+     * @return 公开用户信息
+     */
+    PublicUserVO getPublicUserVO(User user);
+
+    /**
+     * 公开用户列表封装
+     *
+     * @param userList 用户实体列表
+     * @return 公开用户信息列表
+     */
+    List<PublicUserVO> getPublicUserVOList(List<User> userList);
 
     QueryWrapper<User> getQueryWrapper(UserQueryRequest userQueryRequest);
 

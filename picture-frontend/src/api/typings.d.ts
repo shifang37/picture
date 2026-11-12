@@ -35,6 +35,12 @@ declare namespace API {
     message?: string
   }
 
+  type BaseResponsePublicUserVO = {
+    code?: number
+    data?: PublicUserVO
+    message?: string
+  }
+
   type BaseResponsePicture = {
     code?: number
     data?: Picture
@@ -105,6 +111,16 @@ declare namespace API {
   type OrderItem = {
     column?: string
     asc?: boolean
+  }
+
+  /**
+   * 公开用户信息：公开接口不返回账号和角色
+   */
+  type PublicUserVO = {
+    id?: string
+    userName?: string
+    userAvatar?: string
+    userProfile?: string
   }
 
   type PagePicture = {
@@ -248,10 +264,11 @@ declare namespace API {
     editTime?: string
     updateTime?: string
     reviewStatus?: number
+    // 审核意见 / 审核人 / 审核时间仅在详情和「我的图片」中、且请求者是作者或管理员时返回
     reviewMessage?: string
     reviewerId?: string
     reviewTime?: string
-    user?: UserVO
+    user?: PublicUserVO
   }
 
   type testDownloadFileParams = {

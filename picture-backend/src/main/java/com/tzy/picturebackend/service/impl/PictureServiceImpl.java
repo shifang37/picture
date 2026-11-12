@@ -24,11 +24,11 @@ import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
-import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.mapper.PictureMapper;
@@ -418,20 +418,17 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Override
     public PictureVO getPictureVO(Picture picture, HttpServletRequest request) {
-        // 对象转封装类
-        PictureVO pictureVO = PictureVO.objToVo(picture);
-        // 关联查询用户信息
-        Long userId = picture.getUserId();
-        if (userId != null && userId > 0) {
-            User user = userService.getById(userId);
-            UserVO userVO = userService.getUserVO(user);
-            pictureVO.setUser(userVO);
-        }
+        // 审核内部字段只对作者本人和管理员可见，其余访客只能拿到公开 VO
+        User loginUser = userService.getLoginUserOrNull(request);
+        PictureVO pictureVO = canViewReviewInfo(picture, loginUser)
+                ? PictureDetailVO.objToDetailVo(picture)
+                : PictureVO.objToVo(picture);
+        fillPublicUser(pictureVO, picture.getUserId());
         return pictureVO;
     }
 
     /**
-     * 分页获取图片封装
+     * 分页获取公开图片封装：不包含审核意见和审核人
      */
     @Override
     public Page<PictureVO> getPictureVOPage(Page<Picture> picturePage, HttpServletRequest request) {
@@ -440,23 +437,64 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (CollUtil.isEmpty(pictureList)) {
             return pictureVOPage;
         }
-        // 对象列表 => 封装对象列表
+        // 对象列表 => 公开封装对象列表
         List<PictureVO> pictureVOList = pictureList.stream().map(PictureVO::objToVo).collect(Collectors.toList());
-        // 1. 关联查询用户信息
-        Set<Long> userIdSet = pictureList.stream().map(Picture::getUserId).collect(Collectors.toSet());
-        Map<Long, List<User>> userIdUserListMap = userService.listByIds(userIdSet).stream()
-                .collect(Collectors.groupingBy(User::getId));
-        // 2. 填充信息
-        pictureVOList.forEach(pictureVO -> {
-            Long userId = pictureVO.getUserId();
-            User user = null;
-            if (userIdUserListMap.containsKey(userId)) {
-                user = userIdUserListMap.get(userId).get(0);
-            }
-            pictureVO.setUser(userService.getUserVO(user));
-        });
+        fillPublicUsers(pictureVOList, pictureList);
         pictureVOPage.setRecords(pictureVOList);
         return pictureVOPage;
+    }
+
+    @Override
+    public Page<PictureDetailVO> getPictureDetailVOPage(Page<Picture> picturePage) {
+        Page<PictureDetailVO> detailVOPage = new Page<>(picturePage.getCurrent(), picturePage.getSize(),
+                picturePage.getTotal());
+        List<Picture> pictureList = picturePage.getRecords();
+        if (CollUtil.isEmpty(pictureList)) {
+            return detailVOPage;
+        }
+        List<PictureDetailVO> detailVOList = pictureList.stream()
+                .map(PictureDetailVO::objToDetailVo)
+                .collect(Collectors.toList());
+        fillPublicUsers(detailVOList, pictureList);
+        detailVOPage.setRecords(detailVOList);
+        return detailVOPage;
+    }
+
+    /**
+     * 当前请求者是否可以查看审核内部字段：仅作者本人和管理员
+     */
+    private boolean canViewReviewInfo(Picture picture, User loginUser) {
+        if (picture == null || loginUser == null) {
+            return false;
+        }
+        return Objects.equals(picture.getUserId(), loginUser.getId()) || userService.isAdmin(loginUser);
+    }
+
+    /**
+     * 填充单张图片的作者公开信息
+     */
+    private void fillPublicUser(PictureVO pictureVO, Long userId) {
+        if (pictureVO == null || userId == null || userId <= 0) {
+            return;
+        }
+        pictureVO.setUser(userService.getPublicUserVO(userService.getById(userId)));
+    }
+
+    /**
+     * 批量填充图片作者公开信息，避免逐条查库
+     */
+    private void fillPublicUsers(List<? extends PictureVO> pictureVOList, List<Picture> pictureList) {
+        Set<Long> userIdSet = pictureList.stream()
+                .map(Picture::getUserId)
+                .filter(Objects::nonNull)
+                .filter(userId -> userId > 0)
+                .collect(Collectors.toSet());
+        Map<Long, User> userMap = userIdSet.isEmpty()
+                ? Map.of()
+                : userService.listByIds(userIdSet).stream()
+                        .collect(Collectors.toMap(User::getId, user -> user, (left, right) -> left));
+        pictureVOList.forEach(pictureVO ->
+                pictureVO.setUser(userService.getPublicUserVO(userMap.get(pictureVO.getUserId()))));
     }
 
     @Override

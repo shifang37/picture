@@ -98,24 +98,9 @@ public class PictureVO implements Serializable {
     private Integer reviewStatus;
 
     /**
-     * 审核信息
+     * 创建用户信息（公开字段，不包含账号和角色）
      */
-    private String reviewMessage;
-
-    /**
-     * 审核人 id
-     */
-    private Long reviewerId;
-
-    /**
-     * 审核时间
-     */
-    private Date reviewTime;
-
-    /**
-     * 创建用户信息
-     */
-    private UserVO user;
+    private PublicUserVO user;
 
     private static final long serialVersionUID = 1L;
 

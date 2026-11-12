@@ -8,6 +8,7 @@ import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.manager.SessionInvalidationManager;
 import com.tzy.picturebackend.model.dto.user.UserResetPasswordRequest;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.support.InMemoryRedis;
@@ -405,6 +406,34 @@ class UserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.userPassword").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("公开用户信息：只返回昵称、头像和简介，不泄露账号和角色")
+    void getUserVOById_returnsPublicFieldsOnly() throws Exception {
+        User user = user(1L, "admin");
+        user.setUserName("昵称");
+        user.setUserAvatar("http://avatar.png");
+        user.setUserProfile("简介");
+        PublicUserVO publicUserVO = new PublicUserVO();
+        publicUserVO.setId(1L);
+        publicUserVO.setUserName("昵称");
+        publicUserVO.setUserAvatar("http://avatar.png");
+        publicUserVO.setUserProfile("简介");
+        when(userService.getById(1L)).thenReturn(user);
+        when(userService.getPublicUserVO(user)).thenReturn(publicUserVO);
+
+        mockMvc.perform(get("/user/get/vo").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.userName").value("昵称"))
+                .andExpect(jsonPath("$.data.userAvatar").value("http://avatar.png"))
+                .andExpect(jsonPath("$.data.userProfile").value("简介"))
+                .andExpect(jsonPath("$.data.userAccount").doesNotExist())
+                .andExpect(jsonPath("$.data.userRole").doesNotExist());
+
+        verify(userService).getPublicUserVO(user);
+        verify(userService, never()).getUserVO(any());
     }
 
     private User user(Long id, String role) {

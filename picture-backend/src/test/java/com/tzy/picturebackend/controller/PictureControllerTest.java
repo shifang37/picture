@@ -13,6 +13,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
+import com.tzy.picturebackend.model.vo.PictureDetailVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 import com.tzy.picturebackend.model.vo.PictureTagCategory;
@@ -117,7 +118,7 @@ class PictureControllerTest {
         User normalUser = user(100L, "user");
         when(userService.getLoginUser(any())).thenReturn(normalUser);
         when(pictureService.page(any(Page.class), any())).thenReturn(new Page<>(1, 10));
-        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.getPictureDetailVOPage(any())).thenReturn(new Page<>(1, 10));
 
         mockMvc.perform(post("/picture/my/page/vo")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -149,6 +150,40 @@ class PictureControllerTest {
     }
 
     // ==================== 删除 ====================
+
+    @Test
+    @DisplayName("图片详情：作者/管理员返回的详情 VO 会序列化审核意见和审核人")
+    void getPictureVOById_serializesReviewInfoForAuthorOrAdmin() throws Exception {
+        Picture picture = picture(1L, "图片", 2);
+        when(pictureService.getById(1L)).thenReturn(picture);
+        PictureDetailVO detailVO = new PictureDetailVO();
+        detailVO.setId(1L);
+        detailVO.setReviewMessage("内容不合规");
+        detailVO.setReviewerId(99L);
+        when(pictureService.getPictureVO(eq(picture), any())).thenReturn(detailVO);
+
+        mockMvc.perform(get("/picture/get/vo").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.reviewMessage").value("内容不合规"))
+                .andExpect(jsonPath("$.data.reviewerId").exists());
+    }
+
+    @Test
+    @DisplayName("图片详情：公开 VO 响应中不包含审核意见和审核人")
+    void getPictureVOById_doesNotSerializeReviewInfoForPublicVO() throws Exception {
+        Picture picture = picture(1L, "图片", 1);
+        when(pictureService.getById(1L)).thenReturn(picture);
+        PictureVO publicVO = new PictureVO();
+        publicVO.setId(1L);
+        when(pictureService.getPictureVO(eq(picture), any())).thenReturn(publicVO);
+
+        mockMvc.perform(get("/picture/get/vo").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.reviewMessage").doesNotExist())
+                .andExpect(jsonPath("$.data.reviewerId").doesNotExist());
+    }
 
     @Test
     @DisplayName("删除：登录用户可以删除自己的图片")
