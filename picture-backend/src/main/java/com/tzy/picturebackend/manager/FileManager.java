@@ -8,6 +8,7 @@ import cn.hutool.core.util.StrUtil;
 import com.qcloud.cos.model.PutObjectResult;
 import com.qcloud.cos.model.ciModel.persistence.ImageInfo;
 import com.tzy.picturebackend.config.CosClientConfig;
+import com.tzy.picturebackend.config.UploadProperties;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
@@ -38,9 +39,12 @@ import java.util.Set;
 public class FileManager {
 
     /**
-     * 单张图片大小上限：2MB
+     * 单张图片大小上限的兜底值：10MB。
+     * <p>
+     * 实际值取 {@link UploadProperties#getMaxFileSizeBytes()}；这里保留兜底是为了让直接
+     * {@code new FileManager()} 的单元测试不依赖 Spring 容器。
      */
-    private static final long MAX_FILE_SIZE = 2 * 1024 * 1024L;
+    static final long DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024L;
 
     /**
      * 允许上传的图片后缀
@@ -87,6 +91,9 @@ public class FileManager {
 
     @Resource
     private ImageDecodeLimiter imageDecodeLimiter;
+
+    @Resource
+    private UploadProperties uploadProperties;
 
     /**
      * 上传图片
@@ -343,6 +350,24 @@ public class FileManager {
     }
 
     /**
+     * 当前生效的单张上传上限：优先取配置，未注入（单元测试）时回退默认值
+     */
+    long maxFileSizeBytes() {
+        UploadProperties properties = this.uploadProperties;
+        if (properties != null && properties.getMaxFileSizeBytes() > 0) {
+            return properties.getMaxFileSizeBytes();
+        }
+        return DEFAULT_MAX_FILE_SIZE;
+    }
+
+    /**
+     * 字节换算成整 MB，用于错误提示
+     */
+    private static long toMegabytes(long bytes) {
+        return Math.max(1L, bytes / (1024 * 1024));
+    }
+
+    /**
      * 校验文件：空文件、大小、后缀、MIME 类型和文件头都要符合图片要求
      *
      * @param multipartFile multipart 文件
@@ -350,7 +375,9 @@ public class FileManager {
     public void validPicture(MultipartFile multipartFile) {
         ThrowUtils.throwIf(multipartFile == null || multipartFile.isEmpty(), ErrorCode.PARAMS_ERROR, "文件不能为空");
         // 1. 校验文件大小
-        ThrowUtils.throwIf(multipartFile.getSize() > MAX_FILE_SIZE, ErrorCode.PARAMS_ERROR, "文件大小不能超过 2M");
+        long maxFileSize = maxFileSizeBytes();
+        ThrowUtils.throwIf(multipartFile.getSize() > maxFileSize, ErrorCode.PARAMS_ERROR,
+                "文件大小不能超过 " + toMegabytes(maxFileSize) + "MB");
         // 2. 校验文件后缀（忽略大小写）
         String originalFilename = multipartFile.getOriginalFilename();
         ThrowUtils.throwIf(StrUtil.isBlank(originalFilename), ErrorCode.PARAMS_ERROR, "文件名不能为空");

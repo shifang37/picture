@@ -149,7 +149,7 @@ class PictureControllerTest {
         User normalUser = user(100L, "user");
         when(userService.getLoginUser(any())).thenReturn(normalUser);
         when(pictureService.uploadPicture(any(), any(), eq(normalUser)))
-                .thenThrow(new MaxUploadSizeExceededException(2 * 1024 * 1024L));
+                .thenThrow(new MaxUploadSizeExceededException(10 * 1024 * 1024L));
 
         MockMultipartFile file = new MockMultipartFile("file", "big.jpg", "image/jpeg",
                 new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0});
@@ -157,7 +157,7 @@ class PictureControllerTest {
         mockMvc.perform(multipart("/picture/upload").file(file))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40000))
-                .andExpect(jsonPath("$.message").value("文件大小不能超过 2M"));
+                .andExpect(jsonPath("$.message").value("文件大小不能超过 10MB"));
     }
 
     // ==================== 删除 ====================

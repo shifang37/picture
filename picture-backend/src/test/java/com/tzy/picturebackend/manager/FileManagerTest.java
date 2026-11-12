@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.manager;
 
+import com.tzy.picturebackend.config.UploadProperties;
 import com.tzy.picturebackend.exception.BusinessException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -56,14 +57,33 @@ class FileManagerTest {
     }
 
     @Test
-    @DisplayName("校验：超过 2MB 应拒绝")
+    @DisplayName("校验：超过 10MB 应拒绝，恰好 10MB 放行")
     void validPicture_rejectsOversizedFile() {
-        byte[] bytes = new byte[(2 * 1024 * 1024) + 1];
+        byte[] bytes = new byte[(10 * 1024 * 1024) + 1];
         System.arraycopy(JPEG_HEADER, 0, bytes, 0, JPEG_HEADER.length);
 
         BusinessException e = assertThrows(BusinessException.class,
                 () -> fileManager.validPicture(file("big.jpg", "image/jpeg", bytes)));
-        assertEquals("文件大小不能超过 2M", e.getMessage());
+        assertEquals("文件大小不能超过 10MB", e.getMessage());
+
+        byte[] border = new byte[10 * 1024 * 1024];
+        System.arraycopy(JPEG_HEADER, 0, border, 0, JPEG_HEADER.length);
+        assertDoesNotThrow(() -> fileManager.validPicture(file("border.jpg", "image/jpeg", border)));
+    }
+
+    @Test
+    @DisplayName("校验：上限可通过 UploadProperties 覆盖")
+    void validPicture_respectsConfiguredLimit() {
+        FileManager manager = new FileManager();
+        UploadProperties properties = new UploadProperties();
+        properties.setMaxFileSizeBytes(1024);
+        ReflectionTestUtils.setField(manager, "uploadProperties", properties);
+        byte[] bytes = new byte[2048];
+        System.arraycopy(JPEG_HEADER, 0, bytes, 0, JPEG_HEADER.length);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> manager.validPicture(file("small.jpg", "image/jpeg", bytes)));
+        assertEquals("文件大小不能超过 1MB", e.getMessage());
     }
 
     @Test

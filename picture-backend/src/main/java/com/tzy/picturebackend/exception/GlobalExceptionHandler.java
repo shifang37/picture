@@ -69,7 +69,18 @@ public class GlobalExceptionHandler {
     public BaseResponse<?> maxUploadSizeExceededExceptionHandler(MaxUploadSizeExceededException e) {
         log.warn("上传文件超过大小限制: {}", e.getMessage());
         pictureMetrics.apiError(ErrorCode.PARAMS_ERROR.getCode());
-        return ResultUtils.error(ErrorCode.PARAMS_ERROR, "文件大小不能超过 2M");
+        return ResultUtils.error(ErrorCode.PARAMS_ERROR, "文件大小不能超过 " + uploadLimitText(e.getMaxUploadSize()));
+    }
+
+    /**
+     * 把 multipart 上限换算成提示文案；异常里拿不到具体值时按默认的 10MB 提示
+     */
+    private static String uploadLimitText(long maxUploadSize) {
+        if (maxUploadSize <= 0) {
+            return "10MB";
+        }
+        long megabytes = Math.max(1L, maxUploadSize / (1024 * 1024));
+        return megabytes + "MB";
     }
 
     /**
