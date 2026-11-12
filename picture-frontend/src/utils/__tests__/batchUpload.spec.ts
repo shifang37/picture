@@ -108,4 +108,72 @@ describe('batchUpload scheduler', () => {
     resolveUpload?.()
     await scheduler.idle()
   })
+
+  it('把上传进度与阶段文案透传到列表项，完成后进度固定为 100', async () => {
+    let observedProgress = -1
+    let observedMessage: string | undefined
+    const holder: { scheduler?: ReturnType<typeof createBatchUploadScheduler> } = {}
+    const scheduler = createBatchUploadScheduler({
+      concurrency: 1,
+      upload: async (_file, reporter) => {
+        reporter.status('压缩中...')
+        observedMessage = holder.scheduler?.items[0].message
+        reporter.progress(42)
+        observedProgress = holder.scheduler?.items[0].progress ?? -1
+        reporter.progress(160)
+        return { reviewStatus: 1, message: '已自动通过审核' }
+      },
+    })
+    holder.scheduler = scheduler
+
+    scheduler.addFiles([createFile('a.jpg')])
+    await scheduler.idle()
+
+    expect(observedProgress).toBe(42)
+    expect(observedMessage).toBe('压缩中...')
+    // 超出 100 的进度会被截断，上传成功后固定 100
+    expect(scheduler.items[0].progress).toBe(100)
+    expect(scheduler.items[0].message).toBe('已自动通过审核')
+  })
+
+  it('重试失败项时进度归零', async () => {
+    let attempts = 0
+    const scheduler = createBatchUploadScheduler({
+      concurrency: 1,
+      upload: async (_file, reporter) => {
+        attempts++
+        reporter.progress(60)
+        if (attempts === 1) {
+          throw new Error('网络错误')
+        }
+        return {}
+      },
+    })
+
+    scheduler.addFiles([createFile('a.jpg')])
+    await scheduler.idle()
+    expect(scheduler.items[0].status).toBe('error')
+
+    scheduler.retry(scheduler.items[0].uid)
+    await scheduler.idle()
+
+    expect(scheduler.items[0].status).toBe('success')
+    expect(scheduler.items[0].progress).toBe(100)
+  })
+
+  it('秒传命中时保留 duplicated 标记供页面提示', async () => {
+    let duplicated = false
+    const scheduler = createBatchUploadScheduler({
+      upload: async () => {
+        duplicated = true
+        return { duplicated: true, message: '已存在相同图片，已复用' }
+      },
+    })
+
+    scheduler.addFiles([createFile('same.jpg')])
+    await scheduler.idle()
+
+    expect(duplicated).toBe(true)
+    expect(scheduler.items[0].message).toBe('已存在相同图片，已复用')
+  })
 })
