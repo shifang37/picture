@@ -12,7 +12,10 @@
           <a-button type="primary" html-type="submit">搜索</a-button>
         </a-form-item>
       </a-form>
-      <a-button type="primary" @click="openCreate">新增用户</a-button>
+      <a-space>
+        <a-button :loading="recalcLoading" @click="handleRecalcAll">重算全部配额</a-button>
+        <a-button type="primary" @click="openCreate">新增用户</a-button>
+      </a-space>
     </a-flex>
 
     <a-table
@@ -50,9 +53,20 @@
         <template v-else-if="column.dataIndex === 'createTime'">
           {{ formatTime(record.createTime) }}
         </template>
+        <template v-else-if="column.key === 'quota'">
+          <div class="quota-cell">
+            <a-progress
+              :percent="quotaPercent(record.storageUsed, record.storageQuota)"
+              size="small"
+              style="width: 120px; margin-bottom: 0"
+            />
+            <span class="quota-text">{{ describeQuota(record) }}</span>
+          </div>
+        </template>
         <template v-else-if="column.key === 'action'">
           <a-space>
             <a-button type="link" @click="openEdit(record)">编辑</a-button>
+            <a-button type="link" @click="openQuota(record)">配额</a-button>
             <a-button type="link" @click="openReset(record)">重置密码</a-button>
             <a-popconfirm
               title="确定删除该用户吗？"
@@ -156,6 +170,46 @@
         </a-form-item>
       </a-form>
     </a-modal>
+
+    <a-modal
+      v-model:open="quotaModalOpen"
+      title="调整配额"
+      :confirm-loading="quotaSubmitting"
+      ok-text="保存"
+      cancel-text="取消"
+      destroy-on-close
+      @ok="handleQuotaSubmit"
+    >
+      <a-alert
+        type="info"
+        show-icon
+        message="配额只统计未删除图片：用户删除图片会立即释放额度。调低到已用量以下不会删除图片，但会阻止继续上传。"
+        style="margin-bottom: 16px"
+      />
+      <a-form ref="quotaFormRef" :model="quotaForm" :rules="quotaRules" layout="vertical">
+        <a-form-item label="用户">
+          <span>{{ quotaForm.userLabel || '-' }}</span>
+        </a-form-item>
+        <a-form-item label="存储配额（MB）" name="storageQuotaMB">
+          <a-input-number
+            v-model:value="quotaForm.storageQuotaMB"
+            :min="0"
+            :precision="0"
+            :step="1024"
+            style="width: 100%"
+          />
+        </a-form-item>
+        <a-form-item label="图片数量上限" name="pictureQuota">
+          <a-input-number
+            v-model:value="quotaForm.pictureQuota"
+            :min="0"
+            :precision="0"
+            :step="100"
+            style="width: 100%"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -165,8 +219,10 @@ import { Modal, message, type FormInstance, type FormProps } from 'ant-design-vu
 import { SmileOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { addUser, deleteUser, listUserVoByPage, updateUser } from '@/api/userController'
+import { recalcUserQuota, updateUserQuota } from '@/api/quotaExtra'
 import { resetUserPassword } from '@/api/userExtra'
 import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, passwordStrengthRule } from '@/utils/password'
+import { formatBytes, percentOf } from '@/utils/size'
 
 const columns = [
   {
@@ -203,9 +259,14 @@ const columns = [
     width: 180,
   },
   {
+    title: '配额',
+    key: 'quota',
+    width: 220,
+  },
+  {
     title: '操作',
     key: 'action',
-    width: 220,
+    width: 300,
   },
 ]
 
@@ -467,8 +528,111 @@ const handleReset = async () => {
 
 const formatTime = (time?: string) => (time ? dayjs(time).format('YYYY-MM-DD HH:mm:ss') : '-')
 
+// ==================== 配额 ====================
+
+const recalcLoading = ref(false)
+
+/**
+ * 按图片表重算全部用户的已用量：用于迁移/历史数据修正
+ */
+const handleRecalcAll = async () => {
+  recalcLoading.value = true
+  try {
+    const res = await recalcUserQuota()
+    if (res.data.code === 0) {
+      message.success(`已重算 ${res.data.data ?? 0} 个用户的配额`)
+      fetchData()
+    } else {
+      message.error('重算配额失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('重算配额失败：' + (e.message || '系统错误'))
+  } finally {
+    recalcLoading.value = false
+  }
+}
+
+const quotaPercent = (used?: string | number, quota?: string | number) =>
+  percentOf(Number(used ?? 0), Number(quota ?? 0))
+
+const describeQuota = (record: API.UserVO) => {
+  const storage = `${formatBytes(Number(record.storageUsed ?? 0))} / ${formatBytes(
+    Number(record.storageQuota ?? 0),
+  )}`
+  return `${storage} · ${record.pictureUsed ?? 0}/${record.pictureQuota ?? 0} 张`
+}
+
+const quotaModalOpen = ref(false)
+const quotaSubmitting = ref(false)
+const quotaFormRef = ref<FormInstance>()
+
+const quotaForm = reactive({
+  userId: '',
+  userLabel: '',
+  storageQuotaMB: 1024,
+  pictureQuota: 1000,
+})
+
+const quotaRules: FormProps['rules'] = {
+  storageQuotaMB: [{ required: true, message: '请输入存储配额', trigger: 'blur' }],
+  pictureQuota: [{ required: true, message: '请输入图片数量上限', trigger: 'blur' }],
+}
+
+const openQuota = (record: API.UserVO) => {
+  if (!record.id) {
+    return
+  }
+  quotaForm.userId = record.id
+  quotaForm.userLabel = record.userName || record.userAccount || record.id
+  quotaForm.storageQuotaMB = Math.round(Number(record.storageQuota ?? 0) / 1024 / 1024)
+  quotaForm.pictureQuota = Number(record.pictureQuota ?? 0)
+  quotaFormRef.value?.clearValidate()
+  quotaModalOpen.value = true
+}
+
+const handleQuotaSubmit = async () => {
+  try {
+    await quotaFormRef.value?.validate()
+  } catch {
+    return
+  }
+  quotaSubmitting.value = true
+  try {
+    const res = await updateUserQuota({
+      userId: quotaForm.userId,
+      storageQuota: Math.max(0, Number(quotaForm.storageQuotaMB) || 0) * 1024 * 1024,
+      pictureQuota: Math.max(0, Number(quotaForm.pictureQuota) || 0),
+    })
+    if (res.data.code === 0) {
+      message.success('配额已更新，立即生效')
+      quotaModalOpen.value = false
+      fetchData()
+    } else {
+      message.error('保存配额失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('保存配额失败：' + (e.message || '系统错误'))
+  } finally {
+    quotaSubmitting.value = false
+  }
+}
+
 // 页面加载时请求一次
 onMounted(() => {
   fetchData()
 })
 </script>
+
+<style scoped>
+.quota-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.quota-text {
+  color: #666;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+</style>

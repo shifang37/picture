@@ -21,6 +21,45 @@
       </a-descriptions>
     </a-card>
 
+    <a-card class="section" title="存储空间">
+      <a-spin :spinning="quotaLoading">
+        <template v-if="quota">
+          <div class="quota-row">
+            <span class="quota-label">存储空间</span>
+            <span class="quota-value">{{ describeStorageQuota(quotaSummary) }}</span>
+          </div>
+          <a-progress
+            :percent="quotaSummary.percent"
+            :status="quotaSummary.percent >= 100 ? 'exception' : 'normal'"
+          />
+          <div class="quota-row">
+            <span class="quota-label">图片数量</span>
+            <span class="quota-value">{{ describePictureQuota(quotaSummary) }}</span>
+          </div>
+          <a-progress
+            :percent="picturePercent"
+            :status="picturePercent >= 100 ? 'exception' : 'normal'"
+          />
+          <a-alert
+            v-if="quotaSummary.exempt"
+            type="info"
+            show-icon
+            message="当前账号不受存储配额限制。"
+            style="margin-bottom: 12px"
+          />
+          <a-alert
+            v-else-if="quotaSummary.exceeded"
+            type="warning"
+            show-icon
+            message="配额已用尽，删除图片会立即释放额度；如需更多空间请联系管理员。"
+            style="margin-bottom: 12px"
+          />
+          <a-button size="small" :loading="quotaLoading" @click="loadQuota">刷新用量</a-button>
+        </template>
+        <a-empty v-else-if="!quotaLoading" description="配额信息加载失败" />
+      </a-spin>
+    </a-card>
+
     <a-card class="section" title="编辑资料">
       <a-form
         :model="profileForm"
@@ -110,8 +149,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { message, type FormProps } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
+import { getMyQuota, type UserQuota } from '@/api/quotaExtra'
 import { updatePassword, updateProfile } from '@/api/userExtra'
 import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, passwordStrengthRule } from '@/utils/password'
+import { describePictureQuota, describeStorageQuota, summarizeQuota } from '@/utils/quota'
+import { percentOf } from '@/utils/size'
 
 const loginUserStore = useLoginUserStore()
 
@@ -119,6 +161,33 @@ const loginUser = computed(() => loginUserStore.loginUser)
 
 const profileLoading = ref(false)
 const passwordLoading = ref(false)
+const quotaLoading = ref(false)
+const quota = ref<UserQuota | null>(null)
+
+const quotaSummary = computed(() => summarizeQuota(quota.value))
+
+const picturePercent = computed(() =>
+  percentOf(quotaSummary.value.usedPictures, quotaSummary.value.quotaPictures),
+)
+
+/**
+ * 加载配额：失败只提示，不影响页面其余功能
+ */
+const loadQuota = async () => {
+  quotaLoading.value = true
+  try {
+    const res = await getMyQuota()
+    if (res.data.code === 0 && res.data.data) {
+      quota.value = res.data.data
+    } else {
+      message.error('获取配额失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('获取配额失败：' + (e.message || '系统错误'))
+  } finally {
+    quotaLoading.value = false
+  }
+}
 
 const profileForm = reactive({
   userName: '',
@@ -216,6 +285,7 @@ onMounted(async () => {
     await loginUserStore.fetchLoginUser()
   }
   fillProfileForm()
+  await loadQuota()
 })
 </script>
 
@@ -231,5 +301,21 @@ onMounted(async () => {
 
 .section {
   margin-bottom: 16px;
+}
+
+.quota-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.quota-label {
+  color: #666;
+}
+
+.quota-value {
+  color: #111;
+  font-variant-numeric: tabular-nums;
 }
 </style>
