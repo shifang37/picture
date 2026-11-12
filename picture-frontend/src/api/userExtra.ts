@@ -2,6 +2,16 @@
 // 生成式客户端（userController.ts）由 npm run openapi 重新生成，这里的内容不会被覆盖。
 import request from '@/request'
 
+/**
+ * 获取注册用图形验证码（一次性，5 分钟内有效）
+ */
+export async function getRegisterCaptcha(options?: { [key: string]: any }) {
+  return request<API.BaseResponseCaptchaVO>('/user/captcha', {
+    method: 'GET',
+    ...(options || {}),
+  })
+}
+
 export interface UserUpdateProfileParams {
   userName?: string
   userAvatar?: string

@@ -5,6 +5,12 @@ declare namespace API {
     message?: string
   }
 
+  type BaseResponseCaptchaVO = {
+    code?: number
+    data?: CaptchaVO
+    message?: string
+  }
+
   type BaseResponseLoginUserVO = {
     code?: number
     data?: LoginUserVO
@@ -71,6 +77,12 @@ declare namespace API {
     message?: string
   }
 
+  type BaseResponseUserAddResult = {
+    code?: number
+    data?: UserAddResult
+    message?: string
+  }
+
   type BaseResponseUserVO = {
     code?: number
     data?: UserVO
@@ -79,6 +91,12 @@ declare namespace API {
 
   type DeleteRequest = {
     id?: string
+  }
+
+  type CaptchaVO = {
+    captchaId?: string
+    image?: string
+    expiresInSeconds?: number
   }
 
   type getPictureByIdParams = {
@@ -104,6 +122,7 @@ declare namespace API {
     userAvatar?: string
     userProfile?: string
     userRole?: string
+    passwordChangeRequired?: boolean
     createTime?: string
     updateTime?: string
   }
@@ -301,6 +320,11 @@ declare namespace API {
     userRole?: string
   }
 
+  type UserAddResult = {
+    id?: string
+    initialPassword?: string
+  }
+
   type UserLoginRequest = {
     userAccount?: string
     userPassword?: string
@@ -322,6 +346,8 @@ declare namespace API {
     userAccount?: string
     userPassword?: string
     checkPassword?: string
+    captchaId?: string
+    captchaCode?: string
   }
 
   type UserUpdateRequest = {

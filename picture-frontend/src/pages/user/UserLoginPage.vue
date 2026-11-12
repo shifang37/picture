@@ -51,6 +51,12 @@ const handleSubmit = async (values: any) => {
       loginUserStore.setLoginUser(res.data.data)
       // 尝试获取完整的用户信息
       await loginUserStore.fetchLoginUser()
+      // 首次登录 / 管理员重置密码后必须先改密，改密完成前不放行到其他页面
+      if (res.data.data.passwordChangeRequired) {
+        message.warning('首次登录请先修改初始密码')
+        await router.replace('/user/changePassword')
+        return
+      }
       message.success('登录成功')
       // 登录成功后回到被拦截的页面（只接受站内路径）
       const redirect = route.query.redirect

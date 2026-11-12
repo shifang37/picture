@@ -11,16 +11,21 @@ import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
+import com.tzy.picturebackend.manager.CaptchaManager;
+import com.tzy.picturebackend.manager.RegistrationGuard;
 import com.tzy.picturebackend.manager.SessionInvalidationManager;
 import com.tzy.picturebackend.model.dto.user.*;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
+import com.tzy.picturebackend.model.vo.CaptchaVO;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
+import com.tzy.picturebackend.model.vo.UserAddResult;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
+import com.tzy.picturebackend.validation.PasswordPolicy;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -33,11 +38,6 @@ import java.util.List;
 @RequestMapping("/user")
 public class UserController {
 
-    /**
-     * 新建用户时的默认密码
-     */
-    private static final String DEFAULT_PASSWORD = "12345678";
-
     @Resource
     private UserService userService;
 
@@ -47,12 +47,31 @@ public class UserController {
     @Resource
     private SessionInvalidationManager sessionInvalidationManager;
 
+    @Resource
+    private RegistrationGuard registrationGuard;
+
+    @Resource
+    private CaptchaManager captchaManager;
+
+    /**
+     * 获取注册用图形验证码。
+     * <p>
+     * 返回的 captchaId 与图片一次性使用，5 分钟内有效；注册时必须同时提交。
+     */
+    @GetMapping("/captcha")
+    public BaseResponse<CaptchaVO> getRegisterCaptcha() {
+        return ResultUtils.success(captchaManager.generate());
+    }
+
     @PostMapping("/register")
     public BaseResponse<Long> userRegister(@Valid @RequestBody UserRegisterRequest userRegisterRequest) {
         ThrowUtils.throwIf(userRegisterRequest == null, ErrorCode.PARAMS_ERROR);
         String userAccount = userRegisterRequest.getUserAccount();
         String userPassword = userRegisterRequest.getUserPassword();
         String checkPassword = userRegisterRequest.getCheckPassword();
+        // 图形验证码 + 账号维度限流；IP 维度已在 RateLimitFilter 中完成
+        registrationGuard.check(userAccount,
+                userRegisterRequest.getCaptchaId(), userRegisterRequest.getCaptchaCode());
         long result = userService.userRegister(userAccount, userPassword, checkPassword);
         return ResultUtils.success(result);
     }
@@ -96,6 +115,8 @@ public class UserController {
         // 修改密码会让其他设备的旧会话失效；当前会话刷新到最新版本，保持登录
         request.getSession().setAttribute(UserConstant.USER_LOGIN_VERSION,
                 sessionInvalidationManager.currentVersion());
+        // 本次改密已完成，解除首次登录强制改密限制
+        request.getSession().setAttribute(UserConstant.USER_PASSWORD_CHANGE_REQUIRED, false);
         return ResultUtils.success(true);
     }
 
@@ -129,10 +150,12 @@ public class UserController {
 
     /**
      * 创建用户
+     * <p>
+     * 初始密码由服务端随机生成，只在本响应中返回一次；用户首次登录必须修改密码。
      */
     @PostMapping("/add")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Long> addUser(@Valid @RequestBody UserAddRequest userAddRequest) {
+    public BaseResponse<UserAddResult> addUser(@Valid @RequestBody UserAddRequest userAddRequest) {
         ThrowUtils.throwIf(userAddRequest == null, ErrorCode.PARAMS_ERROR);
         // 账号重复预检查，避免直接触发数据库唯一索引异常
         long count = userService.count(new QueryWrapper<User>()
@@ -141,10 +164,12 @@ public class UserController {
         User user = new User();
         BeanUtils.copyProperties(userAddRequest, user);
         user.setUserRole(normalizeRole(userAddRequest.getUserRole()));
-        user.setUserPassword(userService.getEncryptPassword(DEFAULT_PASSWORD));
+        String initialPassword = PasswordPolicy.generateTemporaryPassword();
+        user.setUserPassword(userService.getEncryptPassword(initialPassword));
+        user.setPasswordChangeRequired(true);
         boolean result = userService.save(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        return ResultUtils.success(user.getId());
+        return ResultUtils.success(new UserAddResult(user.getId(), initialPassword));
     }
 
     /**

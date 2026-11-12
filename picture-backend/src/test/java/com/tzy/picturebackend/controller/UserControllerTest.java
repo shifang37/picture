@@ -5,9 +5,12 @@ import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
+import com.tzy.picturebackend.manager.CaptchaManager;
+import com.tzy.picturebackend.manager.RegistrationGuard;
 import com.tzy.picturebackend.manager.SessionInvalidationManager;
 import com.tzy.picturebackend.model.dto.user.UserResetPasswordRequest;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.CaptchaVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
@@ -29,6 +32,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -49,13 +54,21 @@ class UserControllerTest {
 
     private PictureService pictureService;
 
+    private RegistrationGuard registrationGuard;
+
+    private CaptchaManager captchaManager;
+
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
         pictureService = mock(PictureService.class);
+        registrationGuard = mock(RegistrationGuard.class);
+        captchaManager = mock(CaptchaManager.class);
         UserController userController = new UserController();
         ReflectionTestUtils.setField(userController, "userService", userService);
         ReflectionTestUtils.setField(userController, "pictureService", pictureService);
+        ReflectionTestUtils.setField(userController, "registrationGuard", registrationGuard);
+        ReflectionTestUtils.setField(userController, "captchaManager", captchaManager);
         ReflectionTestUtils.setField(userController, "sessionInvalidationManager",
                 new SessionInvalidationManager(InMemoryRedis.createTemplate(new ConcurrentHashMap<>())));
 
@@ -163,10 +176,10 @@ class UserControllerTest {
     // ==================== 新增用户 ====================
 
     @Test
-    @DisplayName("新增用户：返回新用户 id，默认密码加密存储")
-    void addUser_returnsNewUserId() throws Exception {
+    @DisplayName("新增用户：返回初始密码，密码加密存储并要求首次登录改密")
+    void addUser_returnsNewUserIdAndInitialPassword() throws Exception {
         when(userService.count(any())).thenReturn(0L);
-        when(userService.getEncryptPassword("12345678")).thenReturn("encrypted");
+        when(userService.getEncryptPassword(anyString())).thenReturn("encrypted");
         when(userService.save(any(User.class))).thenAnswer(invocation -> {
             User saved = invocation.getArgument(0);
             saved.setId(9L);
@@ -177,13 +190,101 @@ class UserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"userAccount\":\"newuser\",\"userName\":\"新用户\",\"userRole\":\"admin\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0));
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.id").value(9))
+                .andExpect(jsonPath("$.data.initialPassword").isString());
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userService).save(captor.capture());
         User saved = captor.getValue();
         assertEquals("admin", saved.getUserRole());
         assertEquals("encrypted", saved.getUserPassword());
+        assertEquals(Boolean.TRUE, saved.getPasswordChangeRequired());
+    }
+
+    // ==================== 注册 ====================
+
+    @Test
+    @DisplayName("注册：验证码与账号限流校验通过后调用 service")
+    void register_success() throws Exception {
+        when(userService.userRegister("newuser", "Abcdef12", "Abcdef12")).thenReturn(5L);
+
+        mockMvc.perform(post("/user/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userAccount\":\"newuser\",\"userPassword\":\"Abcdef12\","
+                                + "\"checkPassword\":\"Abcdef12\",\"captchaId\":\"captcha-id\","
+                                + "\"captchaCode\":\"a1b2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(5));
+
+        verify(registrationGuard).check("newuser", "captcha-id", "a1b2");
+    }
+
+    @Test
+    @DisplayName("注册：验证码错误返回 40000，不调用 service")
+    void register_rejectsInvalidCaptcha() throws Exception {
+        doThrow(new BusinessException(ErrorCode.PARAMS_ERROR, "验证码错误或已过期"))
+                .when(registrationGuard).check(anyString(), anyString(), anyString());
+
+        mockMvc.perform(post("/user/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userAccount\":\"newuser\",\"userPassword\":\"Abcdef12\","
+                                + "\"checkPassword\":\"Abcdef12\",\"captchaId\":\"captcha-id\","
+                                + "\"captchaCode\":\"bad\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("验证码错误或已过期"));
+
+        verify(userService, never()).userRegister(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("注册：账号维度超过限流返回 42900，不调用 service")
+    void register_rejectsRateLimitedAccount() throws Exception {
+        doThrow(new BusinessException(ErrorCode.TOO_MANY_REQUESTS))
+                .when(registrationGuard).check(anyString(), anyString(), anyString());
+
+        mockMvc.perform(post("/user/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userAccount\":\"newuser\",\"userPassword\":\"Abcdef12\","
+                                + "\"checkPassword\":\"Abcdef12\",\"captchaId\":\"captcha-id\","
+                                + "\"captchaCode\":\"a1b2\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(42900));
+
+        verify(userService, never()).userRegister(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("注册：缺少验证码返回 40000，不进入限流与 service")
+    void register_rejectsMissingCaptcha() throws Exception {
+        mockMvc.perform(post("/user/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"userAccount\":\"newuser\",\"userPassword\":\"Abcdef12\","
+                                + "\"checkPassword\":\"Abcdef12\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("验证码不能为空"));
+
+        verify(registrationGuard, never()).check(anyString(), anyString(), anyString());
+        verify(userService, never()).userRegister(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("验证码接口：返回 captchaId 与 data URL 图片")
+    void captcha_returnsImageAndId() throws Exception {
+        CaptchaVO captchaVO = new CaptchaVO();
+        captchaVO.setCaptchaId("id1");
+        captchaVO.setImage("data:image/png;base64,abc");
+        captchaVO.setExpiresInSeconds(300);
+        when(captchaManager.generate()).thenReturn(captchaVO);
+
+        mockMvc.perform(get("/user/captcha"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.captchaId").value("id1"))
+                .andExpect(jsonPath("$.data.image").value("data:image/png;base64,abc"));
     }
 
     // ==================== 编辑用户 ====================
@@ -286,20 +387,22 @@ class UserControllerTest {
     // ==================== 修改密码 ====================
 
     @Test
-    @DisplayName("修改密码：成功返回 true，并刷新当前会话版本")
+    @DisplayName("修改密码：成功返回 true，并刷新当前会话版本、解除强制改密")
     void updatePassword_success() throws Exception {
         when(userService.getLoginUser(any())).thenReturn(user(100L, "user"));
         when(userService.updatePassword(any(User.class), any(), any())).thenReturn(true);
 
         var mvcResult = mockMvc.perform(post("/user/update/password")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"123456\",\"newPassword\":\"abcdef\"}"))
+                        .content("{\"oldPassword\":\"123456\",\"newPassword\":\"Abcdef12\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn();
 
         assertNotNull(mvcResult.getRequest().getSession(false)
                 .getAttribute(UserConstant.USER_LOGIN_VERSION));
+        assertEquals(Boolean.FALSE, mvcResult.getRequest().getSession(false)
+                .getAttribute(UserConstant.USER_PASSWORD_CHANGE_REQUIRED));
     }
 
     @Test
@@ -311,20 +414,32 @@ class UserControllerTest {
 
         mockMvc.perform(post("/user/update/password")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"wrong-old\",\"newPassword\":\"abcdef\"}"))
+                        .content("{\"oldPassword\":\"wrong-old\",\"newPassword\":\"Abcdef12\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(40000))
                 .andExpect(jsonPath("$.message").value("原密码错误"));
     }
 
     @Test
-    @DisplayName("修改密码：新密码少于 6 位返回 40000")
+    @DisplayName("修改密码：新密码少于 8 位返回 40000")
     void updatePassword_rejectsTooShortNewPassword() throws Exception {
         mockMvc.perform(post("/user/update/password")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"oldPassword\":\"123456\",\"newPassword\":\"123\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(40000));
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("密码长度不能少于 8 位"));
+    }
+
+    @Test
+    @DisplayName("修改密码：新密码只有字母返回 40000")
+    void updatePassword_rejectsPasswordWithoutDigit() throws Exception {
+        mockMvc.perform(post("/user/update/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"123456\",\"newPassword\":\"abcdefgh\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000))
+                .andExpect(jsonPath("$.message").value("密码必须同时包含字母和数字"));
     }
 
     // ==================== 管理员重置密码 ====================

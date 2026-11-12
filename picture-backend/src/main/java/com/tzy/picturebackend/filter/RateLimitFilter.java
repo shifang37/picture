@@ -22,7 +22,10 @@ import java.time.Duration;
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_ID;
 
 /**
- * 登录与上传接口限流，避免暴力破解和恶意刷上传。
+ * 登录、注册、验证码与上传接口限流，避免暴力破解、批量注册和恶意刷上传。
+ * <p>
+ * 注册这里只做 IP 维度：账号维度需要读取 JSON 请求体，放在
+ * {@link com.tzy.picturebackend.manager.RegistrationGuard} 中，由 Controller 在解析参数后执行。
  * <p>
  * 顺序必须晚于 Spring Session 的 SessionRepositoryFilter（Integer.MIN_VALUE + 50）：
  * 否则这里读到的还是 Tomcat 的空会话，上传限流会静悄悄地从「按用户」退化成「按 IP」。
@@ -32,6 +35,16 @@ import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_ID;
 public class RateLimitFilter extends OncePerRequestFilter {
 
     private static final int LOGIN_LIMIT_PER_MINUTE = 10;
+
+    /**
+     * 同一 IP 10 分钟最多发起 10 次注册请求（账号维度另有限制）
+     */
+    private static final int REGISTER_LIMIT_PER_TEN_MINUTES = 10;
+
+    /**
+     * 同一 IP 每分钟最多获取 30 个验证码，防止刷验证码消耗 CPU
+     */
+    private static final int CAPTCHA_LIMIT_PER_MINUTE = 30;
 
     private static final int UPLOAD_LIMIT_PER_MINUTE = 60;
 
@@ -44,25 +57,44 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        if (!"POST".equalsIgnoreCase(request.getMethod())) {
-            filterChain.doFilter(request, response);
-            return;
-        }
         String path = relativePath(request);
+        String method = request.getMethod();
         try {
-            if ("/user/login".equals(path)) {
-                rateLimitManager.check("login:ip:" + clientIp(request),
-                        LOGIN_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
-            } else if ("/picture/upload".equals(path)) {
-                rateLimitManager.check(uploadKey(request), UPLOAD_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
+            if ("POST".equalsIgnoreCase(method)) {
+                if ("/user/login".equals(path)) {
+                    rateLimitManager.check("login:ip:" + clientIp(request),
+                            LOGIN_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
+                } else if ("/user/register".equals(path)) {
+                    rateLimitManager.check("register:ip:" + clientIp(request),
+                            REGISTER_LIMIT_PER_TEN_MINUTES, Duration.ofMinutes(10));
+                } else if ("/picture/upload".equals(path)) {
+                    rateLimitManager.check(uploadKey(request), UPLOAD_LIMIT_PER_MINUTE,
+                            Duration.ofMinutes(1));
+                }
+            } else if ("GET".equalsIgnoreCase(method) && "/user/captcha".equals(path)) {
+                rateLimitManager.check("captcha:ip:" + clientIp(request),
+                        CAPTCHA_LIMIT_PER_MINUTE, Duration.ofMinutes(1));
             }
         } catch (BusinessException e) {
             // 限流响应同样是 HTTP 200，按业务码无法区分来源，这里单独计数
-            pictureMetrics.rateLimited("/user/login".equals(path) ? "login" : "upload");
+            pictureMetrics.rateLimited(rateLimitType(path));
             writeError(response, e.getCode(), e.getMessage());
             return;
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * 被限流接口对应的指标标签，未命中时归入 other，便于发现遗漏的配置
+     */
+    private String rateLimitType(String path) {
+        return switch (path) {
+            case "/user/login" -> "login";
+            case "/user/register" -> "register";
+            case "/user/captcha" -> "captcha";
+            case "/picture/upload" -> "upload";
+            default -> "other";
+        };
     }
 
     private String uploadKey(HttpServletRequest request) {

@@ -36,6 +36,12 @@ const router = createRouter({
       meta: { requiresLogin: true },
     },
     {
+      path: '/user/changePassword',
+      name: '修改初始密码',
+      component: () => import('@/pages/user/UserChangePasswordPage.vue'),
+      meta: { requiresLogin: true },
+    },
+    {
       path: '/admin/dashboard',
       name: '数据看板',
       component: () => import('@/pages/admin/DashboardPage.vue'),

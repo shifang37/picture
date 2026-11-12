@@ -80,7 +80,7 @@
         v-if="!isEdit"
         type="info"
         show-icon
-        :message="`新用户默认密码为 ${DEFAULT_PASSWORD}，请提醒用户登录后及时修改。`"
+        message="新用户的初始密码由系统随机生成，创建成功后仅显示一次，请及时转达；用户首次登录必须修改密码。"
         style="margin-bottom: 16px"
       />
       <a-form ref="formRef" :model="formState" :rules="formRules" layout="vertical">
@@ -129,7 +129,7 @@
       <a-alert
         type="warning"
         show-icon
-        :message="`即将重置用户「${resetPasswordForm.userName || resetPasswordForm.userAccount}」的密码，重置后旧密码立即失效。`"
+        :message="`即将重置用户「${resetPasswordForm.userName || resetPasswordForm.userAccount}」的密码，重置后旧密码立即失效，该用户首次登录必须修改密码。`"
         style="margin-bottom: 16px"
       />
       <a-form
@@ -141,8 +141,8 @@
         <a-form-item label="新密码" name="newPassword">
           <a-input-password
             v-model:value="resetPasswordForm.newPassword"
-            placeholder="请输入 6-72 位新密码"
-            :maxlength="72"
+            :placeholder="`请输入新密码（${PASSWORD_HINT}）`"
+            :maxlength="PASSWORD_MAX_LENGTH"
             allow-clear
           />
         </a-form-item>
@@ -150,7 +150,7 @@
           <a-input-password
             v-model:value="resetPasswordForm.confirmPassword"
             placeholder="请再次输入新密码"
-            :maxlength="72"
+            :maxlength="PASSWORD_MAX_LENGTH"
             allow-clear
           />
         </a-form-item>
@@ -161,11 +161,12 @@
 
 <script lang="ts" setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { message, type FormInstance, type FormProps } from 'ant-design-vue'
+import { Modal, message, type FormInstance, type FormProps } from 'ant-design-vue'
 import { SmileOutlined } from '@ant-design/icons-vue'
 import dayjs from 'dayjs'
 import { addUser, deleteUser, listUserVoByPage, updateUser } from '@/api/userController'
 import { resetUserPassword } from '@/api/userExtra'
+import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, passwordStrengthRule } from '@/utils/password'
 
 const columns = [
   {
@@ -212,9 +213,6 @@ const roleOptions = [
   { value: 'user', label: '普通用户' },
   { value: 'admin', label: '管理员' },
 ]
-
-// 与后端 UserController.DEFAULT_PASSWORD 保持一致
-const DEFAULT_PASSWORD = '12345678'
 
 // 数据
 const dataList = ref<API.UserVO[]>([])
@@ -334,31 +332,40 @@ const handleSubmit = async () => {
   }
   submitting.value = true
   try {
-    const res = isEdit.value
-      ? await updateUser({
-          id: formState.id,
-          userName: formState.userName,
-          userAvatar: formState.userAvatar,
-          userProfile: formState.userProfile,
-          userRole: formState.userRole,
-        })
-      : await addUser({
-          userAccount: formState.userAccount,
-          userName: formState.userName,
-          userAvatar: formState.userAvatar,
-          userProfile: formState.userProfile,
-          userRole: formState.userRole,
-        })
-    if (res.data.code === 0) {
-      message.success(isEdit.value ? '保存成功' : `新增成功，默认密码 ${DEFAULT_PASSWORD}`)
-      modalOpen.value = false
-      if (!isEdit.value) {
-        searchParams.current = 1
+    if (isEdit.value) {
+      const res = await updateUser({
+        id: formState.id,
+        userName: formState.userName,
+        userAvatar: formState.userAvatar,
+        userProfile: formState.userProfile,
+        userRole: formState.userRole,
+      })
+      if (res.data.code !== 0) {
+        message.error('保存失败：' + (res.data.message || '未知错误'))
+        return
       }
-      fetchData()
+      message.success('保存成功')
     } else {
-      message.error('保存失败：' + (res.data.message || '未知错误'))
+      const res = await addUser({
+        userAccount: formState.userAccount,
+        userName: formState.userName,
+        userAvatar: formState.userAvatar,
+        userProfile: formState.userProfile,
+        userRole: formState.userRole,
+      })
+      if (res.data.code !== 0) {
+        message.error('保存失败：' + (res.data.message || '未知错误'))
+        return
+      }
+      // 初始密码只返回一次，用弹窗展示，避免只停留在会消失的 message 里
+      Modal.success({
+        title: '新增成功',
+        content: `初始密码：${res.data.data?.initialPassword ?? '-'}（仅显示一次）。请及时转达给用户，用户首次登录必须修改密码。`,
+      })
+      searchParams.current = 1
     }
+    modalOpen.value = false
+    fetchData()
   } catch (e: any) {
     message.error('保存失败：' + (e.message || '系统错误'))
   } finally {
@@ -415,7 +422,7 @@ const validateConfirmPassword = async (_rule: any, value: string) => {
 const resetRules: FormProps['rules'] = {
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, max: 72, message: '新密码长度需在 6 到 72 个字符之间', trigger: 'blur' },
+    { ...passwordStrengthRule, trigger: 'blur' },
   ],
   confirmPassword: [{ validator: validateConfirmPassword, trigger: 'blur' }],
 }
@@ -446,7 +453,7 @@ const handleReset = async () => {
       newPassword: resetPasswordForm.newPassword,
     })
     if (res.data.code === 0) {
-      message.success('密码已重置，该用户已有登录会话已失效，请通知用户使用新密码登录')
+      message.success('密码已重置，该用户首次登录必须修改密码；原有登录会话已失效')
       resetModalOpen.value = false
     } else {
       message.error('重置密码失败：' + (res.data.message || '未知错误'))

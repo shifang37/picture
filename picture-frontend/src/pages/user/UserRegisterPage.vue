@@ -22,32 +22,54 @@
           :maxlength="256"
         />
       </a-form-item>
-      <a-form-item
-        name="userPassword"
-        :rules="[
-          { required: true, message: '请输入密码' },
-          { min: 6, max: 72, message: '密码长度需在 6 到 72 个字符之间' },
-        ]"
-      >
+      <a-form-item name="userPassword" :rules="passwordRules">
         <a-input-password
           v-model:value="formState.userPassword"
-          placeholder="请输入密码（6-72 个字符）"
-          :maxlength="72"
+          :placeholder="`请输入密码（${PASSWORD_HINT}）`"
+          :maxlength="PASSWORD_MAX_LENGTH"
         />
       </a-form-item>
       <a-form-item
         name="checkPassword"
         :rules="[
           { required: true, message: '请输入确认密码' },
-          { min: 6, max: 72, message: '确认密码长度需在 6 到 72 个字符之间' },
           { validator: validateConfirmPassword, trigger: 'blur' },
         ]"
       >
         <a-input-password
           v-model:value="formState.checkPassword"
           placeholder="请再次输入密码"
-          :maxlength="72"
+          :maxlength="PASSWORD_MAX_LENGTH"
         />
+      </a-form-item>
+      <a-form-item
+        name="captchaCode"
+        :rules="[
+          { required: true, message: '请输入验证码' },
+          { len: 4, message: '请输入 4 位验证码' },
+        ]"
+      >
+        <div class="captcha-row">
+          <a-input
+            v-model:value="formState.captchaCode"
+            placeholder="请输入右侧验证码"
+            :maxlength="4"
+            autocomplete="off"
+          />
+          <a-spin :spinning="captchaLoading">
+            <img
+              v-if="captchaImage"
+              class="captcha-image"
+              :src="captchaImage"
+              alt="图形验证码"
+              title="看不清？点击刷新"
+              @click="refreshCaptcha"
+            />
+            <button v-else type="button" class="captcha-refresh" @click="refreshCaptcha">
+              获取验证码
+            </button>
+          </a-spin>
+        </div>
       </a-form-item>
       <div class="tips">
         已有账号？
@@ -64,16 +86,28 @@
 
 <script setup lang="ts">
 import { userRegister } from '@/api/userController'
+import { getRegisterCaptcha } from '@/api/userExtra'
+import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, passwordStrengthRule } from '@/utils/password'
 import { message } from 'ant-design-vue'
-import { reactive, ref } from 'vue'
+import type { RuleObject } from 'ant-design-vue/es/form/interface'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 const formState = reactive<API.UserRegisterRequest>({
   userAccount: '',
   userPassword: '',
   checkPassword: '',
+  captchaCode: '',
 })
 const router = useRouter()
 const loading = ref(false)
+const captchaLoading = ref(false)
+const captchaId = ref('')
+const captchaImage = ref('')
+
+const passwordRules: RuleObject[] = [
+  { required: true, message: '请输入密码' },
+  { ...passwordStrengthRule, trigger: 'blur' },
+]
 
 // 与后端 DTO 的密码上限保持一致
 const validateConfirmPassword = (_rule: any, value: string) => {
@@ -84,10 +118,38 @@ const validateConfirmPassword = (_rule: any, value: string) => {
 }
 
 /**
+ * 获取图形验证码。后端一次性使用，任何失败提交后都需要重新获取。
+ */
+const refreshCaptcha = async () => {
+  captchaLoading.value = true
+  try {
+    const res = await getRegisterCaptcha()
+    if (res.data.code === 0 && res.data.data) {
+      captchaId.value = res.data.data.captchaId || ''
+      captchaImage.value = res.data.data.image || ''
+      formState.captchaCode = ''
+    } else {
+      message.error('验证码获取失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e: any) {
+    message.error('验证码获取失败：' + (e.message || '系统错误'))
+  } finally {
+    captchaLoading.value = false
+  }
+}
+
+onMounted(refreshCaptcha)
+
+/**
  * 提交表单
  * @param values
  */
 const handleSubmit = async (values: any) => {
+  if (!captchaId.value) {
+    message.error('验证码已失效，请点击图片刷新')
+    await refreshCaptcha()
+    return
+  }
   // 判断两次输入的密码是否一致
   if (formState.userPassword !== formState.checkPassword) {
     message.error('二次输入的密码不一致')
@@ -95,19 +157,22 @@ const handleSubmit = async (values: any) => {
   }
   loading.value = true
   try {
-    const res = await userRegister(values)
+    const res = await userRegister({ ...values, captchaId: captchaId.value })
     // 注册成功，跳转到登录页面
     if (res.data.code === 0 && res.data.data) {
-      message.success('注册成功')
+      message.success('注册成功，请登录')
       router.push({
         path: '/user/login',
         replace: true,
       })
     } else {
       message.error('注册失败：' + (res.data.message || '未知错误'))
+      // 验证码无论对错都已被消费，失败后立即换一张，避免用户重复提交同一验证码
+      await refreshCaptcha()
     }
   } catch (e: any) {
     message.error('注册失败：' + (e.message || '系统错误'))
+    await refreshCaptcha()
   } finally {
     loading.value = false
   }
@@ -129,6 +194,30 @@ const handleSubmit = async (values: any) => {
   text-align: center;
   color: #bbb;
   margin-bottom: 16px;
+}
+
+.captcha-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.captcha-image {
+  display: block;
+  width: 120px;
+  height: 32px;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid #d9d9d9;
+}
+
+.captcha-refresh {
+  height: 32px;
+  padding: 0 8px;
+  cursor: pointer;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fff;
 }
 
 .tips {

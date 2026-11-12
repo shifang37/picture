@@ -117,6 +117,61 @@ class RateLimitFilterTest {
     }
 
     @Test
+    @DisplayName("注册：同一 IP 10 分钟内超过 10 次返回 42900")
+    void register_blocksAfterIpLimit() throws Exception {
+        MockHttpServletResponse lastResponse = null;
+        MockFilterChain lastChain = null;
+        for (int i = 0; i < 11; i++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/user/register");
+            request.setContextPath("/api");
+            request.setRemoteAddr("10.0.0.3");
+            lastResponse = new MockHttpServletResponse();
+            lastChain = new MockFilterChain();
+            rateLimitFilter.doFilter(request, lastResponse, lastChain);
+        }
+
+        assertEquals(200, lastResponse.getStatus());
+        assertTrue(lastResponse.getContentAsString().contains("\"code\":42900"));
+        assertNull(lastChain.getRequest(), "超过限流后不应继续执行");
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.RATE_LIMITED)
+                .tag("type", "register").counter().count());
+    }
+
+    @Test
+    @DisplayName("验证码：同一 IP 每分钟超过 30 次返回 42900")
+    void captcha_blocksAfterIpLimit() throws Exception {
+        MockHttpServletResponse lastResponse = null;
+        MockFilterChain lastChain = null;
+        for (int i = 0; i < 31; i++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/user/captcha");
+            request.setContextPath("/api");
+            request.setRemoteAddr("10.0.0.4");
+            lastResponse = new MockHttpServletResponse();
+            lastChain = new MockFilterChain();
+            rateLimitFilter.doFilter(request, lastResponse, lastChain);
+        }
+
+        assertTrue(lastResponse.getContentAsString().contains("\"code\":42900"));
+        assertNull(lastChain.getRequest(), "超过限流后不应继续执行");
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.RATE_LIMITED)
+                .tag("type", "captcha").counter().count());
+    }
+
+    @Test
+    @DisplayName("注册：未达到 IP 限制的正常请求继续放行")
+    void register_passesUnderLimit() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/user/register");
+        request.setContextPath("/api");
+        request.setRemoteAddr("10.0.0.5");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        rateLimitFilter.doFilter(request, response, chain);
+
+        assertNotNull(chain.getRequest());
+    }
+
+    @Test
     @DisplayName("限流：未达到限制的正常请求继续放行")
     void normalRequest_passes() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/user/login");

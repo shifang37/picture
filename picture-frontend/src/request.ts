@@ -34,6 +34,13 @@ myAxios.interceptors.response.use(
     if (data.code === 40300) {
       message.error(data.message || '请求校验失败，请刷新页面后重试')
     }
+    // 首次登录未改密：直接调用业务接口时统一引导到改密页（正常页面跳转由路由守卫处理）
+    if (data.code === 40301) {
+      if (!window.location.pathname.includes('/user/changePassword')) {
+        message.warning(data.message || '请先修改初始密码')
+        window.location.href = '/user/changePassword'
+      }
+    }
     // 登录 / 上传等接口触发限流
     if (data.code === 42900) {
       message.warning(data.message || '请求过于频繁，请稍后再试')

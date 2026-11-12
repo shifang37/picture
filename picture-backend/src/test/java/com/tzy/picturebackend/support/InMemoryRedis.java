@@ -15,8 +15,8 @@ import static org.mockito.Mockito.when;
 /**
  * 用 Mockito 模拟 StringRedisTemplate 的最小内存实现。
  * <p>
- * 只覆盖单元测试用到的 get / set(带 TTL) / increment / delete，避免为了跑单测启动真实 Redis；
- * 真实 Redis 的行为由后续的集成测试覆盖。
+ * 只覆盖单元测试用到的 get / getAndDelete / set(带 TTL) / increment / delete，
+ * 避免为了跑单测启动真实 Redis；真实 Redis 的行为由后续的集成测试覆盖。
  */
 public final class InMemoryRedis {
 
@@ -30,6 +30,12 @@ public final class InMemoryRedis {
         when(template.opsForValue()).thenReturn(ops);
 
         when(ops.get(anyString())).thenAnswer(invocation -> store.get(invocation.getArgument(0)));
+
+        // 验证码校验依赖 GETDEL：读取并删除必须一次完成
+        when(ops.getAndDelete(anyString())).thenAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            return store.remove(key);
+        });
 
         when(ops.increment(anyString())).thenAnswer(invocation -> {
             String key = invocation.getArgument(0);

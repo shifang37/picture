@@ -23,6 +23,11 @@ router.beforeEach(async (to) => {
       return `/user/login?redirect=${encodeURIComponent(to.fullPath)}`
     }
   }
+  // 首次登录 / 管理员重置密码后：未改密前只能停留在改密页
+  if (loginUser?.id && loginUser.passwordChangeRequired && to.path !== '/user/changePassword') {
+    message.warning('首次登录请先修改初始密码')
+    return '/user/changePassword'
+  }
   if (to.meta.requiresLogin && !loginUser?.id) {
     message.warning('请先登录')
     return `/user/login?redirect=${encodeURIComponent(to.fullPath)}`

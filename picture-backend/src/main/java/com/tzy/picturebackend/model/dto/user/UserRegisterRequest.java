@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.model.dto.user;
 
+import com.tzy.picturebackend.annotation.StrongPassword;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -22,13 +23,26 @@ public class UserRegisterRequest implements Serializable {
      * 密码
      */
     @NotBlank(message = "密码不能为空")
-    @Size(min = 6, max = 72, message = "密码长度需在 6 到 72 个字符之间")
+    @StrongPassword
     private String userPassword;
 
     /**
      * 确认密码
      */
     @NotBlank(message = "确认密码不能为空")
-    @Size(min = 6, max = 72, message = "确认密码长度需在 6 到 72 个字符之间")
     private String checkPassword;
+
+    /**
+     * 图形验证码 id（由 /user/captcha 下发）
+     */
+    @NotBlank(message = "验证码不能为空")
+    @Size(max = 64, message = "验证码标识不合法")
+    private String captchaId;
+
+    /**
+     * 图形验证码
+     */
+    @NotBlank(message = "验证码不能为空")
+    @Size(max = 16, message = "验证码不合法")
+    private String captchaCode;
 }

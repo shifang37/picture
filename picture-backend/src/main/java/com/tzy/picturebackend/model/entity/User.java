@@ -53,6 +53,11 @@ public class User {
     private String userRole;
 
     /**
+     * 是否必须修改初始密码：true-首次登录需改密
+     */
+    private Boolean passwordChangeRequired;
+
+    /**
      * 编辑时间
      */
     private Date editTime;

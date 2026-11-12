@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.integration;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.manager.FileManager;
@@ -253,6 +254,86 @@ class PictureApplicationIT {
                 .andExpect(jsonPath("$.code").value(0));
     }
 
+    @Test
+    @DisplayName("注册：验证码一次性校验，新账号首次登录必须改密后才能访问业务接口")
+    void registerRequiresCaptchaAndForcesPasswordChange() throws Exception {
+        String csrf = csrfToken();
+        String account = "it_force_" + UUID.randomUUID().toString().substring(0, 8);
+
+        // 1. 获取图形验证码，答案只存在 Redis 中，测试直接读取以完成注册
+        MvcResult captchaResult = mockMvc.perform(get("/user/captcha"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andReturn();
+        JsonNode captcha = objectMapper.readTree(captchaResult.getResponse().getContentAsString())
+                .path("data");
+        String captchaId = captcha.path("captchaId").asText();
+        String captchaCode = redisTemplate.opsForValue().get("picture:captcha:" + captchaId);
+        assertNotNull(captchaCode, "验证码答案应写入 Redis");
+
+        // 2. 带验证码注册成功
+        mockMvc.perform(post("/user/register")
+                        .cookie(new Cookie("XSRF-TOKEN", csrf))
+                        .header("X-XSRF-TOKEN", csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "userAccount", account,
+                                "userPassword", PASSWORD,
+                                "checkPassword", PASSWORD,
+                                "captchaId", captchaId,
+                                "captchaCode", captchaCode))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        // 3. 登录返回强制改密标记
+        redisTemplate.delete("picture:ratelimit:login:ip:127.0.0.1");
+        MvcResult loginResult = mockMvc.perform(post("/user/login")
+                        .cookie(new Cookie("XSRF-TOKEN", csrf))
+                        .header("X-XSRF-TOKEN", csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("userAccount", account, "userPassword", PASSWORD))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.passwordChangeRequired").value(true))
+                .andReturn();
+        Cookie session = loginResult.getResponse().getCookie("SESSION");
+        assertNotNull(session, "登录应返回 SESSION cookie");
+        Cookie xsrf = new Cookie("XSRF-TOKEN", csrf);
+
+        // 4. 未改密时业务接口被拦截
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .cookie(session, xsrf)
+                        .header("X-XSRF-TOKEN", csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40301));
+
+        // 5. 修改密码后解除限制
+        mockMvc.perform(post("/user/update/password")
+                        .cookie(session, xsrf)
+                        .header("X-XSRF-TOKEN", csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                Map.of("oldPassword", PASSWORD, "newPassword", NEW_PASSWORD))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .cookie(session, xsrf)
+                        .header("X-XSRF-TOKEN", csrf)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        mockMvc.perform(get("/user/get/login").cookie(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.passwordChangeRequired").value(false));
+    }
+
     // ==================== Redis 限流 ====================
 
     @Test
@@ -394,6 +475,8 @@ class PictureApplicationIT {
     private User createUser(String suffix) {
         String account = "it_" + suffix + "_" + UUID.randomUUID().toString().substring(0, 8);
         long id = userService.userRegister(account, PASSWORD, PASSWORD);
+        // 业务测试的账号直接清除首次改密标记，聚焦被测流程本身；强制改密由上面的注册用例覆盖
+        jdbcTemplate.update("update user set passwordChangeRequired = 0 where id = ?", id);
         User user = userService.getById(id);
         assertNotNull(user);
         return user;
@@ -436,6 +519,8 @@ class PictureApplicationIT {
     }
 
     private Cookie login(String account, String password, String csrf) throws Exception {
+        // 同一个 IP 的登录限流计数会在测试之间累积，登录前清理避免测试顺序造成假失败
+        redisTemplate.delete("picture:ratelimit:login:ip:127.0.0.1");
         MvcResult result = mockMvc.perform(post("/user/login")
                         .cookie(new Cookie("XSRF-TOKEN", csrf))
                         .header("X-XSRF-TOKEN", csrf)

@@ -38,6 +38,11 @@ public class LoginUserVO implements Serializable {
     private String userRole;
 
     /**
+     * 是否必须修改初始密码：前端据此跳转到改密页
+     */
+    private Boolean passwordChangeRequired;
+
+    /**
      * 创建时间
      */
     private Date createTime;

@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_ID;
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_VERSION;
+import static com.tzy.picturebackend.constant.UserConstant.USER_PASSWORD_CHANGE_REQUIRED;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -101,18 +102,34 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("注册：密码少于 6 位应拒绝")
+    @DisplayName("注册：密码少于 8 位应拒绝")
     void userRegister_rejectsShortPassword() {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> userService.userRegister("tzyy", "123", "123"));
-        assertEquals("密码过短", e.getMessage());
+        assertEquals("密码长度不能少于 8 位", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("注册：密码必须同时包含字母和数字")
+    void userRegister_rejectsWeakPassword() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userRegister("tzyy", "abcdefgh", "abcdefgh"));
+        assertEquals("密码必须同时包含字母和数字", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("注册：密码不能包含账号")
+    void userRegister_rejectsPasswordContainingAccount() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.userRegister("tzyy", "tzyy1234", "tzyy1234"));
+        assertEquals("密码不能包含账号", e.getMessage());
     }
 
     @Test
     @DisplayName("注册：两次密码不一致应拒绝")
     void userRegister_rejectsMismatchedPassword() {
         BusinessException e = assertThrows(BusinessException.class,
-                () -> userService.userRegister("tzyy", "123456", "654321"));
+                () -> userService.userRegister("tzyy", "Abcdef12", "Abcdef34"));
         assertEquals("密码不一致", e.getMessage());
     }
 
@@ -122,12 +139,12 @@ class UserServiceImplTest {
         when(userMapper.selectCount(any())).thenReturn(1L);
 
         BusinessException e = assertThrows(BusinessException.class,
-                () -> userService.userRegister("tzyy", "123456", "123456"));
+                () -> userService.userRegister("tzyy", "Abcdef12", "Abcdef12"));
         assertEquals("账号重复", e.getMessage());
     }
 
     @Test
-    @DisplayName("注册：入库密码应为 BCrypt 密文，角色为 user")
+    @DisplayName("注册：入库密码应为 BCrypt 密文，角色为 user，并要求首次登录改密")
     void userRegister_storesBcryptPassword() {
         when(userMapper.selectCount(any())).thenReturn(0L);
         when(userMapper.insert(any(User.class))).thenAnswer(invocation -> {
@@ -136,14 +153,15 @@ class UserServiceImplTest {
             return 1;
         });
 
-        long id = userService.userRegister("tzyy", "123456", "123456");
+        long id = userService.userRegister("tzyy", "Abcdef12", "Abcdef12");
         assertEquals(100L, id);
 
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userMapper).insert(captor.capture());
         User saved = captor.getValue();
-        assertTrue(encoder.matches("123456", saved.getUserPassword()), "入库密码应能用明文校验通过");
+        assertTrue(encoder.matches("Abcdef12", saved.getUserPassword()), "入库密码应能用明文校验通过");
         assertEquals("user", saved.getUserRole());
+        assertEquals(Boolean.TRUE, saved.getPasswordChangeRequired(), "新注册用户首次登录必须改密");
     }
 
     // ==================== 登录 ====================
@@ -194,8 +212,25 @@ class UserServiceImplTest {
         assertNotNull(vo);
         assertNotNull(request.getSession().getAttribute(USER_LOGIN_ID), "登录后应只写入用户 id");
         assertNotNull(request.getSession().getAttribute(USER_LOGIN_VERSION), "登录后应写入会话版本");
+        assertEquals(Boolean.FALSE, request.getSession().getAttribute(USER_PASSWORD_CHANGE_REQUIRED));
         // 已是 BCrypt，不应触发升级
         verify(userMapper, never()).updateById(any(User.class));
+    }
+
+    @Test
+    @DisplayName("登录：临时密码账号会写入强制改密标记，并在返回信息中标记")
+    void userLogin_marksPasswordChangeRequired() {
+        User user = userWithPassword(encoder.encode("Abcdef12"));
+        user.setPasswordChangeRequired(true);
+        when(userMapper.selectOne(any())).thenReturn(user);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+
+        LoginUserVO vo = userService.userLogin("tzyy", "Abcdef12", request);
+
+        assertEquals(Boolean.TRUE, vo.getPasswordChangeRequired());
+        assertEquals(Boolean.TRUE,
+                request.getSession().getAttribute(USER_PASSWORD_CHANGE_REQUIRED),
+                "首次登录应让后续请求被强制改密过滤器拦截");
     }
 
     @Test
@@ -273,18 +308,18 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("改密：新密码少于 6 位应拒绝")
+    @DisplayName("改密：新密码少于 8 位应拒绝")
     void updatePassword_rejectsShortNewPassword() {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> userService.updatePassword(userWithPassword("x"), "123456", "123"));
-        assertEquals("新密码不能少于 6 位", e.getMessage());
+        assertEquals("密码长度不能少于 8 位", e.getMessage());
     }
 
     @Test
     @DisplayName("改密：新旧密码相同应拒绝")
     void updatePassword_rejectsSamePassword() {
         BusinessException e = assertThrows(BusinessException.class,
-                () -> userService.updatePassword(userWithPassword("x"), "123456", "123456"));
+                () -> userService.updatePassword(userWithPassword("x"), "Abcdef12", "Abcdef12"));
         assertEquals("新密码不能与原密码相同", e.getMessage());
     }
 
@@ -311,6 +346,8 @@ class UserServiceImplTest {
         ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
         verify(userMapper).updateById(captor.capture());
         assertTrue(encoder.matches("newpass1", captor.getValue().getUserPassword()));
+        assertEquals(Boolean.FALSE, captor.getValue().getPasswordChangeRequired(),
+                "用户自行改密后应清除强制改密标记");
         assertTrue(sessionInvalidationManager.isInvalidated(1L, 0L),
                 "修改密码后旧会话版本应失效");
     }
@@ -331,8 +368,20 @@ class UserServiceImplTest {
         assertEquals(Long.valueOf(1L), updated.getId());
         assertTrue(updated.getUserPassword().startsWith("$2a$"));
         assertTrue(encoder.matches("newpass1", updated.getUserPassword()));
+        assertEquals(Boolean.TRUE, updated.getPasswordChangeRequired(),
+                "管理员重置的临时密码应在首次登录后强制修改");
         assertTrue(sessionInvalidationManager.isInvalidated(1L, 0L),
                 "重置密码后目标用户旧会话应失效");
+    }
+
+    @Test
+    @DisplayName("重置密码：新密码包含账号应拒绝")
+    void resetPassword_rejectsPasswordContainingAccount() {
+        when(userMapper.selectById(1L)).thenReturn(userWithPassword(encoder.encode("123456")));
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.resetPassword(1L, "tzyy1234"));
+        assertEquals("密码不能包含账号", e.getMessage());
     }
 
     @Test
@@ -346,19 +395,19 @@ class UserServiceImplTest {
     }
 
     @Test
-    @DisplayName("重置密码：新密码少于 6 位应拒绝")
+    @DisplayName("重置密码：新密码少于 8 位应拒绝")
     void resetPassword_rejectsShortPassword() {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> userService.resetPassword(1L, "123"));
-        assertEquals("新密码长度需在 6 到 72 个字符之间", e.getMessage());
+        assertEquals("密码长度不能少于 8 位", e.getMessage());
     }
 
     @Test
-    @DisplayName("重置密码：新密码超过 72 位应拒绝")
+    @DisplayName("重置密码：新密码超过 64 位应拒绝")
     void resetPassword_rejectsTooLongPassword() {
         BusinessException e = assertThrows(BusinessException.class,
-                () -> userService.resetPassword(1L, "p".repeat(73)));
-        assertEquals("新密码长度需在 6 到 72 个字符之间", e.getMessage());
+                () -> userService.resetPassword(1L, "p".repeat(65)));
+        assertEquals("密码长度不能超过 64 位", e.getMessage());
     }
 
     @Test

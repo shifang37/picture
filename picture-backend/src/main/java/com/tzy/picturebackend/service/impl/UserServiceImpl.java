@@ -17,6 +17,7 @@ import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.mapper.UserMapper;
+import com.tzy.picturebackend.validation.PasswordPolicy;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -35,6 +36,7 @@ import java.util.stream.Collectors;
 
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_ID;
 import static com.tzy.picturebackend.constant.UserConstant.USER_LOGIN_VERSION;
+import static com.tzy.picturebackend.constant.UserConstant.USER_PASSWORD_CHANGE_REQUIRED;
 
 /**
 * @author shifang37
@@ -80,9 +82,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if(userAccount.length()<4){
             throw new BusinessException(ErrorCode.PARAMS_ERROR,"账号过短");
         }
-        if(userPassword.length()<6||checkPassword.length()<6){
-            throw new BusinessException(ErrorCode.PARAMS_ERROR,"密码过短");
-        }
+        // 密码强度与账号关系统一走 PasswordPolicy，接口层 @StrongPassword 只是提前拦截
+        PasswordPolicy.validate(userPassword, userAccount);
         if(!checkPassword.equals(userPassword)){
             throw new BusinessException(ErrorCode.PARAMS_ERROR,"密码不一致");
         }
@@ -95,12 +96,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         }
         //3.加密
         String encryptPassword = getEncryptPassword(userPassword);
-        //4.插入数据
+        //4.插入数据：新注册账号首次登录必须修改密码
         User user = new User();
         user.setUserAccount(userAccount);
         user.setUserPassword(encryptPassword);
         user.setUserName("无名");
         user.setUserRole(UserRoleEnum.USER.getValue());
+        user.setPasswordChangeRequired(true);
         boolean saveResult = this.save(user);
         if(!saveResult){
             throw new BusinessException(ErrorCode.SYSTEM_ERROR,"注册失败，数据库错误");
@@ -173,6 +175,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         request.changeSessionId();
         session.setAttribute(USER_LOGIN_ID, user.getId());
         session.setAttribute(USER_LOGIN_VERSION, sessionInvalidationManager.currentVersion());
+        session.setAttribute(USER_PASSWORD_CHANGE_REQUIRED,
+                Boolean.TRUE.equals(user.getPasswordChangeRequired()));
         return this.getLoginUserVO(user);
     }
 
@@ -242,11 +246,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     }
 
     /**
-     * 清除 Session 中的登录态与登录版本
+     * 清除 Session 中的登录态、登录版本与强制改密标记
      */
     private void clearLoginState(HttpSession session) {
         session.removeAttribute(USER_LOGIN_ID);
         session.removeAttribute(USER_LOGIN_VERSION);
+        session.removeAttribute(USER_PASSWORD_CHANGE_REQUIRED);
     }
 
     @Override
@@ -257,9 +262,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (StrUtil.hasBlank(oldPassword, newPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
         }
-        if (newPassword.length() < 6) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码不能少于 6 位");
-        }
+        PasswordPolicy.validate(newPassword, loginUser.getUserAccount());
         if (oldPassword.equals(newPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码不能与原密码相同");
         }
@@ -273,6 +276,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         User update = new User();
         update.setId(user.getId());
         update.setUserPassword(getEncryptPassword(newPassword));
+        // 用户已自行改密，清除首次登录强制改密标记
+        update.setPasswordChangeRequired(false);
         boolean result = this.updateById(update);
         if (result) {
             // 让该用户在其他设备上的旧会话失效；当前会话由 Controller 刷新版本
@@ -289,16 +294,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (StrUtil.isBlank(newPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码不能为空");
         }
-        if (newPassword.length() < 6 || newPassword.length() > 72) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "新密码长度需在 6 到 72 个字符之间");
-        }
+        // 先校验强度，再查用户校验密码与账号的关系，避免无意义的查库
+        PasswordPolicy.validateFormat(newPassword);
         User user = this.getById(userId);
         if (user == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         }
+        PasswordPolicy.validateAgainstAccount(newPassword, user.getUserAccount());
         User update = new User();
         update.setId(userId);
         update.setUserPassword(getEncryptPassword(newPassword));
+        // 管理员重置的密码属于临时密码，用户首次登录必须修改
+        update.setPasswordChangeRequired(true);
         boolean result = this.updateById(update);
         if (!result) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "重置密码失败");

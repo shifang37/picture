@@ -77,7 +77,8 @@
         <a-form-item label="新密码" name="newPassword">
           <a-input-password
             v-model:value="passwordForm.newPassword"
-            placeholder="请输入新密码（6-72 位）"
+            :placeholder="`请输入新密码（${PASSWORD_HINT}）`"
+            :maxlength="PASSWORD_MAX_LENGTH"
             autocomplete="new-password"
           />
         </a-form-item>
@@ -110,6 +111,7 @@ import { message, type FormProps } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { updatePassword, updateProfile } from '@/api/userExtra'
+import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, passwordStrengthRule } from '@/utils/password'
 
 const loginUserStore = useLoginUserStore()
 
@@ -147,7 +149,7 @@ const passwordRules: FormProps['rules'] = {
   oldPassword: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
   newPassword: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, max: 72, message: '新密码长度需在 6 到 72 个字符之间', trigger: 'blur' },
+    { ...passwordStrengthRule, trigger: 'blur' },
   ],
   confirmPassword: [
     { required: true, message: '请再次输入新密码', trigger: 'blur' },

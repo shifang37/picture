@@ -12,6 +12,11 @@ public interface UserConstant {
      */
     String USER_LOGIN_VERSION = "user_login_version";
 
+    /**
+     * 首次登录强制改密标记：Session 中保存 Boolean，为 true 时只允许改密、登出和读取登录态
+     */
+    String USER_PASSWORD_CHANGE_REQUIRED = "user_password_change_required";
+
     //  region 权限
 
     /**

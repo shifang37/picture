@@ -4,7 +4,7 @@ import request from '@/request'
 
 /** 此处后端没有提供注释 POST /user/add */
 export async function addUser(body: API.UserAddRequest, options?: { [key: string]: any }) {
-  return request<API.BaseResponseLong>('/user/add', {
+  return request<API.BaseResponseUserAddResult>('/user/add', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

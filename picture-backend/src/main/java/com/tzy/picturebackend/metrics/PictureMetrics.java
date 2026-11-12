@@ -36,7 +36,7 @@ public class PictureMetrics {
     public static final String API_ERRORS = "picture.api.errors";
 
     /**
-     * 限流计数器（type=login/upload）
+     * 限流计数器（type=login/register/captcha/upload）
      */
     public static final String RATE_LIMITED = "picture.rate.limited";
 
@@ -88,7 +88,7 @@ public class PictureMetrics {
     /**
      * 记录一次被限流的请求
      *
-     * @param type login / upload
+     * @param type login / register / captcha / upload
      */
     public void rateLimited(String type) {
         Counter.builder(RATE_LIMITED)
