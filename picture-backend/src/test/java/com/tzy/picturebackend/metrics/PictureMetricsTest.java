@@ -99,6 +99,30 @@ class PictureMetricsTest {
     }
 
     @Test
+    @DisplayName("M4 指标：EXIF 处理、秒传命中与配额拒绝都能导出")
+    void m4Metrics_exportWithTags() {
+        pictureMetrics.exif("rotated");
+        pictureMetrics.exif("stripped");
+        pictureMetrics.uploadDuplicate();
+        pictureMetrics.quotaRejected("storage");
+        pictureMetrics.quotaRejected("count");
+
+        String scrape = registry.scrape();
+        assertTrue(scrape.contains("picture_exif_total"));
+        assertTrue(scrape.contains("picture_upload_duplicate_total"));
+        assertTrue(scrape.contains("picture_quota_rejected_total"));
+        assertEquals(1.0, registry.get(PictureMetrics.EXIF)
+                .tag("action", "rotated").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.EXIF)
+                .tag("action", "stripped").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.QUOTA_REJECTED)
+                .tag("type", "storage").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.QUOTA_REJECTED)
+                .tag("type", "count").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.UPLOAD_DUPLICATE).counter().count());
+    }
+
+    @Test
     @DisplayName("Caffeine 缓存：开启 recordStats 后可导出命中次数")
     void caffeineCache_exportsStats() {
         Cache<String, String> cache = Caffeine.newBuilder().recordStats().build();

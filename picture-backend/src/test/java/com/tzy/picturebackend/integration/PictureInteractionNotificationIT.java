@@ -1,6 +1,7 @@
 package com.tzy.picturebackend.integration;
 
 import com.tzy.picturebackend.manager.FileManager;
+import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.model.dto.album.AlbumAddRequest;
 import com.tzy.picturebackend.model.dto.album.AlbumPictureRequest;
 import com.tzy.picturebackend.model.dto.interaction.InteractionRequest;
@@ -13,10 +14,12 @@ import com.tzy.picturebackend.model.vo.AlbumVO;
 import com.tzy.picturebackend.model.vo.InteractionStatusVO;
 import com.tzy.picturebackend.model.vo.NotificationVO;
 import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
+import com.tzy.picturebackend.model.vo.UserQuotaVO;
 import com.tzy.picturebackend.service.AlbumService;
 import com.tzy.picturebackend.service.NotificationService;
 import com.tzy.picturebackend.service.PictureInteractionService;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.UserQuotaService;
 import com.tzy.picturebackend.service.UserService;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +49,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -89,6 +93,12 @@ class PictureInteractionNotificationIT {
     private AlbumService albumService;
 
     @Autowired
+    private UserQuotaService userQuotaService;
+
+    @Autowired
+    private PictureMapper pictureMapper;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     /**
@@ -130,6 +140,118 @@ class PictureInteractionNotificationIT {
                 WHERE table_schema = DATABASE() AND table_name IN ('album', 'album_picture')
                 """, Integer.class);
         assertEquals(2, albumTables);
+
+        // M4 / F10：用户配额列与图片哈希列
+        Integer quotaColumns = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = 'user'
+                  AND column_name IN ('storageQuota', 'storageUsed', 'pictureQuota', 'pictureUsed')
+                """, Integer.class);
+        assertEquals(4, quotaColumns);
+        Integer hashColumn = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = 'picture' AND column_name = 'fileHash'
+                """, Integer.class);
+        assertEquals(1, hashColumn);
+        Integer hashIndex = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.statistics
+                WHERE table_schema = DATABASE() AND table_name = 'picture' AND index_name = 'idx_user_hash'
+                """, Integer.class);
+        assertTrue(hashIndex > 0);
+    }
+
+    @Test
+    @DisplayName("配额：V13 的列默认值生效，新用户拿到 1GB / 1000 张")
+    void quotaDefaultsAppliedByMigration() {
+        UserQuotaVO quota = userQuotaService.getQuota(owner.getId());
+
+        assertEquals(Long.valueOf(1073741824L), quota.getStorageQuota());
+        assertEquals(Integer.valueOf(1000), quota.getPictureQuota());
+        assertEquals(Long.valueOf(0L), quota.getStorageUsed());
+        assertEquals(Integer.valueOf(0), quota.getPictureUsed());
+        assertEquals(Boolean.FALSE, quota.getExempt());
+    }
+
+    @Test
+    @DisplayName("配额：10 线程同时预留，成功数不超过上限且用量不会被加超")
+    void quotaReserve_isAtomicUnderConcurrency() throws Exception {
+        jdbcTemplate.update("""
+                UPDATE user SET storageQuota = 5, pictureQuota = 3,
+                                storageUsed = 0, pictureUsed = 0
+                WHERE id = ?
+                """, owner.getId());
+        User target = userService.getById(owner.getId());
+
+        int threads = 10;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Boolean>> futures = new ArrayList<>(threads);
+        try {
+            for (int i = 0; i < threads; i++) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return userQuotaService.reserve(target, 1, 1);
+                }));
+            }
+            start.countDown();
+            int success = 0;
+            for (Future<Boolean> future : futures) {
+                if (Boolean.TRUE.equals(future.get(30, TimeUnit.SECONDS))) {
+                    success++;
+                }
+            }
+            assertEquals(3, success, "只有 3 次预留能成功");
+        } finally {
+            pool.shutdownNow();
+        }
+
+        User after = userService.getById(owner.getId());
+        assertEquals(3, after.getPictureUsed());
+        assertEquals(3L, after.getStorageUsed());
+    }
+
+    @Test
+    @DisplayName("配额：软删除释放额度，恢复重新占用；额度不足时拒绝恢复")
+    void quotaReleasedOnDeleteAndRecheckedOnRestore() {
+        userQuotaService.reserve(userService.getById(owner.getId()), 1024L, 1);
+        assertEquals(1024L, userService.getById(owner.getId()).getStorageUsed());
+
+        pictureService.deletePicture(picture.getId(), owner);
+        User afterDelete = userService.getById(owner.getId());
+        assertEquals(0L, afterDelete.getStorageUsed(), "软删除必须释放额度");
+        assertEquals(0, afterDelete.getPictureUsed());
+
+        // 配额被调小后不允许恢复，避免恢复出超额数据
+        jdbcTemplate.update("UPDATE user SET storageQuota = 512 WHERE id = ?", owner.getId());
+        assertThrows(com.tzy.picturebackend.exception.BusinessException.class,
+                () -> pictureService.restorePicture(picture.getId()));
+
+        jdbcTemplate.update("UPDATE user SET storageQuota = 8192 WHERE id = ?", owner.getId());
+        assertTrue(pictureService.restorePicture(picture.getId()));
+        User afterRestore = userService.getById(owner.getId());
+        assertEquals(1024L, afterRestore.getStorageUsed());
+        assertEquals(1, afterRestore.getPictureUsed());
+    }
+
+    @Test
+    @DisplayName("秒传：同用户同哈希命中，排除自身与已删除图片")
+    void dedupe_matchesSameUserHash() {
+        String hash = "b".repeat(64);
+        Picture existing = createPicture(owner);
+        existing.setFileHash(hash);
+        assertTrue(pictureService.updateById(existing));
+
+        Picture found = pictureMapper.selectByUserAndHash(owner.getId(), hash, null);
+        assertNotNull(found);
+        assertEquals(existing.getId(), found.getId());
+        assertNull(pictureMapper.selectByUserAndHash(owner.getId(), hash, existing.getId()),
+                "重传时必须排除自身");
+        assertNull(pictureMapper.selectByUserAndHash(owner.getId(), "c".repeat(64), null),
+                "不同哈希不应命中");
+
+        pictureService.deletePicture(existing.getId(), owner);
+        assertNull(pictureMapper.selectByUserAndHash(owner.getId(), hash, null),
+                "已删除图片不参与秒传");
     }
 
     @Test

@@ -19,6 +19,7 @@ import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.AlbumService;
 import com.tzy.picturebackend.service.NotificationService;
+import com.tzy.picturebackend.service.UserQuotaService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.support.InMemoryRedis;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +71,8 @@ class UserControllerTest {
 
     private AlbumService albumService;
 
+    private UserQuotaService userQuotaService;
+
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
@@ -79,6 +82,7 @@ class UserControllerTest {
         notificationService = mock(NotificationService.class);
         notificationEventPublisher = mock(NotificationEventPublisher.class);
         albumService = mock(AlbumService.class);
+        userQuotaService = mock(UserQuotaService.class);
         UserController userController = new UserController();
         ReflectionTestUtils.setField(userController, "userService", userService);
         ReflectionTestUtils.setField(userController, "pictureService", pictureService);
@@ -87,8 +91,7 @@ class UserControllerTest {
         ReflectionTestUtils.setField(userController, "notificationService", notificationService);
         ReflectionTestUtils.setField(userController, "notificationEventPublisher", notificationEventPublisher);
         ReflectionTestUtils.setField(userController, "albumService", albumService);
-        ReflectionTestUtils.setField(userController, "userQuotaService",
-                org.mockito.Mockito.mock(com.tzy.picturebackend.service.UserQuotaService.class));
+        ReflectionTestUtils.setField(userController, "userQuotaService", userQuotaService);
         ReflectionTestUtils.setField(userController, "sessionInvalidationManager",
                 new SessionInvalidationManager(InMemoryRedis.createTemplate(new ConcurrentHashMap<>())));
 
@@ -220,6 +223,8 @@ class UserControllerTest {
         assertEquals("admin", saved.getUserRole());
         assertEquals("encrypted", saved.getUserPassword());
         assertEquals(Boolean.TRUE, saved.getPasswordChangeRequired());
+        // 新增用户同样按 app.quota.* 写入默认配额
+        verify(userQuotaService).applyDefaultQuota(saved);
     }
 
     // ==================== 注册 ====================
