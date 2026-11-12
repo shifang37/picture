@@ -135,6 +135,13 @@ app:
     # 搜索后端：mysql（默认，沿用原有模糊查询）| es（Elasticsearch 全文检索）
     # 设为 es 后公开列表由索引召回 id，Elasticsearch 异常时自动回落到 MySQL
     engine: ${SEARCH_ENGINE:mysql}
+  share:
+    # 爬虫访问 /picture/{id} 时返回的 OG 卡片：frontend-base-url 必须是用户实际访问的站点地址
+    frontend-base-url: ${SHARE_FRONTEND_BASE_URL:http://localhost:5173}
+    # og:image 缩略图长边，1200 是微信 / Twitter 大图卡片推荐宽度
+    og-image-width: ${SHARE_OG_IMAGE_WIDTH:1200}
+    # 分享页缓存秒数：名称/简介被修改后最长延迟这么久生效
+    cache-seconds: ${SHARE_CACHE_SECONDS:300}
   recycle:
     # 删除后先进入回收站，保留期结束才物理删除图片与 COS 对象
     retention-days: ${RECYCLE_RETENTION_DAYS:7}

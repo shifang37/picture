@@ -86,6 +86,11 @@ public class PictureMetrics {
      */
     public static final String SEARCH_META = "picture.search.meta";
 
+    /**
+     * 分享卡片渲染计数（result=rendered/not_found）
+     */
+    public static final String SHARE = "picture.share";
+
     private final MeterRegistry registry;
 
     /**
@@ -238,6 +243,19 @@ public class PictureMetrics {
         Counter.builder(SEARCH_META)
                 .description("搜索联想与热词请求次数")
                 .tag("type", type == null ? "unknown" : type)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次分享卡片渲染：{@code not_found} 突增通常意味着有人批量探测图片 id
+     *
+     * @param result rendered / not_found
+     */
+    public void share(String result) {
+        Counter.builder(SHARE)
+                .description("图片分享卡片渲染次数")
+                .tag("result", result == null ? "unknown" : result)
                 .register(registry)
                 .increment();
     }
