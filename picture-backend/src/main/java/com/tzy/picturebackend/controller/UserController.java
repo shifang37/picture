@@ -28,6 +28,7 @@ import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserAddResult;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.AlbumService;
 import com.tzy.picturebackend.service.NotificationService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.validation.PasswordPolicy;
@@ -64,6 +65,9 @@ public class UserController {
 
     @Resource
     private NotificationEventPublisher notificationEventPublisher;
+
+    @Resource
+    private AlbumService albumService;
 
     /**
      * 获取注册用图形验证码。
@@ -248,6 +252,8 @@ public class UserController {
         sessionInvalidationManager.forget(deleteRequest.getId());
         // 作者主页缓存必须立即失效，否则 TTL 内仍会返回一个已删除的用户
         userService.evictPublicUserProfile(deleteRequest.getId());
+        // 用户已删除，其专辑不会再有人管理，连同关系一并清理；图片已在上面被拒绝删除
+        albumService.deleteByUserId(deleteRequest.getId());
         // 用户已删除，其通知不会再有人查看，直接清理
         notificationService.deleteByUserId(deleteRequest.getId());
         return ResultUtils.success(true);

@@ -17,6 +17,7 @@ import com.tzy.picturebackend.model.vo.CaptchaVO;
 import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.AlbumService;
 import com.tzy.picturebackend.service.NotificationService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.support.InMemoryRedis;
@@ -67,6 +68,8 @@ class UserControllerTest {
 
     private NotificationEventPublisher notificationEventPublisher;
 
+    private AlbumService albumService;
+
     @BeforeEach
     void setUp() {
         userService = mock(UserService.class);
@@ -75,6 +78,7 @@ class UserControllerTest {
         captchaManager = mock(CaptchaManager.class);
         notificationService = mock(NotificationService.class);
         notificationEventPublisher = mock(NotificationEventPublisher.class);
+        albumService = mock(AlbumService.class);
         UserController userController = new UserController();
         ReflectionTestUtils.setField(userController, "userService", userService);
         ReflectionTestUtils.setField(userController, "pictureService", pictureService);
@@ -82,6 +86,7 @@ class UserControllerTest {
         ReflectionTestUtils.setField(userController, "captchaManager", captchaManager);
         ReflectionTestUtils.setField(userController, "notificationService", notificationService);
         ReflectionTestUtils.setField(userController, "notificationEventPublisher", notificationEventPublisher);
+        ReflectionTestUtils.setField(userController, "albumService", albumService);
         ReflectionTestUtils.setField(userController, "sessionInvalidationManager",
                 new SessionInvalidationManager(InMemoryRedis.createTemplate(new ConcurrentHashMap<>())));
 

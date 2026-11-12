@@ -227,6 +227,181 @@ test('我的图片：批量删除选中图片并刷新列表', async ({ page }) 
   expect(batchDeleteBody?.ids).toEqual(['1', '2'])
 })
 
+test('我的专辑：创建专辑后出现在列表中', async ({ page }) => {
+  let albums = [] as Record<string, unknown>[]
+  let createBody: Record<string, unknown> | undefined
+
+  await mockImages(page)
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: loginUser })
+      return
+    }
+    if (url.includes('/album/my/page')) {
+      await route.fulfill({
+        json: { code: 0, data: { records: albums, total: albums.length }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/album/add')) {
+      createBody = route.request().postDataJSON() as Record<string, unknown>
+      albums = [
+        {
+          id: '10',
+          userId: '100',
+          name: '我的风景',
+          description: '旅行随手拍',
+          pictureCount: '0',
+          publicCount: '0',
+          isPublic: 1,
+        },
+      ]
+      await route.fulfill({ json: { code: 0, data: albums[0], message: 'ok' } })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/my/albums')
+  await expect(page.getByTestId('albums-empty')).toBeVisible()
+
+  await page.getByRole('button', { name: '创建专辑' }).first().click()
+  await page.getByTestId('album-name-input').fill('我的风景')
+  await page.getByPlaceholder('简单介绍一下这个专辑').fill('旅行随手拍')
+  await page.locator('.ant-modal .ant-switch').click()
+  await page.getByRole('button', { name: /保\s*存/ }).click()
+
+  await expect(page.getByText('专辑已创建')).toBeVisible()
+  await expect(page.getByTestId('album-card')).toContainText('我的风景')
+  await expect(page.getByTestId('album-card')).toContainText('公开 0')
+  expect(createBody?.name).toBe('我的风景')
+  expect(createBody?.isPublic).toBe(true)
+})
+
+test('专辑详情：管理模式可移除作品', async ({ page }) => {
+  let removeBody: Record<string, unknown> | undefined
+
+  await mockImages(page)
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: loginUser })
+      return
+    }
+    if (url.includes('/album/get')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: {
+            id: '10',
+            userId: '100',
+            name: '我的风景',
+            description: '旅行随手拍',
+            pictureCount: '1',
+            publicCount: '1',
+            isPublic: 1,
+            canManage: true,
+            user: { id: '100', userName: '测试用户' },
+          },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/album/picture/page')) {
+      await route.fulfill({
+        json: { code: 0, data: { records: [mockPicture()], total: 1 }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/album/picture/remove')) {
+      removeBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({
+        json: { code: 0, data: { id: '10', pictureCount: '0', publicCount: '0' }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/album/10')
+  await expect(page.getByTestId('album-name')).toContainText('我的风景')
+  await expect(page.getByTestId('picture-card')).toBeVisible()
+
+  // 切换到管理模式，表格里把作品从专辑移除
+  await page.locator('.ant-radio-button-wrapper').filter({ hasText: '管理' }).click()
+  await expect(page.getByText('专辑作品管理')).toBeVisible()
+  await page.locator('.ant-table-tbody').getByRole('button', { name: /移\s*除/ }).click()
+  await page.getByRole('tooltip').getByRole('button', { name: /移\s*除/ }).click()
+
+  await expect(page.getByText('已从专辑移除，图片本身不受影响')).toBeVisible()
+  expect(removeBody?.albumId).toBe('10')
+  expect(removeBody?.pictureIds).toEqual(['1'])
+})
+
+test('我的图片：把选中图片加入专辑', async ({ page }) => {
+  let addBody: Record<string, unknown> | undefined
+
+  await mockImages(page)
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: loginUser })
+      return
+    }
+    if (url.includes('/picture/my/page/vo')) {
+      await route.fulfill({
+        json: { code: 0, data: { records: [mockPicture()], total: 1 }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/album/my/page')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: {
+            records: [{ id: '10', name: '我的风景', isPublic: 1, pictureCount: '2' }],
+            total: 1,
+          },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/album/picture/add')) {
+      addBody = route.request().postDataJSON() as Record<string, unknown>
+      await route.fulfill({ json: { code: 0, data: { id: '10' }, message: 'ok' } })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/my_pictures')
+  await page.locator('.ant-table-thead .ant-checkbox-wrapper').click()
+  await page.getByRole('button', { name: '加入专辑' }).click()
+
+  await page.locator('.ant-modal .ant-select-selector').click()
+  await page.locator('.ant-select-item-option').filter({ hasText: '我的风景' }).click()
+  await page.getByRole('button', { name: /^加\s*入$/ }).click()
+
+  await expect(page.getByText('已加入专辑')).toBeVisible()
+  expect(addBody?.albumId).toBe('10')
+  expect(addBody?.pictureIds).toEqual(['1'])
+})
+
 test('作者主页：作者不存在展示 404', async ({ page }) => {
   await page.route(API_PATTERN, async (route) => {
     const url = route.request().url()

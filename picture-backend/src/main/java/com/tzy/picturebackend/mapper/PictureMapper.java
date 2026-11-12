@@ -158,4 +158,19 @@ public interface PictureMapper extends BaseMapper<Picture> {
      */
     AuthorStatsVO selectAuthorStats(@Param("userId") Long userId);
 
+    /**
+     * 专辑内的图片分页。
+     * <p>
+     * 自定义 SQL 不经过逻辑删除插件，{@code isDelete = 0} 显式写死；公开访问时
+     * {@code onlyPublic = true} 只返回已过审图片，作者/管理员可以看全部。
+     *
+     * @param page       分页参数
+     * @param albumId    专辑 id
+     * @param onlyPublic 是否只返回已过审图片
+     * @return 图片分页，按加入专辑时间倒序
+     */
+    IPage<Picture> selectPageByAlbum(Page<Picture> page,
+                                     @Param("albumId") Long albumId,
+                                     @Param("onlyPublic") boolean onlyPublic);
+
 }

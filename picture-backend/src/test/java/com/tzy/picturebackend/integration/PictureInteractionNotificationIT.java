@@ -1,15 +1,19 @@
 package com.tzy.picturebackend.integration;
 
 import com.tzy.picturebackend.manager.FileManager;
+import com.tzy.picturebackend.model.dto.album.AlbumAddRequest;
+import com.tzy.picturebackend.model.dto.album.AlbumPictureRequest;
 import com.tzy.picturebackend.model.dto.interaction.InteractionRequest;
 import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.vo.AlbumVO;
 import com.tzy.picturebackend.model.vo.InteractionStatusVO;
 import com.tzy.picturebackend.model.vo.NotificationVO;
 import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
+import com.tzy.picturebackend.service.AlbumService;
 import com.tzy.picturebackend.service.NotificationService;
 import com.tzy.picturebackend.service.PictureInteractionService;
 import com.tzy.picturebackend.service.PictureService;
@@ -40,6 +44,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -80,6 +86,9 @@ class PictureInteractionNotificationIT {
     private UserService userService;
 
     @Autowired
+    private AlbumService albumService;
+
+    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     /**
@@ -114,6 +123,13 @@ class PictureInteractionNotificationIT {
                 WHERE table_schema = DATABASE() AND table_name IN ('picture_interaction', 'notification')
                 """, Integer.class);
         assertEquals(2, tables);
+
+        // M2 / F6：专辑表
+        Integer albumTables = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_schema = DATABASE() AND table_name IN ('album', 'album_picture')
+                """, Integer.class);
+        assertEquals(2, albumTables);
     }
 
     @Test
@@ -249,6 +265,29 @@ class PictureInteractionNotificationIT {
         PublicUserProfileVO afterDelete = userService.getPublicUserProfile(owner.getId());
         assertEquals(0L, afterDelete.getPictureCount());
         assertEquals(0L, afterDelete.getFavoriteCount());
+    }
+
+    @Test
+    @DisplayName("专辑：创建 → 加图 → 公开统计 → 移图，计数与封面保持一致")
+    void albumFlow_updatesCountAndCover() {
+        AlbumAddRequest addRequest = new AlbumAddRequest();
+        addRequest.setName("集成测试专辑");
+        addRequest.setIsPublic(true);
+        AlbumVO album = albumService.add(addRequest, owner);
+        assertNotNull(album.getId());
+
+        AlbumPictureRequest pictureRequest = new AlbumPictureRequest();
+        pictureRequest.setAlbumId(album.getId());
+        pictureRequest.setPictureIds(List.of(picture.getId()));
+        AlbumVO updated = albumService.addPictures(pictureRequest, owner);
+
+        assertEquals(1, updated.getPictureCount());
+        assertEquals(picture.getId(), updated.getCoverPictureId(), "首次加图应自动设置封面");
+        assertEquals(1L, updated.getPublicCount(), "公开数量只统计已过审图片");
+
+        AlbumVO removed = albumService.removePictures(pictureRequest, owner);
+        assertEquals(0, removed.getPictureCount());
+        assertNull(removed.getCoverPictureId(), "封面被移除后应回退为空");
     }
 
     private InteractionRequest request(String type) {

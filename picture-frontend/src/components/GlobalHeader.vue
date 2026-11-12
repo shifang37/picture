@@ -106,6 +106,11 @@ const originItems = [
     title: '我的收藏',
   },
   {
+    key: '/my/albums',
+    label: '我的专辑',
+    title: '我的专辑',
+  },
+  {
     key: '/admin/dashboard',
     label: '数据看板',
     title: '数据看板',
@@ -149,12 +154,13 @@ const filterMenus = (menus = [] as MenuProps['items']) => {
     if (menuKey.startsWith('/admin') && loginUser?.userRole !== 'admin') {
       return false
     }
-    // 上传、「我的图片」和「我的收藏」需要登录
+    // 上传、「我的图片」「我的收藏」「我的专辑」需要登录
     if (
       (menuKey === '/add_picture' ||
         menuKey === '/batch_upload' ||
         menuKey === '/my_pictures' ||
-        menuKey === '/my/favorites') &&
+        menuKey === '/my/favorites' ||
+        menuKey === '/my/albums') &&
       !loginUser?.id
     ) {
       return false

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tzy.picturebackend.mapper.AlbumPictureMapper">
+
+    <!-- 幂等加图：依赖 album_picture 的联合主键，重复图片直接跳过 -->
+    <insert id="insertIgnore">
+        INSERT IGNORE INTO album_picture (albumId, pictureId, createTime)
+        VALUES
+        <foreach collection="pictureIds" item="pictureId" separator=",">
+            (#{albumId}, #{pictureId}, #{createTime})
+        </foreach>
+    </insert>
+
+    <delete id="deleteByAlbumId">
+        DELETE
+        FROM album_picture
+        WHERE albumId = #{albumId}
+    </delete>
+
+    <delete id="deleteByAlbumIds">
+        DELETE
+        FROM album_picture
+        WHERE albumId IN
+        <foreach collection="albumIds" item="albumId" open="(" separator="," close=")">
+            #{albumId}
+        </foreach>
+    </delete>
+
+    <delete id="deleteByAlbumAndPictureIds">
+        DELETE
+        FROM album_picture
+        WHERE albumId = #{albumId}
+          AND pictureId IN
+        <foreach collection="pictureIds" item="pictureId" open="(" separator="," close=")">
+            #{pictureId}
+        </foreach>
+    </delete>
+
+    <select id="countByAlbumId" resultType="int">
+        SELECT COUNT(*)
+        FROM album_picture
+        WHERE albumId = #{albumId}
+    </select>
+
+    <select id="countByAlbumAndPictureId" resultType="int">
+        SELECT COUNT(*)
+        FROM album_picture
+        WHERE albumId = #{albumId}
+          AND pictureId = #{pictureId}
+    </select>
+
+    <!-- 公开图片数量：只算已过审且未删除，外部无法通过数量推断专辑里的未过审内容 -->
+    <select id="selectPublicCounts" resultType="com.tzy.picturebackend.model.vo.AlbumPictureCountVO">
+        SELECT ap.albumId AS albumId, COUNT(*) AS publicCount
+        FROM album_picture ap
+                 JOIN picture p ON p.id = ap.pictureId
+        WHERE ap.albumId IN
+        <foreach collection="albumIds" item="albumId" open="(" separator="," close=")">
+            #{albumId}
+        </foreach>
+          AND p.isDelete = 0
+          AND p.reviewStatus = 1
+        GROUP BY ap.albumId
+    </select>
+
+    <!-- 封面回退：最新一张公开图片 -->
+    <select id="selectFirstPublicPictureId" resultType="java.lang.Long">
+        SELECT ap.pictureId
+        FROM album_picture ap
+                 JOIN picture p ON p.id = ap.pictureId
+        WHERE ap.albumId = #{albumId}
+          AND p.isDelete = 0
+          AND p.reviewStatus = 1
+        ORDER BY ap.createTime DESC, ap.pictureId DESC
+        LIMIT 1
+    </select>
+
+    <!-- 作者视角的封面回退：允许未过审图片 -->
+    <select id="selectLatestPictureId" resultType="java.lang.Long">
+        SELECT ap.pictureId
+        FROM album_picture ap
+                 JOIN picture p ON p.id = ap.pictureId
+        WHERE ap.albumId = #{albumId}
+          AND p.isDelete = 0
+        ORDER BY ap.createTime DESC, ap.pictureId DESC
+        LIMIT 1
+    </select>
+</mapper>

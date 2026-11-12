@@ -192,4 +192,19 @@
           AND isDelete = 0
           AND reviewStatus = 1
     </select>
+    <!--
+        专辑内图片分页：公开访问只返回已过审图片；作者/管理员可以看全部。
+        自定义 SQL 必须显式带上 isDelete = 0。
+    -->
+    <select id="selectPageByAlbum" resultMap="BaseResultMap">
+        SELECT p.*
+        FROM picture p
+        JOIN album_picture ap ON ap.pictureId = p.id
+        WHERE ap.albumId = #{albumId}
+          AND p.isDelete = 0
+        <if test="onlyPublic">
+            AND p.reviewStatus = 1
+        </if>
+        ORDER BY ap.createTime DESC, ap.pictureId DESC
+    </select>
 </mapper>

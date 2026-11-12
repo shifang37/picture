@@ -21,6 +21,9 @@
         <a-button :disabled="!selectedRowKeys.length" @click="batchEditOpen = true">
           批量编辑
         </a-button>
+        <a-button :disabled="!selectedRowKeys.length" @click="addToAlbumOpen = true">
+          加入专辑
+        </a-button>
         <a-popconfirm
           title="确定删除选中的图片吗？删除后进入回收站，可在保留期内由管理员恢复。"
           ok-text="删除"
@@ -91,6 +94,11 @@
       :ids="selectedRowKeys"
       @success="handleBatchEdited"
     />
+    <AddToAlbumModal
+      v-model:open="addToAlbumOpen"
+      :picture-ids="selectedRowKeys"
+      @success="clearSelection"
+    />
   </div>
 </template>
 
@@ -104,6 +112,7 @@ import { deletePicture } from '@/api/pictureController'
 import { batchDeletePictures, listMyPictureVoByPage } from '@/api/pictureExtra'
 import { formatSize, getThumbnailUrl } from '@/utils'
 import BatchEditModal from '@/components/BatchEditModal.vue'
+import AddToAlbumModal from '@/components/AddToAlbumModal.vue'
 
 const router = useRouter()
 
@@ -131,6 +140,7 @@ const loading = ref(false)
 // 批量操作：表格多选与批量编辑弹窗
 const selectedRowKeys = ref<string[]>([])
 const batchEditOpen = ref(false)
+const addToAlbumOpen = ref(false)
 const rowSelection = computed(() => ({
   selectedRowKeys: selectedRowKeys.value,
   preserveSelectedRowKeys: false,

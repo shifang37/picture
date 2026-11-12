@@ -102,6 +102,18 @@ const router = createRouter({
       meta: { requiresLogin: true },
     },
     {
+      path: '/my/albums',
+      name: '我的专辑',
+      component: () => import('@/pages/MyAlbumsPage.vue'),
+      meta: { requiresLogin: true },
+    },
+    {
+      path: '/album/:id',
+      name: '专辑详情',
+      component: () => import('@/pages/AlbumDetailPage.vue'),
+      props: true,
+    },
+    {
       path: '/notifications',
       name: '通知中心',
       component: () => import('@/pages/NotificationPage.vue'),
