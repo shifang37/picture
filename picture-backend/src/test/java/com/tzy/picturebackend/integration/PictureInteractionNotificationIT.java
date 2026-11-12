@@ -9,6 +9,7 @@ import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.InteractionStatusVO;
 import com.tzy.picturebackend.model.vo.NotificationVO;
+import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.service.NotificationService;
 import com.tzy.picturebackend.service.PictureInteractionService;
 import com.tzy.picturebackend.service.PictureService;
@@ -223,6 +224,31 @@ class PictureInteractionNotificationIT {
                 SELECT COUNT(*) FROM picture_interaction WHERE pictureId = ?
                 """, Integer.class, picture.getId());
         assertEquals(0, relations, "物理删除图片时必须级联清理互动关系");
+    }
+
+    @Test
+    @DisplayName("作者主页统计：只统计已过审未删除作品，删除后缓存失效并归零")
+    void publicUserProfile_countsOnlyPublicPictures() {
+        // 同一作者的待审核作品不能被统计进去
+        Picture reviewing = createPicture(owner);
+        reviewing.setReviewStatus(PictureReviewStatusEnum.REVIEWING.getValue());
+        assertTrue(pictureService.updateById(reviewing));
+        // 已过审作品产生一次收藏，统计应包含该收藏
+        pictureInteractionService.add(request("favorite"), owner);
+
+        PublicUserProfileVO profile = userService.getPublicUserProfile(owner.getId());
+
+        assertEquals(1L, profile.getPictureCount(), "只统计已过审作品");
+        assertEquals(1L, profile.getFavoriteCount());
+        assertEquals("集成测试用户", profile.getUser().getUserName());
+
+        // 删除后必须让缓存失效，否则 5 分钟 TTL 内主页还会显示旧统计
+        assertTrue(pictureService.deletePicture(picture.getId(), owner));
+        userService.evictPublicUserProfile(owner.getId());
+
+        PublicUserProfileVO afterDelete = userService.getPublicUserProfile(owner.getId());
+        assertEquals(0L, afterDelete.getPictureCount());
+        assertEquals(0L, afterDelete.getFavoriteCount());
     }
 
     private InteractionRequest request(String type) {

@@ -165,4 +165,18 @@
             #{id}
         </foreach>
     </update>
+    <!--
+        作者主页统计：只统计已过审且未删除的作品，与主页作品列表口径一致。
+        SUM 在空集合上返回 NULL，用 COALESCE 兜底为 0，前端不需要处理 null。
+    -->
+    <select id="selectAuthorStats" resultType="com.tzy.picturebackend.model.vo.AuthorStatsVO">
+        SELECT COUNT(*)                          AS pictureCount,
+               COALESCE(SUM(downloadCount), 0)   AS downloadCount,
+               COALESCE(SUM(favoriteCount), 0)   AS favoriteCount,
+               COALESCE(SUM(likeCount), 0)       AS likeCount
+        FROM picture
+        WHERE userId = #{userId}
+          AND isDelete = 0
+          AND reviewStatus = 1
+    </select>
 </mapper>

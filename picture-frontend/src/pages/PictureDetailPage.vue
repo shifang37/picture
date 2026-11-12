@@ -20,7 +20,16 @@
           />
           <a-descriptions :column="1">
             <a-descriptions-item label="作者">
-              <a-space>
+              <router-link
+                v-if="picture.user?.id"
+                :to="`/author/${picture.user.id}`"
+                class="author-link"
+                data-testid="picture-author-link"
+              >
+                <a-avatar :size="24" :src="picture.user?.userAvatar" />
+                <span>{{ picture.user?.userName }}</span>
+              </router-link>
+              <a-space v-else>
                 <a-avatar :size="24" :src="picture.user?.userAvatar" />
                 <div>{{ picture.user?.userName }}</div>
               </a-space>
@@ -237,4 +246,15 @@ onMounted(() => {
 })
 </script>
 
-<style scoped></style>
+<style scoped>
+.author-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+}
+
+.author-link:hover {
+  color: #1677ff;
+}
+</style>

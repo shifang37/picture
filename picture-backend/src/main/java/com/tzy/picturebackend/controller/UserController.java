@@ -23,6 +23,7 @@ import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
 import com.tzy.picturebackend.model.vo.CaptchaVO;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserAddResult;
 import com.tzy.picturebackend.model.vo.UserVO;
@@ -213,6 +214,18 @@ public class UserController {
     }
 
     /**
+     * 获取公开作者主页信息（昵称、头像、简介、作品与互动统计）
+     * <p>
+     * 无需登录；只统计已通过审核且未删除的作品，结果缓存 5 分钟。
+     * 用户不存在或已删除返回 40400。
+     */
+    @GetMapping("/public/{id}")
+    public BaseResponse<PublicUserProfileVO> getPublicUserProfile(@PathVariable Long id) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "用户 id 不能为空");
+        return ResultUtils.success(userService.getPublicUserProfile(id));
+    }
+
+    /**
      * 删除用户
      */
     @PostMapping("/delete")
@@ -233,6 +246,8 @@ public class UserController {
         boolean result = userService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除用户失败");
         sessionInvalidationManager.forget(deleteRequest.getId());
+        // 作者主页缓存必须立即失效，否则 TTL 内仍会返回一个已删除的用户
+        userService.evictPublicUserProfile(deleteRequest.getId());
         // 用户已删除，其通知不会再有人查看，直接清理
         notificationService.deleteByUserId(deleteRequest.getId());
         return ResultUtils.success(true);

@@ -1,12 +1,16 @@
 package com.tzy.picturebackend.service.impl;
 
 import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.manager.SessionInvalidationManager;
+import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.mapper.UserMapper;
 import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
 import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.AuthorStatsVO;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.support.InMemoryRedis;
 import jakarta.servlet.http.HttpSession;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,6 +57,8 @@ class UserServiceImplTest {
 
     private UserMapper userMapper;
 
+    private PictureMapper pictureMapper;
+
     private SessionInvalidationManager sessionInvalidationManager;
 
     @BeforeEach
@@ -64,6 +70,8 @@ class UserServiceImplTest {
         // baseMapper 定义在 MyBatis-Plus 的 CrudRepository 中
         ReflectionTestUtils.setField(userService, "baseMapper", userMapper);
         ReflectionTestUtils.setField(userService, "sessionInvalidationManager", sessionInvalidationManager);
+        pictureMapper = mock(PictureMapper.class);
+        ReflectionTestUtils.setField(userService, "pictureMapper", pictureMapper);
     }
 
     // ==================== 密码加密 ====================
@@ -464,6 +472,76 @@ class UserServiceImplTest {
         BusinessException e = assertThrows(BusinessException.class,
                 () -> userService.updateProfile(loginUser(), new UserUpdateProfileRequest()));
         assertEquals("更新个人资料失败", e.getMessage());
+    }
+
+    // ==================== 作者主页 ====================
+
+    @Test
+    @DisplayName("作者主页：返回公开资料与已过审作品统计")
+    void getPublicUserProfile_returnsPublicFieldsAndStats() {
+        User author = new User();
+        author.setId(9L);
+        author.setUserAccount("author001");
+        author.setUserName("作者");
+        author.setUserAvatar("http://a.png");
+        author.setUserProfile("简介");
+        author.setUserRole("user");
+        author.setCreateTime(new java.util.Date(1700000000000L));
+        when(userMapper.selectById(9L)).thenReturn(author);
+        AuthorStatsVO stats = new AuthorStatsVO();
+        stats.setPictureCount(12L);
+        stats.setDownloadCount(340L);
+        stats.setFavoriteCount(56L);
+        stats.setLikeCount(88L);
+        when(pictureMapper.selectAuthorStats(9L)).thenReturn(stats);
+
+        PublicUserProfileVO profile = userService.getPublicUserProfile(9L);
+
+        assertNotNull(profile);
+        assertEquals("作者", profile.getUser().getUserName());
+        assertEquals(12L, profile.getPictureCount());
+        assertEquals(340L, profile.getDownloadCount());
+        assertEquals(56L, profile.getFavoriteCount());
+        assertEquals(88L, profile.getLikeCount());
+        assertEquals(author.getCreateTime(), profile.getJoinedAt());
+        // 公开资料不允许包含账号与角色
+        assertEquals(9L, profile.getUser().getId());
+    }
+
+    @Test
+    @DisplayName("作者主页：没有公开作品时统计全部为 0")
+    void getPublicUserProfile_returnsZeroStatsWhenNoPublicPicture() {
+        User author = new User();
+        author.setId(9L);
+        author.setUserName("作者");
+        when(userMapper.selectById(9L)).thenReturn(author);
+        when(pictureMapper.selectAuthorStats(9L)).thenReturn(null);
+
+        PublicUserProfileVO profile = userService.getPublicUserProfile(9L);
+
+        assertEquals(0L, profile.getPictureCount());
+        assertEquals(0L, profile.getDownloadCount());
+        assertEquals(0L, profile.getFavoriteCount());
+        assertEquals(0L, profile.getLikeCount());
+    }
+
+    @Test
+    @DisplayName("作者主页：用户不存在返回 40400")
+    void getPublicUserProfile_throwsNotFoundForMissingUser() {
+        when(userMapper.selectById(9L)).thenReturn(null);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.getPublicUserProfile(9L));
+        assertEquals(ErrorCode.NOT_FOUND_ERROR.getCode(), e.getCode());
+    }
+
+    @Test
+    @DisplayName("作者主页：非法 id 返回 40000，且不查库")
+    void getPublicUserProfile_rejectsIllegalId() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> userService.getPublicUserProfile(0L));
+        assertEquals(ErrorCode.PARAMS_ERROR.getCode(), e.getCode());
+        verify(userMapper, never()).selectById(any());
     }
 
     // ==================== 排序 ====================

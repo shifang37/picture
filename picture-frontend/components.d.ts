@@ -67,6 +67,7 @@ declare module 'vue' {
     NotificationBell: typeof import('./src/components/NotificationBell.vue')['default']
     PictureCard: typeof import('./src/components/PictureCard.vue')['default']
     PictureUpload: typeof import('./src/components/PictureUpload.vue')['default']
+    PictureWaterfall: typeof import('./src/components/PictureWaterfall.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
   }

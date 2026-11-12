@@ -14,6 +14,7 @@ import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.NotificationTypeEnum;
 import com.tzy.picturebackend.model.vo.CaptchaVO;
+import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.NotificationService;
@@ -572,6 +573,57 @@ class UserControllerTest {
 
         verify(userService).getPublicUserVO(user);
         verify(userService, never()).getUserVO(any());
+    }
+
+    // ==================== 公开作者主页 ====================
+
+    @Test
+    @DisplayName("公开作者主页：返回公开资料与统计，不泄露账号和角色")
+    void getPublicUserProfile_returnsPublicFieldsAndStats() throws Exception {
+        PublicUserProfileVO profile = new PublicUserProfileVO();
+        PublicUserVO publicUser = new PublicUserVO();
+        publicUser.setId(9L);
+        publicUser.setUserName("作者");
+        publicUser.setUserAvatar("http://a.png");
+        publicUser.setUserProfile("简介");
+        profile.setUser(publicUser);
+        profile.setPictureCount(12L);
+        profile.setDownloadCount(340L);
+        profile.setFavoriteCount(56L);
+        profile.setLikeCount(88L);
+        when(userService.getPublicUserProfile(9L)).thenReturn(profile);
+
+        mockMvc.perform(get("/user/public/9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.user.id").value("9"))
+                .andExpect(jsonPath("$.data.user.userName").value("作者"))
+                .andExpect(jsonPath("$.data.pictureCount").value(12))
+                .andExpect(jsonPath("$.data.favoriteCount").value(56))
+                .andExpect(jsonPath("$.data.user.userAccount").doesNotExist())
+                .andExpect(jsonPath("$.data.user.userRole").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("公开作者主页：用户不存在返回 40400")
+    void getPublicUserProfile_returnsNotFound() throws Exception {
+        when(userService.getPublicUserProfile(9L))
+                .thenThrow(new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在"));
+
+        mockMvc.perform(get("/user/public/9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40400))
+                .andExpect(jsonPath("$.message").value("用户不存在"));
+    }
+
+    @Test
+    @DisplayName("公开作者主页：非法 id 返回 40000，不调用 service")
+    void getPublicUserProfile_rejectsIllegalId() throws Exception {
+        mockMvc.perform(get("/user/public/0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(userService, never()).getPublicUserProfile(anyLong());
     }
 
     private User user(Long id, String role) {

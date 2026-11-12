@@ -33,9 +33,20 @@ public class CacheConfig {
      */
     public static final String ANALYZE_CACHE = "analyze";
 
+    /**
+     * 作者主页公开统计缓存名
+     */
+    public static final String USER_PROFILE_CACHE = "userProfile";
+
     private static final Duration TAG_CATEGORY_TTL = Duration.ofMinutes(30);
 
     private static final Duration ANALYZE_TTL = Duration.ofMinutes(5);
+
+    /**
+     * 作者主页统计 TTL：上传、过审、删除、下载、收藏都会改变统计值，
+     * 5 分钟延迟可接受；作者本人查看自己的准确数据请走「我的图片」。
+     */
+    private static final Duration USER_PROFILE_TTL = Duration.ofMinutes(5);
 
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
@@ -48,13 +59,15 @@ public class CacheConfig {
                 .serializeValuesWith(RedisSerializationContext.SerializationPair
                         .fromSerializer(new GenericJackson2JsonRedisSerializer()));
         RedisCacheConfiguration analyzeConfig = defaults.entryTtl(ANALYZE_TTL);
+        RedisCacheConfiguration userProfileConfig = defaults.entryTtl(USER_PROFILE_TTL);
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaults)
                 // 打开 RedisCache 的命中/未命中统计：否则 cache_gets_total 等指标恒为 0
                 .enableStatistics()
                 .withInitialCacheConfigurations(Map.of(
                         TAG_CATEGORY_CACHE, defaults,
-                        ANALYZE_CACHE, analyzeConfig))
+                        ANALYZE_CACHE, analyzeConfig,
+                        USER_PROFILE_CACHE, userProfileConfig))
                 .build();
     }
 }

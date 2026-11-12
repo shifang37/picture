@@ -114,6 +114,13 @@ const router = createRouter({
       props: true,
     },
     {
+      // 作者主页：公开路由，刷新或直接分享都能访问
+      path: '/author/:id',
+      name: '作者主页',
+      component: () => import('@/pages/AuthorPage.vue'),
+      props: true,
+    },
+    {
       // 兜底路由：未匹配的站内地址统一显示 404 页面
       path: '/:pathMatch(.*)*',
       name: 'notFound',

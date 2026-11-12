@@ -5,14 +5,18 @@ import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.tzy.picturebackend.config.CacheConfig;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.manager.SessionInvalidationManager;
+import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.model.dto.user.UserQueryRequest;
 import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.UserRoleEnum;
+import com.tzy.picturebackend.model.vo.AuthorStatsVO;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.UserService;
@@ -22,6 +26,8 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.BeanUtils;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -49,6 +55,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Resource
     private SessionInvalidationManager sessionInvalidationManager;
+
+    /**
+     * 作者主页统计直接走 SQL 聚合，不依赖 PictureService，避免与 PictureServiceImpl 形成循环依赖
+     */
+    @Resource
+    private PictureMapper pictureMapper;
 
     /**
      * 密码编码器：BCrypt 自带随机盐，同一明文每次加密结果不同
@@ -371,6 +383,36 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             return new ArrayList<>();
         }
         return userList.stream().map(this::getPublicUserVO).collect(Collectors.toList());
+    }
+
+    @Override
+    @Cacheable(cacheNames = CacheConfig.USER_PROFILE_CACHE, key = "#id")
+    public PublicUserProfileVO getPublicUserProfile(Long id) {
+        if (id == null || id <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户 id 不能为空");
+        }
+        User user = this.getById(id);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        }
+        PublicUserProfileVO profile = new PublicUserProfileVO();
+        profile.setUser(getPublicUserVO(user));
+        profile.setJoinedAt(user.getCreateTime());
+        // 统计口径固定为「已通过审核 + 未删除」，没有公开作品时各项为 0
+        AuthorStatsVO stats = pictureMapper.selectAuthorStats(id);
+        if (stats != null) {
+            profile.setPictureCount(stats.getPictureCount());
+            profile.setDownloadCount(stats.getDownloadCount());
+            profile.setFavoriteCount(stats.getFavoriteCount());
+            profile.setLikeCount(stats.getLikeCount());
+        }
+        return profile;
+    }
+
+    @Override
+    @CacheEvict(cacheNames = CacheConfig.USER_PROFILE_CACHE, key = "#id")
+    public void evictPublicUserProfile(Long id) {
+        // 只负责失效缓存，真正的删除逻辑在 Controller 的 deleteUser 中完成
     }
 
     @Override

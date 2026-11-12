@@ -75,3 +75,32 @@ export async function resetUserPassword(
     ...(options || {}),
   })
 }
+
+/**
+ * 公开作者主页信息：只包含公开资料与已过审作品的聚合统计。
+ * 后端将 Long 序列化为字符串，统计值统一用 Number() 转换。
+ */
+export interface PublicUserProfile {
+  user?: API.PublicUserVO
+  pictureCount?: string | number
+  downloadCount?: string | number
+  favoriteCount?: string | number
+  likeCount?: string | number
+  joinedAt?: string
+}
+
+interface BaseResponsePublicUserProfile {
+  code?: number
+  data?: PublicUserProfile
+  message?: string
+}
+
+/**
+ * 获取公开作者主页信息（匿名可访问）
+ */
+export async function getPublicUserProfile(id: string, options?: { [key: string]: any }) {
+  return request<BaseResponsePublicUserProfile>(`/user/public/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    ...(options || {}),
+  })
+}

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Constants;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.model.entity.Picture;
+import com.tzy.picturebackend.model.vo.AuthorStatsVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -130,5 +131,16 @@ public interface PictureMapper extends BaseMapper<Picture> {
      * @return 受影响行数
      */
     int recountInteractions(@Param("ids") Collection<Long> ids);
+
+    /**
+     * 作者维度的公开作品聚合统计。
+     * <p>
+     * 口径固定为 {@code isDelete = 0 AND reviewStatus = 1}：作者主页只展示公开作品，
+     * 待审核 / 已拒绝的内容不能被外部通过统计数字推断出来。
+     *
+     * @param userId 作者 id
+     * @return 作品数、下载量、收藏数、点赞数；没有公开作品时各项为 0
+     */
+    AuthorStatsVO selectAuthorStats(@Param("userId") Long userId);
 
 }

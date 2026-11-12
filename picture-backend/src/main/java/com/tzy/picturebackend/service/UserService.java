@@ -6,6 +6,7 @@ import com.tzy.picturebackend.model.dto.user.UserUpdateProfileRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.vo.LoginUserVO;
+import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -97,6 +98,27 @@ public interface UserService extends IService<User> {
      * @return 公开用户信息列表
      */
     List<PublicUserVO> getPublicUserVOList(List<User> userList);
+
+    /**
+     * 获取公开作者主页信息。
+     * <p>
+     * 只返回公开资料与「已通过审核且未删除」作品的聚合统计，结果缓存 5 分钟；
+     * 用户不存在或已删除时抛出 40400。账号、角色等内部字段不会出现在响应里。
+     *
+     * @param id 作者 id
+     * @return 作者公开主页信息
+     */
+    PublicUserProfileVO getPublicUserProfile(Long id);
+
+    /**
+     * 失效作者主页缓存。
+     * <p>
+     * 用户被删除后必须立即清除，否则缓存会在 TTL 内继续返回一个已不存在的用户；
+     * 统计值的日常漂移由 5 分钟 TTL 兜底。
+     *
+     * @param id 作者 id
+     */
+    void evictPublicUserProfile(Long id);
 
     QueryWrapper<User> getQueryWrapper(UserQueryRequest userQueryRequest);
 
