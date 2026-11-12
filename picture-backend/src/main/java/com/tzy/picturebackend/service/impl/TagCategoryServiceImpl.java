@@ -6,6 +6,7 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.tzy.picturebackend.config.CacheConfig;
+import com.tzy.picturebackend.constant.PictureTagConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
@@ -40,9 +41,14 @@ public class TagCategoryServiceImpl
         implements TagCategoryService {
 
     /**
-     * 名称最大长度，与数据库字段一致
+     * 分类名称最大长度，与 tag_category.name 数据库字段一致
      */
-    private static final int MAX_NAME_LENGTH = 64;
+    private static final int CATEGORY_MAX_NAME_LENGTH = 64;
+
+    /**
+     * 标签名称最大长度，与 picture_tag.tag、DTO、AI 提示词保持一致
+     */
+    private static final int TAG_MAX_NAME_LENGTH = PictureTagConstant.TAG_MAX_LENGTH;
 
     @Resource
     private PictureMapper pictureMapper;
@@ -76,7 +82,7 @@ public class TagCategoryServiceImpl
     @CacheEvict(cacheNames = CacheConfig.TAG_CATEGORY_CACHE, allEntries = true)
     public boolean add(String type, String name) {
         String normalizedType = normalizeType(type);
-        String normalizedName = normalizeName(name);
+        String normalizedName = normalizeName(normalizedType, name);
         long count = this.count(new QueryWrapper<TagCategory>()
                 .eq("type", normalizedType)
                 .eq("name", normalizedName));
@@ -139,7 +145,7 @@ public class TagCategoryServiceImpl
      */
     private int insertIfMissing(String type, String name, Set<String> existingKeys) {
         String normalizedName = name.trim();
-        if (StrUtil.isBlank(normalizedName) || normalizedName.length() > MAX_NAME_LENGTH) {
+        if (StrUtil.isBlank(normalizedName) || normalizedName.length() > maxNameLength(type)) {
             log.warn("跳过不符合字典长度要求的名称, type = {}, name = {}", type, name);
             return 0;
         }
@@ -172,12 +178,20 @@ public class TagCategoryServiceImpl
     /**
      * 校验并归一化名称
      */
-    private String normalizeName(String name) {
+    private String normalizeName(String type, String name) {
         ThrowUtils.throwIf(StrUtil.isBlank(name), ErrorCode.PARAMS_ERROR, "名称不能为空");
         String trimmed = name.trim();
-        ThrowUtils.throwIf(trimmed.length() > MAX_NAME_LENGTH, ErrorCode.PARAMS_ERROR,
-                "名称不能超过 " + MAX_NAME_LENGTH + " 个字符");
+        int maxLength = maxNameLength(type);
+        ThrowUtils.throwIf(trimmed.length() > maxLength, ErrorCode.PARAMS_ERROR,
+                (TYPE_TAG.equals(type) ? "标签" : "名称") + "不能超过 " + maxLength + " 个字符");
         return trimmed;
+    }
+
+    /**
+     * 标签与图片标签共用 32 字符上限；分类沿用数据库的 64 字符
+     */
+    private int maxNameLength(String type) {
+        return TYPE_TAG.equals(type) ? TAG_MAX_NAME_LENGTH : CATEGORY_MAX_NAME_LENGTH;
     }
 
     private String keyOf(String type, String name) {

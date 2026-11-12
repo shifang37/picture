@@ -6,6 +6,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureUpdateRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.baomidou.mybatisplus.spring.service.IService;
@@ -67,7 +68,36 @@ public interface PictureService extends IService<Picture> {
      */
     void deletePictureFile(String url);
 
+    /**
+     * 构造不含标签条件的查询条件。
+     * <p>
+     * 标签需要 JOIN {@code picture_tag}，不能放进 QueryWrapper；列表查询请统一使用
+     * {@link #pagePictures(Page, PictureQueryRequest)}。
+     */
     QueryWrapper<Picture> getQueryWrapper(PictureQueryRequest pictureQueryRequest);
+
+    /**
+     * 按查询条件分页查询图片。
+     * <p>
+     * 带标签时使用 {@code picture JOIN picture_tag}，多个标签为「同时包含」语义；
+     * 不带标签时沿用原有 QueryWrapper 查询。
+     *
+     * @param page    分页参数
+     * @param request 查询条件
+     * @return 图片分页
+     */
+    Page<Picture> pagePictures(Page<Picture> page, PictureQueryRequest request);
+
+    /**
+     * 管理员直接更新图片信息（名称、简介、分类、标签）
+     * <p>
+     * 与普通用户编辑共用标签关系表的同步逻辑，保证 {@code picture.tags} 与
+     * {@code picture_tag} 不会出现不一致。
+     *
+     * @param pictureUpdateRequest 更新请求
+     * @return 是否更新成功
+     */
+    boolean updatePicture(PictureUpdateRequest pictureUpdateRequest);
 
     /**
      * 图片详情封装：作者本人或管理员会额外得到审核意见、审核人等内部字段

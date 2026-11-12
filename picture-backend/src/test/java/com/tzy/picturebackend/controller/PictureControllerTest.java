@@ -10,6 +10,7 @@ import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureListPage;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureUpdateRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -125,7 +126,7 @@ class PictureControllerTest {
     void listMyPictureVOByPage_forcesLoginUserId() throws Exception {
         User normalUser = user(100L, "user");
         when(userService.getLoginUser(any())).thenReturn(normalUser);
-        when(pictureService.page(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
         when(pictureService.getPictureDetailVOPage(any())).thenReturn(new Page<>(1, 10));
 
         mockMvc.perform(post("/picture/my/page/vo")
@@ -136,7 +137,7 @@ class PictureControllerTest {
 
         ArgumentCaptor<PictureQueryRequest> requestCaptor =
                 ArgumentCaptor.forClass(PictureQueryRequest.class);
-        verify(pictureService).getQueryWrapper(requestCaptor.capture());
+        verify(pictureService).pagePictures(any(Page.class), requestCaptor.capture());
         assertEquals(Long.valueOf(100L), requestCaptor.getValue().getUserId());
     }
 
@@ -262,10 +263,7 @@ class PictureControllerTest {
     @Test
     @DisplayName("更新：管理员直接更新图片后发布 changed 事件并失效缓存")
     void updatePicture_publishesChangedEvent() throws Exception {
-        Picture existing = new Picture();
-        existing.setId(1L);
-        when(pictureService.getById(1L)).thenReturn(existing);
-        when(pictureService.updateById(any(Picture.class))).thenReturn(true);
+        when(pictureService.updatePicture(any())).thenReturn(true);
 
         mockMvc.perform(post("/picture/update")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -274,7 +272,10 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data").value(true));
 
-        verify(pictureService).updateById(any(Picture.class));
+        ArgumentCaptor<PictureUpdateRequest> requestCaptor =
+                ArgumentCaptor.forClass(PictureUpdateRequest.class);
+        verify(pictureService).updatePicture(requestCaptor.capture());
+        assertEquals(Long.valueOf(1L), requestCaptor.getValue().getId());
         verify(pictureListCache).invalidate();
         verify(pictureEventPublisher).pictureChanged(1L);
     }
@@ -326,7 +327,7 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.data.total").value(1))
                 .andExpect(jsonPath("$.data.records[0].name").value("缓存图片"));
 
-        verify(pictureService, never()).page(any(), any());
+        verify(pictureService, never()).pagePictures(any(), any());
         verify(pictureListCache, never()).put(any(), any());
         verifyNoInteractions(pictureSearchService);
     }
@@ -335,7 +336,7 @@ class PictureControllerTest {
     @DisplayName("公开列表：未命中时回源数据库，并只缓存已通过审核的内容")
     void listPictureVOByPage_populatesCacheOnMiss() throws Exception {
         when(pictureListCache.get(any())).thenReturn(null);
-        when(pictureService.page(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
         when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
 
         mockMvc.perform(post("/picture/list/page/vo")
@@ -380,8 +381,8 @@ class PictureControllerTest {
                 "已拒绝的图片即使仍残留在索引里也不能展示");
         assertEquals(1L, pageCaptor.getValue().getTotal(),
                 "被过滤掉的失效文档要从 total 中扣除");
-        // 搜索路径不再执行 MySQL 的模糊查询
-        verify(pictureService, never()).page(any(), any());
+        // 搜索路径不再执行 MySQL 查询
+        verify(pictureService, never()).pagePictures(any(), any());
         verify(pictureService, never()).getQueryWrapper(any());
     }
 
@@ -392,7 +393,7 @@ class PictureControllerTest {
         when(pictureSearchService.enabled()).thenReturn(true);
         when(pictureSearchService.searchPictureIds(any()))
                 .thenThrow(new IllegalStateException("elasticsearch down"));
-        when(pictureService.page(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
         when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
 
         mockMvc.perform(post("/picture/list/page/vo")
@@ -401,8 +402,8 @@ class PictureControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0));
 
-        verify(pictureService).getQueryWrapper(any());
-        verify(pictureService).page(any(Page.class), any());
+        verify(pictureService, never()).getQueryWrapper(any());
+        verify(pictureService).pagePictures(any(Page.class), any());
         verify(pictureListCache).put(any(), any());
     }
 
@@ -423,7 +424,7 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.data.total").value(0));
 
         verify(pictureService, never()).listByIds(any());
-        verify(pictureService, never()).page(any(), any());
+        verify(pictureService, never()).pagePictures(any(), any());
     }
 
     @Test

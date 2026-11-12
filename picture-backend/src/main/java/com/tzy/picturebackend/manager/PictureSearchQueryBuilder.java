@@ -87,7 +87,7 @@ public class PictureSearchQueryBuilder {
         addTerm(filter, "picScale", request.getPicScale());
         addTerm(filter, "reviewStatus", request.getReviewStatus());
         if (CollUtil.isNotEmpty(request.getTags())) {
-            // 多个标签是「同时包含」关系，与 MySQL 逐个 like 的语义一致
+            // 多个标签是「同时包含」关系，与 MySQL 的 picture_tag JOIN + HAVING 语义一致
             for (String tag : request.getTags()) {
                 if (StrUtil.isNotBlank(tag)) {
                     addTerm(filter, "tags", tag.trim());

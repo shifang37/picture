@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.model.dto.picture;
 
+import com.tzy.picturebackend.constant.PictureTagConstant;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -39,8 +40,10 @@ public class PictureEditRequest implements Serializable {
     /**
      * 标签
      */
-    @Size(max = 20, message = "标签最多 20 个")
-    private List<@Size(max = 32, message = "单个标签不能超过 32 个字符") String> tags;
+    @Size(max = PictureTagConstant.TAG_MAX_COUNT,
+            message = "标签最多 " + PictureTagConstant.TAG_MAX_COUNT + " 个")
+    private List<@Size(max = PictureTagConstant.TAG_MAX_LENGTH,
+            message = "单个标签不能超过 " + PictureTagConstant.TAG_MAX_LENGTH + " 个字符") String> tags;
 
     private static final long serialVersionUID = 1L;
 }

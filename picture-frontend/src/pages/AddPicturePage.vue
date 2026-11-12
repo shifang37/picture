@@ -97,6 +97,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { message, type FormProps } from 'ant-design-vue'
 import PictureUpload from '@/components/PictureUpload.vue'
+import { PICTURE_TAG_MAX_COUNT, PICTURE_TAG_MAX_LENGTH } from '@/constants/picture'
 import { editPicture, listPictureTagCategory, getPictureVoById } from '@/api/pictureController'
 import { getPictureAiSuggestion, type PictureAiSuggestion } from '@/api/pictureExtra'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
@@ -176,10 +177,10 @@ const applyAiSuggestion = () => {
   message.success('已填入 AI 建议，可继续修改后提交')
 }
 
-// 标签逐个校验长度，避免总长度或单个标签过长被后端拒绝
+// 标签逐个校验长度，避免单个标签过长被后端拒绝
 const validateTags = (_rule: any, value?: string[]) => {
-  if (value?.some((tag) => tag.length > 32)) {
-    return Promise.reject('单个标签不能超过 32 个字符')
+  if (value?.some((tag) => tag.length > PICTURE_TAG_MAX_LENGTH)) {
+    return Promise.reject(`单个标签不能超过 ${PICTURE_TAG_MAX_LENGTH} 个字符`)
   }
   return Promise.resolve()
 }
@@ -193,7 +194,12 @@ const formRules: FormProps['rules'] = {
   introduction: [{ max: 512, message: '简介不能超过 512 个字符', trigger: 'blur' }],
   category: [{ max: 64, message: '分类不能超过 64 个字符', trigger: 'blur' }],
   tags: [
-    { type: 'array', max: 20, message: '标签最多 20 个', trigger: 'change' },
+    {
+      type: 'array',
+      max: PICTURE_TAG_MAX_COUNT,
+      message: `标签最多 ${PICTURE_TAG_MAX_COUNT} 个`,
+      trigger: 'change',
+    },
     { validator: validateTags, trigger: 'change' },
   ],
 }

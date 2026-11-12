@@ -101,10 +101,18 @@ class TagCategoryServiceImplTest {
     }
 
     @Test
-    @DisplayName("新增：名称超过 64 个字符返回参数错误")
-    void add_rejectsTooLongName() {
+    @DisplayName("新增：标签超过 32 个字符返回参数错误，与图片标签上限一致")
+    void add_rejectsTooLongTagName() {
         BusinessException e = assertThrows(BusinessException.class,
-                () -> tagCategoryService.add("tag", "t".repeat(65)));
+                () -> tagCategoryService.add("tag", "t".repeat(33)));
+        assertEquals("标签不能超过 32 个字符", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("新增：分类名称超过 64 个字符返回参数错误")
+    void add_rejectsTooLongCategoryName() {
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> tagCategoryService.add("category", "c".repeat(65)));
         assertEquals("名称不能超过 64 个字符", e.getMessage());
     }
 

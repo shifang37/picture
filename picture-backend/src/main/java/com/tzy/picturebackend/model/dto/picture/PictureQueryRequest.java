@@ -1,6 +1,7 @@
 package com.tzy.picturebackend.model.dto.picture;
 
 import com.tzy.picturebackend.common.PageRequest;
+import com.tzy.picturebackend.constant.PictureTagConstant;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
@@ -40,8 +41,10 @@ public class PictureQueryRequest extends PageRequest implements Serializable {
     /**
      * 标签
      */
-    @Size(max = 20, message = "标签最多 20 个")
-    private List<@Size(max = 32, message = "单个标签不能超过 32 个字符") String> tags;
+    @Size(max = PictureTagConstant.TAG_MAX_COUNT,
+            message = "标签最多 " + PictureTagConstant.TAG_MAX_COUNT + " 个")
+    private List<@Size(max = PictureTagConstant.TAG_MAX_LENGTH,
+            message = "单个标签不能超过 " + PictureTagConstant.TAG_MAX_LENGTH + " 个字符") String> tags;
 
     /**
      * 文件体积

@@ -1,7 +1,6 @@
 package com.tzy.picturebackend.controller;
 
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.annotation.AuthCheck;
 import com.tzy.picturebackend.common.BaseResponse;
@@ -34,7 +33,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.BeanUtils;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -113,24 +111,12 @@ public class PictureController {
                 || pictureUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
-        // 将实体类和 DTO 进行转换
-        Picture picture = new Picture();
-        BeanUtils.copyProperties(pictureUpdateRequest, picture);
-        // 注意将 list 转为 string
-        picture.setTags(JSONUtil.toJsonStr(pictureUpdateRequest.getTags()));
-        // 数据校验
-        pictureService.validPicture(picture);
-        // 判断是否存在
-        long id = pictureUpdateRequest.getId();
-        Picture oldPicture = pictureService.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 操作数据库
-        boolean result = pictureService.updateById(picture);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 校验、落库与 picture_tag 同步统一收敛到 service
+        pictureService.updatePicture(pictureUpdateRequest);
         // 管理员直接改图也可能改变首页展示内容
         pictureListCache.invalidate();
         // 管理端直接更新绕过了 service 的编辑逻辑，这里补发内容变更事件
-        pictureEventPublisher.pictureChanged(id);
+        pictureEventPublisher.pictureChanged(pictureUpdateRequest.getId());
         return ResultUtils.success(true);
     }
 
@@ -188,9 +174,9 @@ public class PictureController {
         long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
         validPage(current, size, 100);
-        // 查询数据库
-        Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                pictureService.getQueryWrapper(pictureQueryRequest));
+        // 查询数据库（标签条件走 picture_tag JOIN）
+        Page<Picture> picturePage = pictureService.pagePictures(new Page<>(current, size),
+                pictureQueryRequest);
         return ResultUtils.success(picturePage);
     }
 
@@ -226,9 +212,9 @@ public class PictureController {
             }
         }
         if (pictureVOPage == null) {
-            // 查询数据库
-            Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                    pictureService.getQueryWrapper(pictureQueryRequest));
+            // 查询数据库（标签条件走 picture_tag JOIN）
+            Page<Picture> picturePage = pictureService.pagePictures(new Page<>(current, size),
+                    pictureQueryRequest);
             // 获取封装类
             pictureVOPage = pictureService.getPictureVOPage(picturePage, request);
         }
@@ -281,9 +267,9 @@ public class PictureController {
         User loginUser = userService.getLoginUser(request);
         // 强制只查本人图片，忽略客户端传入的 userId，避免越权查看他人待审核内容
         pictureQueryRequest.setUserId(loginUser.getId());
-        // 查询数据库
-        Page<Picture> picturePage = pictureService.page(new Page<>(pictureQueryRequest.getCurrent(), size),
-                pictureService.getQueryWrapper(pictureQueryRequest));
+        // 查询数据库（标签条件走 picture_tag JOIN）
+        Page<Picture> picturePage = pictureService.pagePictures(
+                new Page<>(pictureQueryRequest.getCurrent(), size), pictureQueryRequest);
         // 「我的图片」全部属于当前用户，可以返回审核意见等内部字段
         return ResultUtils.success(pictureService.getPictureDetailVOPage(picturePage));
     }

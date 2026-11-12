@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
+import com.tzy.picturebackend.constant.PictureTagConstant;
 import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
@@ -20,6 +21,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureUpdateRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -32,6 +34,7 @@ import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.mapper.PictureMapper;
+import com.tzy.picturebackend.mapper.PictureTagMapper;
 import com.tzy.picturebackend.service.TagCategoryService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
@@ -39,10 +42,13 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -85,6 +91,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private TagCategoryService tagCategoryService;
+
+    @Resource
+    private PictureTagMapper pictureTagMapper;
 
     @Resource
     private PictureMetrics pictureMetrics;
@@ -217,6 +226,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean editPicture(PictureEditRequest pictureEditRequest, User loginUser) {
         ThrowUtils.throwIf(pictureEditRequest == null || pictureEditRequest.getId() == null
                 || pictureEditRequest.getId() <= 0, ErrorCode.PARAMS_ERROR);
@@ -233,8 +243,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         Picture picture = new Picture();
         BeanUtils.copyProperties(pictureEditRequest, picture);
         // 显式判空，避免 JSONUtil.toJsonStr(null) 把标签写成字符串 "null"
+        List<String> normalizedTags = null;
         if (pictureEditRequest.getTags() != null) {
-            picture.setTags(JSONUtil.toJsonStr(pictureEditRequest.getTags()));
+            normalizedTags = normalizeTags(pictureEditRequest.getTags());
+            picture.setTags(JSONUtil.toJsonStr(normalizedTags));
         }
         picture.setEditTime(new Date());
         validPicture(picture);
@@ -255,6 +267,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             result = this.updateById(picture);
         }
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "编辑失败");
+        // 标签同时写入关系表；与图片更新在同一个事务内，避免 JSON 与关系表不一致
+        if (normalizedTags != null) {
+            replacePictureTags(id, normalizedTags);
+        }
         if (contentChanged) {
             // 名称、简介、分类、标签变化都会影响公开列表
             pictureListCache.invalidate();
@@ -262,6 +278,60 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             pictureEventPublisher.pictureChanged(id);
         }
         return true;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean updatePicture(PictureUpdateRequest pictureUpdateRequest) {
+        ThrowUtils.throwIf(pictureUpdateRequest == null || pictureUpdateRequest.getId() == null
+                || pictureUpdateRequest.getId() <= 0, ErrorCode.PARAMS_ERROR);
+        long id = pictureUpdateRequest.getId();
+        Picture oldPicture = this.getById(id);
+        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        Picture picture = new Picture();
+        BeanUtils.copyProperties(pictureUpdateRequest, picture);
+        List<String> normalizedTags = null;
+        if (pictureUpdateRequest.getTags() != null) {
+            normalizedTags = normalizeTags(pictureUpdateRequest.getTags());
+            picture.setTags(JSONUtil.toJsonStr(normalizedTags));
+        }
+        validPicture(picture);
+        boolean result = this.updateById(picture);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "更新失败");
+        if (normalizedTags != null) {
+            replacePictureTags(id, normalizedTags);
+        }
+        return true;
+    }
+
+    /**
+     * 用给定标签整体替换图片的标签关系；空列表表示清空标签
+     */
+    private void replacePictureTags(Long pictureId, List<String> tags) {
+        pictureTagMapper.deleteByPictureId(pictureId);
+        if (CollUtil.isNotEmpty(tags)) {
+            pictureTagMapper.insertBatch(pictureId, tags);
+        }
+    }
+
+    /**
+     * 标签归一化：去空、去首尾空格、去重，保持原有顺序。
+     * <p>
+     * 去重按忽略大小写处理，与 MySQL utf8mb4_unicode_ci 的比较规则保持一致；
+     * 否则 ["Tag", "tag"] 会在 Java 侧算成 2 个标签，而数据库 DISTINCT 只算 1 个，导致 JOIN 永远不命中。
+     */
+    private static List<String> normalizeTags(List<String> tags) {
+        if (CollUtil.isEmpty(tags)) {
+            return List.of();
+        }
+        Map<String, String> unique = new LinkedHashMap<>();
+        for (String tag : tags) {
+            String trimmed = StrUtil.trim(tag);
+            if (StrUtil.isNotEmpty(trimmed)) {
+                unique.putIfAbsent(trimmed.toLowerCase(Locale.ROOT), trimmed);
+            }
+        }
+        return List.copyOf(unique.values());
     }
 
     /**
@@ -340,6 +410,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 先做数据库逻辑删除，成功后再清理 COS，避免数据库回滚但对象已被删除
         boolean result = this.removeById(id);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
+        // 逻辑删除后清理标签关系；即使清理失败，查询侧仍会过滤已删除图片
+        try {
+            pictureTagMapper.deleteByPictureId(id);
+        } catch (RuntimeException e) {
+            log.warn("清理图片标签关系失败, pictureId = {}", id, e);
+        }
         deletePictureFile(oldPicture.getUrl());
         pictureListCache.invalidate();
         // 删除后索引侧也要移除文档
@@ -368,7 +444,6 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         String name = pictureQueryRequest.getName();
         String introduction = pictureQueryRequest.getIntroduction();
         String category = pictureQueryRequest.getCategory();
-        List<String> tags = pictureQueryRequest.getTags();
         Long picSize = pictureQueryRequest.getPicSize();
         Integer picWidth = pictureQueryRequest.getPicWidth();
         Integer picHeight = pictureQueryRequest.getPicHeight();
@@ -398,12 +473,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         queryWrapper.eq(ObjUtil.isNotEmpty(picSize), "picSize", picSize);
         queryWrapper.eq(ObjUtil.isNotEmpty(picScale), "picScale", picScale);
         queryWrapper.eq(ObjUtil.isNotEmpty(reviewStatus), "reviewStatus", reviewStatus);
-        // JSON 数组查询
-        if (CollUtil.isNotEmpty(tags)) {
-            for (String tag : tags) {
-                queryWrapper.like("tags", "\"" + tag + "\"");
-            }
-        }
+        // 标签过滤需要 JOIN picture_tag，由 pagePictures 统一处理，不能放进 QueryWrapper
         // 排序：sortField 会被拼进 ORDER BY，只接受白名单内的字段
         if (StrUtil.isNotEmpty(sortField)) {
             ThrowUtils.throwIf(!SORT_FIELD_WHITELIST.contains(sortField), ErrorCode.PARAMS_ERROR, "排序字段不合法");
@@ -414,6 +484,20 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             }
         }
         return queryWrapper;
+    }
+
+    @Override
+    public Page<Picture> pagePictures(Page<Picture> page, PictureQueryRequest pictureQueryRequest) {
+        ThrowUtils.throwIf(page == null, ErrorCode.PARAMS_ERROR);
+        List<String> tags = normalizeTags(pictureQueryRequest == null ? null : pictureQueryRequest.getTags());
+        QueryWrapper<Picture> queryWrapper = getQueryWrapper(pictureQueryRequest);
+        if (tags.isEmpty()) {
+            return this.page(page, queryWrapper);
+        }
+        // 自定义 SQL 不经过 MyBatis-Plus 逻辑删除插件，显式补上 isDelete = 0
+        queryWrapper.eq("isDelete", 0);
+        baseMapper.selectPageByTags(page, queryWrapper, tags, tags.size());
+        return page;
     }
 
     @Override
@@ -525,8 +609,25 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             ThrowUtils.throwIf(category.length() > 64, ErrorCode.PARAMS_ERROR, "分类不能超过 64 个字符");
         }
         if (StrUtil.isNotBlank(tags)) {
-            // tags 是 JSON 数组字符串，每个标签长度之和也可能超过数据库字段长度
-            ThrowUtils.throwIf(tags.length() > 512, ErrorCode.PARAMS_ERROR, "标签总长度不能超过 512 个字符");
+            // 与 DTO、AI、picture_tag.tag 共用同一组上限：单个标签 32 字符、最多 20 个
+            List<String> tagList;
+            try {
+                tagList = JSONUtil.toList(tags, String.class);
+            } catch (RuntimeException e) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "标签格式不合法");
+            }
+            if (tagList == null) {
+                tagList = List.of();
+            }
+            ThrowUtils.throwIf(tagList.size() > PictureTagConstant.TAG_MAX_COUNT,
+                    ErrorCode.PARAMS_ERROR,
+                    "标签最多 " + PictureTagConstant.TAG_MAX_COUNT + " 个");
+            for (String tag : tagList) {
+                String trimmed = StrUtil.trim(tag);
+                ThrowUtils.throwIf(trimmed != null && trimmed.length() > PictureTagConstant.TAG_MAX_LENGTH,
+                        ErrorCode.PARAMS_ERROR,
+                        "单个标签不能超过 " + PictureTagConstant.TAG_MAX_LENGTH + " 个字符");
+            }
         }
         if (StrUtil.isNotBlank(picFormat)) {
             ThrowUtils.throwIf(picFormat.length() > 32, ErrorCode.PARAMS_ERROR, "图片格式不能超过 32 个字符");

@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.integration;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tzy.picturebackend.event.PictureEventPublisher;
@@ -7,6 +8,8 @@ import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.RedisRateLimitCounter;
 import com.tzy.picturebackend.mapper.AnalyzeMapper;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
+import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -141,7 +144,7 @@ class PictureApplicationIT {
         Integer applied = jdbcTemplate.queryForObject(
                 "select count(*) from flyway_schema_history where success = 1", Integer.class);
         assertNotNull(applied);
-        assertTrue(applied >= 6, "V1-V6 迁移应全部执行，实际 " + applied);
+        assertTrue(applied >= 8, "V1-V8 迁移应全部执行，实际 " + applied);
 
         List<String> columns = jdbcTemplate.queryForList(
                 "select column_name from information_schema.columns "
@@ -155,6 +158,19 @@ class PictureApplicationIT {
                         + "where table_schema = database() and table_name = 'picture_ai_suggestion'",
                 Integer.class);
         assertEquals(1, aiSuggestionTable, "V6 应创建 picture_ai_suggestion 表");
+
+        Integer pictureTagTable = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables "
+                        + "where table_schema = database() and table_name = 'picture_tag'",
+                Integer.class);
+        assertEquals(1, pictureTagTable, "V8 应创建 picture_tag 关系表");
+
+        Integer tagPictureIndex = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.statistics "
+                        + "where table_schema = database() and table_name = 'picture_tag' "
+                        + "and index_name = 'idx_tag_picture'",
+                Integer.class);
+        assertEquals(1, tagPictureIndex, "picture_tag 应有 (tag, pictureId) 索引");
     }
 
     // ==================== 重传与删除 ====================
@@ -219,6 +235,45 @@ class PictureApplicationIT {
         assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
                 "insert into user (userAccount, userPassword, userName, userRole) values (?, ?, ?, ?)",
                 user.getUserAccount(), "hash", "duplicate", "user"));
+    }
+
+    @Test
+    @DisplayName("标签查询：多标签走 picture_tag JOIN，删除后关系行被清理")
+    void tagQueryUsesRelationTableAndJoin() {
+        User user = createUser("tagquery");
+        Picture picture = savePicture(user.getId(), "tag-" + UUID.randomUUID() + ".jpg");
+        jdbcTemplate.update("update picture set reviewStatus = ? where id = ?",
+                PictureReviewStatusEnum.PASS.getValue(), picture.getId());
+
+        PictureEditRequest editRequest = new PictureEditRequest();
+        editRequest.setId(picture.getId());
+        editRequest.setTags(List.of("标签A", " 标签B ", "标签B", "标签C"));
+        assertTrue(pictureService.editPicture(editRequest, user));
+
+        Integer relationRows = jdbcTemplate.queryForObject(
+                "select count(*) from picture_tag where pictureId = ?", Integer.class, picture.getId());
+        assertEquals(3, relationRows, "重复/空白标签应归一化后写入关系表");
+
+        // 普通用户编辑已通过图片后会重新进入待审核，这里改回已通过以验证公开列表查询
+        jdbcTemplate.update("update picture set reviewStatus = ? where id = ?",
+                PictureReviewStatusEnum.PASS.getValue(), picture.getId());
+
+        PictureQueryRequest query = new PictureQueryRequest();
+        query.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        query.setTags(List.of("标签A", "标签B"));
+        Page<Picture> matched = pictureService.pagePictures(new Page<>(1, 10), query);
+        assertTrue(matched.getRecords().stream().anyMatch(item -> picture.getId().equals(item.getId())),
+                "同时包含所选标签的图片应被 JOIN 查出");
+
+        query.setTags(List.of("标签A", "不存在的标签"));
+        Page<Picture> notMatched = pictureService.pagePictures(new Page<>(1, 10), query);
+        assertTrue(notMatched.getRecords().stream().noneMatch(item -> picture.getId().equals(item.getId())),
+                "多标签是 AND 语义，缺少任意一个都不应命中");
+
+        assertTrue(pictureService.deletePicture(picture.getId(), user));
+        Integer afterDelete = jdbcTemplate.queryForObject(
+                "select count(*) from picture_tag where pictureId = ?", Integer.class, picture.getId());
+        assertEquals(0, afterDelete, "逻辑删除后应清理该图片的标签关系");
     }
 
     // ==================== 会话与密码 ====================
@@ -392,6 +447,9 @@ class PictureApplicationIT {
                         + "where id = ?",
                 category, "[\"" + tag + "\"]", 4096L, 11L,
                 PictureReviewStatusEnum.PASS.getValue(), picture.getId());
+        // 标签排行已改为聚合 picture_tag，这里补上关系行（直接改 JSON 不会经过 editPicture）
+        jdbcTemplate.update("insert into picture_tag (pictureId, tag) values (?, ?)",
+                picture.getId(), tag);
 
         AnalyzeOverviewVO overview = analyzeMapper.selectOverview();
         assertTrue(overview.getPictureCount() >= 1);

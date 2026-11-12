@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.tzy.picturebackend.config.AiProperties;
+import com.tzy.picturebackend.constant.PictureTagConstant;
 import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
@@ -75,9 +76,9 @@ public class AiSuggestionServiceImpl implements AiSuggestionService {
 
     private static final int CATEGORY_MAX_LENGTH = 64;
 
-    private static final int TAG_MAX_LENGTH = 32;
+    private static final int TAG_MAX_LENGTH = PictureTagConstant.TAG_MAX_LENGTH;
 
-    private static final int TAG_MAX_COUNT = 20;
+    private static final int TAG_MAX_COUNT = PictureTagConstant.TAG_MAX_COUNT;
 
     private static final int MAX_RETRY_AFTER_MILLIS = 5000;
 

@@ -8,12 +8,14 @@ import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureMapper;
+import com.tzy.picturebackend.mapper.PictureTagMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureUpdateRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -35,8 +37,11 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -47,7 +52,9 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -64,6 +71,8 @@ class PictureServiceImplTest {
     private UserService userService;
 
     private PictureMapper pictureMapper;
+
+    private PictureTagMapper pictureTagMapper;
 
     private FileManager fileManager;
 
@@ -82,6 +91,7 @@ class PictureServiceImplTest {
         pictureService = new PictureServiceImpl();
         userService = mock(UserService.class);
         pictureMapper = mock(PictureMapper.class);
+        pictureTagMapper = mock(PictureTagMapper.class);
         fileManager = mock(FileManager.class);
         pictureReviewLogService = mock(PictureReviewLogService.class);
         tagCategoryService = mock(TagCategoryService.class);
@@ -90,6 +100,7 @@ class PictureServiceImplTest {
         meterRegistry = new SimpleMeterRegistry();
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
+        ReflectionTestUtils.setField(pictureService, "pictureTagMapper", pictureTagMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
         ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);
         ReflectionTestUtils.setField(pictureService, "tagCategoryService", tagCategoryService);
@@ -822,6 +833,88 @@ class PictureServiceImplTest {
     }
 
     @Test
+    @DisplayName("分页查询：带标签时走 picture_tag JOIN，不拼 LIKE")
+    void pagePictures_withTagsUsesJoinMapper() {
+        PictureQueryRequest request = new PictureQueryRequest();
+        request.setTags(List.of(" 标签A ", "标签A", "", "标签B"));
+        when(pictureMapper.selectPageByTags(any(), any(), any(), anyInt()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Page<Picture> result = pictureService.pagePictures(new Page<>(1, 10), request);
+
+        ArgumentCaptor<List<String>> tagsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(pictureMapper).selectPageByTags(any(), any(), tagsCaptor.capture(), eq(2));
+        assertEquals(List.of("标签A", "标签B"), tagsCaptor.getValue(),
+                "标签应去空、去重、去首尾空格后再查关系表");
+        assertNotNull(result);
+        verify(pictureMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    @DisplayName("分页查询：不带标签时沿用 QueryWrapper 分页")
+    void pagePictures_withoutTagsUsesPageWrapper() {
+        PictureQueryRequest request = new PictureQueryRequest();
+        when(pictureMapper.selectPage(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Page<Picture> result = pictureService.pagePictures(new Page<>(1, 10), request);
+
+        assertNotNull(result);
+        verify(pictureMapper).selectPage(any(), any());
+        verify(pictureMapper, never()).selectPageByTags(any(), any(), any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("编辑：标签写库时同步替换 picture_tag 关系")
+    void editPicture_syncsPictureTagRelation() {
+        User owner = user(100L, "user");
+        when(userService.isAdmin(owner)).thenReturn(false);
+        when(pictureMapper.selectById(1L))
+                .thenReturn(editablePicture(PictureReviewStatusEnum.REVIEWING.getValue()));
+        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+
+        PictureEditRequest request = editRequest("旧名称");
+        request.setTags(List.of(" 标签A ", "标签A", "", "标签B"));
+
+        assertTrue(pictureService.editPicture(request, owner));
+
+        verify(pictureTagMapper).deleteByPictureId(1L);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<String>> tagsCaptor = ArgumentCaptor.forClass(Collection.class);
+        verify(pictureTagMapper).insertBatch(eq(1L), tagsCaptor.capture());
+        assertEquals(List.of("标签A", "标签B"), List.copyOf(tagsCaptor.getValue()));
+    }
+
+    @Test
+    @DisplayName("管理员更新：标签写库时同步替换 picture_tag 关系")
+    void updatePicture_syncsPictureTagRelation() {
+        when(pictureMapper.selectById(1L))
+                .thenReturn(editablePicture(PictureReviewStatusEnum.PASS.getValue()));
+        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+
+        PictureUpdateRequest request = new PictureUpdateRequest();
+        request.setId(1L);
+        request.setTags(List.of("标签C"));
+
+        assertTrue(pictureService.updatePicture(request));
+
+        verify(pictureTagMapper).deleteByPictureId(1L);
+        verify(pictureTagMapper).insertBatch(1L, List.of("标签C"));
+    }
+
+    @Test
+    @DisplayName("删除：逻辑删除后清理 picture_tag 关系")
+    void deletePicture_cleansPictureTagRelation() {
+        User owner = user(100L, "user");
+        Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        when(pictureMapper.selectById(1L)).thenReturn(existing);
+        when(pictureMapper.deleteById(1L)).thenReturn(1);
+
+        assertTrue(pictureService.deletePicture(1L, owner));
+
+        verify(pictureTagMapper).deleteByPictureId(1L);
+    }
+
+    @Test
     @DisplayName("标签分类：直接从字典服务读取，不再扫描图片")
     void listTagCategory_delegatesToDictionary() {
         PictureTagCategory fromDictionary = new PictureTagCategory();
@@ -934,13 +1027,39 @@ class PictureServiceImplTest {
     }
 
     @Test
-    @DisplayName("校验：标签 JSON 总长度超过 512 应拒绝")
-    void validPicture_rejectsTooLongTagsJson() {
+    @DisplayName("校验：单个标签超过 32 个字符应拒绝")
+    void validPicture_rejectsTooLongTag() {
         Picture picture = validPictureEntity();
-        picture.setTags("[\"" + "t".repeat(510) + "\"]");
+        picture.setTags("[\"" + "t".repeat(33) + "\"]");
 
         BusinessException e = assertThrows(BusinessException.class, () -> pictureService.validPicture(picture));
-        assertEquals("标签总长度不能超过 512 个字符", e.getMessage());
+        assertEquals("单个标签不能超过 32 个字符", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("校验：标签超过 20 个应拒绝")
+    void validPicture_rejectsTooManyTags() {
+        Picture picture = validPictureEntity();
+        picture.setTags(IntStream.range(0, 21)
+                .mapToObj(i -> "\"标签" + i + "\"")
+                .collect(Collectors.joining(",", "[", "]")));
+
+        BusinessException e = assertThrows(BusinessException.class, () -> pictureService.validPicture(picture));
+        assertEquals("标签最多 20 个", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("校验：20 个 32 字符标签（JSON 超过 512）应通过，不再受旧总长度限制")
+    void validPicture_acceptsMaxTagsBeyondLegacyJsonLimit() {
+        Picture picture = validPictureEntity();
+        String tag = "t".repeat(32);
+        String tagsJson = IntStream.range(0, 20)
+                .mapToObj(i -> "\"" + tag + "\"")
+                .collect(Collectors.joining(",", "[", "]"));
+        assertTrue(tagsJson.length() > 512, "构造的 JSON 应超过旧上限，实际 " + tagsJson.length());
+        picture.setTags(tagsJson);
+
+        assertDoesNotThrow(() -> pictureService.validPicture(picture));
     }
 
     @Test

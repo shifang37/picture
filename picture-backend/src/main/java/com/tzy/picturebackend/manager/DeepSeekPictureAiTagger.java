@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tzy.picturebackend.config.AiProperties;
+import com.tzy.picturebackend.constant.PictureTagConstant;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -50,9 +51,9 @@ public class DeepSeekPictureAiTagger implements PictureAiTagger {
             1. name 简洁准确，最多 20 个汉字，不超过 128 个字符；
             2. introduction 客观描述画面，最多 120 个汉字，不超过 512 个字符；
             3. category 必须从给定的分类字典中选择；无法判断时输出 null；
-            4. tags 输出 3-8 个，优先从给定标签字典中选择，每个标签不超过 32 个字符；
+            4. tags 输出 3-8 个，优先从给定标签字典中选择，每个标签不超过 %d 个字符，最多 %d 个；
             5. 不要输出字典外的分类，不要编造画面中不存在的内容。
-            """;
+            """.formatted(PictureTagConstant.TAG_MAX_LENGTH, PictureTagConstant.TAG_MAX_COUNT);
 
     private final AiProperties aiProperties;
 

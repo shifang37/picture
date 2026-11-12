@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.tzy.picturebackend.mapper.PictureTagMapper">
+
+    <insert id="insertBatch">
+        INSERT IGNORE INTO picture_tag (pictureId, tag)
+        VALUES
+        <foreach collection="tags" item="tag" separator=",">
+            (#{pictureId}, #{tag})
+        </foreach>
+    </insert>
+
+    <delete id="deleteByPictureId">
+        DELETE FROM picture_tag WHERE pictureId = #{pictureId}
+    </delete>
+
+</mapper>

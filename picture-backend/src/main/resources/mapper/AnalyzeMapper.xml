@@ -47,17 +47,15 @@
         ORDER BY COUNT(*) DESC, category ASC
     </select>
 
-    <!-- 标签排行：用 JSON_TABLE 展开 picture.tags（JSON 数组） -->
+    <!-- 标签排行：直接聚合 picture_tag 关系表，与列表筛选使用同一份标签数据 -->
     <select id="selectTopTags" resultType="com.tzy.picturebackend.model.vo.AnalyzeTagVO">
-        SELECT jt.tag AS tag,
+        SELECT pt.tag AS tag,
                COUNT(*) AS `count`
-        FROM picture p,
-             JSON_TABLE(p.tags, '$[*]' COLUMNS (tag VARCHAR(64) PATH '$')) jt
+        FROM picture_tag pt
+                 JOIN picture p ON p.id = pt.pictureId
         WHERE p.isDelete = 0
-          AND p.tags IS NOT NULL
-          AND JSON_VALID(p.tags)
-        GROUP BY jt.tag
-        ORDER BY COUNT(*) DESC, jt.tag ASC
+        GROUP BY pt.tag
+        ORDER BY COUNT(*) DESC, pt.tag ASC
         LIMIT #{limit}
     </select>
 

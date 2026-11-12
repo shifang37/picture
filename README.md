@@ -55,7 +55,7 @@ picture/
 mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS picture DEFAULT CHARACTER SET utf8mb4"
 ```
 
-只需建库，四张表由后端启动时通过 Flyway 自动创建（基线脚本为 `picture-backend/src/main/resources/db/migration/V1__baseline.sql`）。
+只需建库，所需表由后端启动时通过 Flyway 自动创建（基线脚本为 `picture-backend/src/main/resources/db/migration/V1__baseline.sql`，标签关系表由 `V8__picture_tag_relation.sql` 创建）。
 
 默认连接配置为 `localhost:3306/picture`，账号 `root` / `root`，如不一致请修改配置文件。旧库（Flyway 之前创建的库）的升级方式见「生产部署」一节。
 
@@ -274,6 +274,16 @@ app:
 - 删除字典项不会修改已有图片的 `category` / `tags` 字段；图片仍在使用时只是不再作为新选项出现
 - 旧库升级到该结构：执行 `picture-backend/sql/legacy/upgrade_v3.sql`，会建表并初始化现有图片的标签/分类（新库无需执行，Flyway 会自动建表）
 
+### 图片标签关系表（picture_tag）
+
+图片与标签的权威关系存在 `picture_tag(pictureId, tag)`：
+
+- 主键 `(pictureId, tag)` 保证同一张图不重复；索引 `(tag, pictureId)` 支撑按标签筛选；
+- 列表查询（首页、管理端、我的图片）在有标签条件时改为 `picture JOIN picture_tag`，多个标签是「同时包含」语义，不再对 `picture.tags` 做 `LIKE '%"标签"%'` 全表扫描；
+- 上传/编辑/管理员更新/删除图片时同步维护关系表，`V8` 迁移会从历史 `picture.tags` JSON 回填；
+- `picture.tags` 仍保留 JSON 副本供详情展示和 Elasticsearch 文档使用，但筛选以 `picture_tag` 为准；
+- 标签上限统一为**单个 32 字符、最多 20 个**（`PictureTagConstant`），DTO、数据库 `picture_tag.tag`、AI 提示词与模型输出清洗共用同一组值。
+
 ## 下载与下载次数统计口径
 
 详情页的「免费下载」走同源后端接口 `GET /api/picture/download/{id}`：
@@ -321,7 +331,7 @@ app:
 
 - 消息体只带标识：`{ eventId, type, pictureId, occurredAt }`，不带名称、简介、状态等业务数据；消费者一律按 `pictureId` 回查数据库，重复投递和乱序都不会写入过期数据；
 - `PictureServiceImpl` 只发布 Spring 应用事件（`PictureEventPublisher`），由 `PictureEventRelay` 用 `@TransactionalEventListener(fallbackExecution = true)` 转发到 RabbitMQ。Service 单元测试只需要验证事件是否发出，不依赖 RabbitMQ；
-- 当前代码没有事务，事件会立即转发；将来给业务方法加上事务后，会自动变成「事务提交后再发」，避免消息先于数据落库。
+- `editPicture` / `updatePicture` 已加事务（同时更新 `picture` 与 `picture_tag`），事件会在事务提交后转发；上传、审核、删除仍无事务，事件立即转发。
 
 ### 可靠性
 
@@ -378,7 +388,7 @@ $env:SEARCH_ENGINE = 'es'
 | `GET /api/analyze/overview` | 用户数、图片数、待审核数、总存储体积、总下载次数 |
 | `GET /api/analyze/upload_trend?days=30` | 按天的上传数量，没有上传的日期补 0 |
 | `GET /api/analyze/category` | 各分类的图片数与体积 |
-| `GET /api/analyze/tags?limit=20` | 使用次数最多的标签（`JSON_TABLE` 展开 `picture.tags`） |
+| `GET /api/analyze/tags?limit=20` | 使用次数最多的标签（聚合 `picture_tag` 关系表） |
 | `GET /api/analyze/review` | 已通过/已拒绝数量、平均审核耗时 |
 | `GET /api/analyze/top_download?limit=10` | 下载次数最多的图片 |
 
@@ -550,7 +560,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **337 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **418 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
@@ -558,7 +568,7 @@ cd picture-backend
 ./mvnw verify   # 单元测试 + Testcontainers 集成测试，需要本机 Docker
 ```
 
-集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、重传后审核/机审字段确实被置空、逻辑删除与账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
+集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
 ## 持续集成与依赖更新
 

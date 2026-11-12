@@ -26,12 +26,38 @@
             <result property="reviewMessage" column="reviewMessage" />
             <result property="reviewerId" column="reviewerId" />
             <result property="reviewTime" column="reviewTime" />
+            <result property="machineReviewStatus" column="machineReviewStatus" />
+            <result property="machineReviewLabel" column="machineReviewLabel" />
+            <result property="machineReviewScore" column="machineReviewScore" />
+            <result property="machineReviewTime" column="machineReviewTime" />
     </resultMap>
 
     <sql id="Base_Column_List">
         id,url,name,introduction,category,tags,
         picSize,downloadCount,picWidth,picHeight,picScale,picFormat,
         userId,createTime,editTime,updateTime,isDelete,
-        reviewStatus,reviewMessage,reviewerId,reviewTime
+        reviewStatus,reviewMessage,reviewerId,reviewTime,
+        machineReviewStatus,machineReviewLabel,machineReviewScore,machineReviewTime
     </sql>
+
+    <!--
+        标签分页查询：先用 (tag, pictureId) 索引从 picture_tag 找出同时包含所有标签的图片，
+        再 JOIN picture 取完整数据；普通过滤/排序由 ew.customSqlSegment 提供，避免重复拼接条件。
+        多个标签是「同时包含」关系，因此用 GROUP BY + HAVING COUNT(DISTINCT tag) 而不是普通 JOIN。
+    -->
+    <select id="selectPageByTags" resultMap="BaseResultMap">
+        SELECT p.*
+        FROM picture p
+        JOIN (
+            SELECT pt.pictureId
+            FROM picture_tag pt
+            WHERE pt.tag IN
+            <foreach collection="tags" item="tag" open="(" separator="," close=")">
+                #{tag}
+            </foreach>
+            GROUP BY pt.pictureId
+            HAVING COUNT(DISTINCT pt.tag) = #{tagCount}
+        ) tag_match ON tag_match.pictureId = p.id
+        ${ew.customSqlSegment}
+    </select>
 </mapper>
