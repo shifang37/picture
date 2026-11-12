@@ -20,8 +20,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -67,9 +69,12 @@ public class FileManager {
     static final long JPEG_COMPRESS_THRESHOLD = (long) (1.5 * 1024 * 1024);
 
     /**
-     * 单张图片最大像素数：防止解压炸弹在压缩阶段耗尽内存
+     * 单张图片最大像素数：防止解压炸弹在压缩阶段耗尽内存。
+     * <p>
+     * 后端容器内存上限只有 768MB（堆约 75%），20MP 的 ARGB 原图一次性解码约 80MB，
+     * 再叠加并发请求很容易 OOM，因此上限从 4000 万像素降到 2000 万像素。
      */
-    static final long MAX_PIXELS = 40_000_000L;
+    static final long MAX_PIXELS = 20_000_000L;
 
     @Resource
     private CosClientConfig cosClientConfig;
@@ -79,6 +84,9 @@ public class FileManager {
 
     @Resource
     private PictureMetrics pictureMetrics;
+
+    @Resource
+    private ImageDecodeLimiter imageDecodeLimiter;
 
     /**
      * 上传图片
@@ -188,28 +196,18 @@ public class FileManager {
         }
         // 像素超限直接拒绝上传，避免 ImageIO/Thumbnailator 全量解码导致 OOM
         validatePixelCount(width, height);
+        int longSide = Math.max(width, height);
+        boolean needResize = longSide > MAX_DIMENSION;
+        boolean needQuality = jpeg && source.length() > JPEG_COMPRESS_THRESHOLD;
+        if (!needResize && !needQuality) {
+            return source;
+        }
+        // 信号量只包住真正的解码/缩放：并发大图解码是 768MB 容器最容易 OOM 的地方。
+        // 等待超时会抛 42900，必须放在压缩失败回退的 try 之外，否则会被当成普通失败吞掉。
+        imageDecodeLimiter.acquire();
         try {
-            int longSide = Math.max(width, height);
-            boolean needResize = longSide > MAX_DIMENSION;
-            boolean needQuality = jpeg && source.length() > JPEG_COMPRESS_THRESHOLD;
-            if (!needResize && !needQuality) {
-                return source;
-            }
             compressed = File.createTempFile("picture-compressed-", "." + normalizedSuffix);
-            Thumbnails.Builder<File> builder = Thumbnails.of(source);
-            if (needResize) {
-                double scale = MAX_DIMENSION * 1.0 / longSide;
-                builder.size(Math.max(1, (int) Math.round(width * scale)),
-                        Math.max(1, (int) Math.round(height * scale)));
-            } else {
-                builder.scale(1.0);
-            }
-            if (jpeg) {
-                builder.outputFormat("jpg").outputQuality(JPEG_QUALITY);
-            } else {
-                builder.outputFormat("png");
-            }
-            builder.toFile(compressed);
+            writeCompressed(source, compressed, width, height, jpeg, needResize);
             // 仅因体积触发压缩时，压缩结果反而更大就回退原文件
             if (!needResize && compressed.length() >= source.length()) {
                 deleteTempFile(compressed);
@@ -225,7 +223,88 @@ public class FileManager {
                 deleteTempFile(compressed);
             }
             return source;
+        } finally {
+            imageDecodeLimiter.release();
         }
+    }
+
+    /**
+     * 解码并写出压缩后的图片。
+     * <p>
+     * 需要缩放时先用 {@link ImageReadParam#setSourceSubsampling} 在解码阶段降采样，
+     * 把解码后的像素规模压到与目标尺寸同一量级，再交给 Thumbnailator 缩放到精确尺寸编码。
+     * 这样 20MP 的大图不会把完整原图像素读进堆内存。
+     *
+     * @param source     原始临时文件
+     * @param target     压缩输出文件
+     * @param width      原图宽
+     * @param height     原图高
+     * @param jpeg       是否 JPEG
+     * @param needResize 是否需要缩小到 {@link #MAX_DIMENSION}
+     */
+    private void writeCompressed(File source, File target, int width, int height,
+                                 boolean jpeg, boolean needResize) throws IOException {
+        int longSide = Math.max(width, height);
+        BufferedImage decoded = decodeImage(source, needResize ? subsamplingFactor(longSide) : 1);
+        if (decoded == null) {
+            throw new IOException("无法解码图片");
+        }
+        Thumbnails.Builder<BufferedImage> builder = Thumbnails.of(decoded);
+        if (needResize) {
+            double scale = MAX_DIMENSION * 1.0 / longSide;
+            builder.size(Math.max(1, (int) Math.round(width * scale)),
+                    Math.max(1, (int) Math.round(height * scale)));
+        } else {
+            builder.scale(1.0);
+        }
+        if (jpeg) {
+            builder.outputFormat("jpg").outputQuality(JPEG_QUALITY);
+        } else {
+            builder.outputFormat("png");
+        }
+        builder.toFile(target);
+    }
+
+    /**
+     * 按需在解码阶段降采样读取图片。
+     * <p>
+     * 不支持降采样的读取器会退化为完整解码（随后仍会缩放），但常规 JPEG/PNG 读取器都支持；
+     * 无法识别或解码失败时返回 null，由调用方回退原文件。
+     *
+     * @param source      图片文件
+     * @param subsampling 降采样倍数，1 表示不降采样
+     */
+    private BufferedImage decodeImage(File source, int subsampling) throws IOException {
+        try (ImageInputStream input = ImageIO.createImageInputStream(source)) {
+            if (input == null) {
+                return null;
+            }
+            Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+            if (!readers.hasNext()) {
+                return null;
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(input, true, true);
+                ImageReadParam param = reader.getDefaultReadParam();
+                if (subsampling > 1) {
+                    param.setSourceSubsampling(subsampling, subsampling, 0, 0);
+                }
+                return reader.read(0, param);
+            } finally {
+                reader.dispose();
+            }
+        }
+    }
+
+    /**
+     * 计算解码降采样倍数。
+     * <p>
+     * 向下取整，保证降采样后的长边不小于 {@link #MAX_DIMENSION}，
+     * 避免 Thumbnailator 因源图太小而无法缩放到目标尺寸。
+     */
+    static int subsamplingFactor(int longSide) {
+        return Math.max(1, longSide / MAX_DIMENSION);
     }
 
     /**

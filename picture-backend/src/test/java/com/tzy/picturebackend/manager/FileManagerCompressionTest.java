@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.manager;
 
+import com.tzy.picturebackend.config.UploadProperties;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -43,6 +44,11 @@ class FileManagerCompressionTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(fileManager, "pictureMetrics", new PictureMetrics(meterRegistry));
+        UploadProperties uploadProperties = new UploadProperties();
+        uploadProperties.setMaxConcurrentDecodes(2);
+        uploadProperties.setDecodeWaitMillis(1000);
+        ReflectionTestUtils.setField(fileManager, "imageDecodeLimiter",
+                new ImageDecodeLimiter(uploadProperties));
     }
 
     @AfterEach
@@ -84,9 +90,9 @@ class FileManagerCompressionTest {
     }
 
     @Test
-    @DisplayName("PNG：缩放后保留透明通道")
+    @DisplayName("PNG：降采样解码后缩放并保留透明通道")
     void compressIfNeeded_keepsPngTransparency() throws Exception {
-        File source = writeTransparentPng(3000, 2000);
+        File source = writeTransparentPng(4000, 3000);
 
         File compressed = fileManager.compressIfNeeded(source, "png");
         tempFiles.add(compressed);
@@ -119,14 +125,42 @@ class FileManagerCompressionTest {
     }
 
     @Test
-    @DisplayName("像素校验：超过 4000 万像素拒绝，边界值放行")
+    @DisplayName("像素校验：超过 2000 万像素拒绝，20MP 边界值放行")
     void validatePixelCount_enforcesLimit() {
         BusinessException e = assertThrows(BusinessException.class,
-                () -> FileManager.validatePixelCount(7000, 6000));
+                () -> FileManager.validatePixelCount(5000, 5000));
         assertTrue(e.getMessage().contains("像素过大"));
 
-        assertDoesNotThrow(() -> FileManager.validatePixelCount(8000, 5000));
+        assertDoesNotThrow(() -> FileManager.validatePixelCount(5000, 4000));
+        assertThrows(BusinessException.class, () -> FileManager.validatePixelCount(5000, 4001));
         assertThrows(BusinessException.class, () -> FileManager.validatePixelCount(0, 100));
+    }
+
+    @Test
+    @DisplayName("超大图：解码阶段降采样后仍缩放到 1920 长边")
+    void compressIfNeeded_subsamplesVeryLargeJpeg() throws Exception {
+        File source = writeJpeg(4000, 3000);
+        long originalSize = source.length();
+
+        File compressed = fileManager.compressIfNeeded(source, "jpg");
+        tempFiles.add(compressed);
+
+        assertNotSame(source, compressed);
+        BufferedImage result = ImageIO.read(compressed);
+        assertEquals(1920, result.getWidth());
+        assertEquals(1440, result.getHeight());
+        assertTrue(compressed.length() < originalSize,
+                "压缩后体积应下降: " + originalSize + " -> " + compressed.length());
+    }
+
+    @Test
+    @DisplayName("降采样倍数：向下取整保证降采样后长边不小于目标尺寸")
+    void subsamplingFactor_keepsTargetReachable() {
+        assertEquals(1, FileManager.subsamplingFactor(0));
+        assertEquals(1, FileManager.subsamplingFactor(1920));
+        assertEquals(1, FileManager.subsamplingFactor(3839));
+        assertEquals(2, FileManager.subsamplingFactor(3840));
+        assertEquals(3, FileManager.subsamplingFactor(6000));
     }
 
     @Test
