@@ -16,4 +16,12 @@
         DELETE FROM picture_tag WHERE pictureId = #{pictureId}
     </delete>
 
+    <delete id="deleteByPictureIds">
+        DELETE FROM picture_tag
+        WHERE pictureId IN
+        <foreach collection="pictureIds" item="pictureId" open="(" separator="," close=")">
+            #{pictureId}
+        </foreach>
+    </delete>
+
 </mapper>

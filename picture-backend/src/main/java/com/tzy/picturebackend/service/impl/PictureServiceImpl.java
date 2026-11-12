@@ -15,6 +15,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
+import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
@@ -24,6 +25,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureReviewRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUpdateRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
+import com.tzy.picturebackend.model.entity.PictureAiSuggestion;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
@@ -97,6 +99,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private PictureTagMapper pictureTagMapper;
+
+    @Resource
+    private PictureAiSuggestionMapper pictureAiSuggestionMapper;
 
     @Resource
     private PictureMetrics pictureMetrics;
@@ -401,6 +406,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean deletePicture(Long id, User loginUser) {
         ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "id 不能为空");
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
@@ -410,20 +416,120 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (!Objects.equals(oldPicture.getUserId(), loginUser.getId()) && !userService.isAdmin(loginUser)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
-        // 先做数据库逻辑删除，成功后再清理 COS，避免数据库回滚但对象已被删除
-        boolean result = this.removeById(id);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
-        // 逻辑删除后清理标签关系；即使清理失败，查询侧仍会过滤已删除图片
-        try {
-            pictureTagMapper.deleteByPictureId(id);
-        } catch (RuntimeException e) {
-            log.warn("清理图片标签关系失败, pictureId = {}", id, e);
-        }
-        deletePictureFile(oldPicture.getUrl());
+        // 移入回收站：保留图片行与 COS 对象，7 天内可由管理员恢复
+        int updated = baseMapper.logicalDeleteById(id, loginUser.getId(), new Date());
+        ThrowUtils.throwIf(updated <= 0, ErrorCode.OPERATION_ERROR, "图片已被删除，请刷新后重试");
+        // 级联清理 AI 建议：它只对正常图片有意义，且模型输出可能包含敏感内容，不保留在回收站
+        pictureAiSuggestionMapper.delete(new QueryWrapper<PictureAiSuggestion>()
+                .eq("pictureId", id));
+        // 标签关系不随回收站保留；恢复时会按 picture.tags JSON 重建
+        pictureTagMapper.deleteByPictureId(id);
+        // 审核日志（picture_review_log）按合规要求保留，这里不做任何删除
         pictureListCache.invalidate();
         // 删除后索引侧也要移除文档
         pictureEventPublisher.pictureChanged(id);
         return true;
+    }
+
+    @Override
+    public Page<Picture> pageRecyclePictures(Page<Picture> page, PictureQueryRequest pictureQueryRequest) {
+        ThrowUtils.throwIf(page == null, ErrorCode.PARAMS_ERROR);
+        QueryWrapper<Picture> queryWrapper = new QueryWrapper<>();
+        // 自定义 SQL 不经过逻辑删除插件，回收站条件必须显式指定
+        queryWrapper.eq("isDelete", 1);
+        if (pictureQueryRequest != null) {
+            queryWrapper.eq(ObjUtil.isNotEmpty(pictureQueryRequest.getId()),
+                    "id", pictureQueryRequest.getId());
+            queryWrapper.eq(ObjUtil.isNotEmpty(pictureQueryRequest.getUserId()),
+                    "userId", pictureQueryRequest.getUserId());
+            queryWrapper.like(StrUtil.isNotBlank(pictureQueryRequest.getName()),
+                    "name", pictureQueryRequest.getName());
+            queryWrapper.like(StrUtil.isNotBlank(pictureQueryRequest.getIntroduction()),
+                    "introduction", pictureQueryRequest.getIntroduction());
+            queryWrapper.eq(StrUtil.isNotBlank(pictureQueryRequest.getCategory()),
+                    "category", pictureQueryRequest.getCategory());
+            queryWrapper.eq(ObjUtil.isNotEmpty(pictureQueryRequest.getReviewStatus()),
+                    "reviewStatus", pictureQueryRequest.getReviewStatus());
+            String searchText = pictureQueryRequest.getSearchText();
+            if (StrUtil.isNotBlank(searchText)) {
+                queryWrapper.and(qw -> qw.like("name", searchText)
+                        .or()
+                        .like("introduction", searchText));
+            }
+        }
+        // 固定按删除时间倒序，最近删除的排在最前面；历史数据没有 deletedAt 时排在最后
+        queryWrapper.orderByDesc("deletedAt").orderByDesc("id");
+        baseMapper.selectRecyclePage(page, queryWrapper);
+        return page;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean restorePicture(Long id) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "id 不能为空");
+        Picture deletedPicture = baseMapper.selectDeletedById(id);
+        ThrowUtils.throwIf(deletedPicture == null, ErrorCode.NOT_FOUND_ERROR, "回收站中不存在该图片");
+        int restored = baseMapper.restoreById(id);
+        ThrowUtils.throwIf(restored <= 0, ErrorCode.OPERATION_ERROR, "图片已被恢复或清理，请刷新后重试");
+        // 删除时清理了标签关系，恢复时用图片上的 JSON 副本重建；
+        // 历史数据可能存在超长/超量标签，先按 picture_tag 的约束过滤，避免恢复整体失败
+        replacePictureTags(id, restorableTags(deletedPicture.getTags()));
+        // 恢复后可能重新出现在公开列表，缓存与搜索索引都要刷新
+        pictureListCache.invalidate();
+        pictureEventPublisher.pictureChanged(id);
+        return true;
+    }
+
+    /**
+     * 从图片的 tags JSON 中提取可写回 {@code picture_tag} 的标签：
+     * 去空、去重、单标签长度与总数量都按 {@link PictureTagConstant} 限制。
+     */
+    private static List<String> restorableTags(String tagsJson) {
+        List<String> tags = normalizeTags(parseTags(tagsJson));
+        List<String> result = new ArrayList<>(Math.min(tags.size(), PictureTagConstant.TAG_MAX_COUNT));
+        for (String tag : tags) {
+            if (tag.length() > PictureTagConstant.TAG_MAX_LENGTH) {
+                continue;
+            }
+            result.add(tag);
+            if (result.size() >= PictureTagConstant.TAG_MAX_COUNT) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public int purgeExpiredPictures(Date before, int batchSize) {
+        ThrowUtils.throwIf(before == null, ErrorCode.PARAMS_ERROR, "清理截止时间不能为空");
+        int limit = Math.max(1, Math.min(batchSize, 500));
+        List<Picture> candidates = baseMapper.selectPurgeCandidates(before, limit);
+        if (CollUtil.isEmpty(candidates)) {
+            return 0;
+        }
+        // 先删 COS 对象：删除失败的图片保留数据库行，下一轮继续重试，避免产生孤儿文件
+        List<Long> purgeableIds = new ArrayList<>(candidates.size());
+        for (Picture picture : candidates) {
+            if (fileManager.deletePictureForPurge(picture.getUrl())) {
+                purgeableIds.add(picture.getId());
+            }
+        }
+        if (purgeableIds.isEmpty()) {
+            return 0;
+        }
+        try {
+            // 防御性清理：正常删除流程已经处理过，这里覆盖历史数据与上次清理失败的记录
+            pictureTagMapper.deleteByPictureIds(purgeableIds);
+            pictureAiSuggestionMapper.delete(new QueryWrapper<PictureAiSuggestion>()
+                    .in("pictureId", purgeableIds));
+            int deleted = baseMapper.deletePhysicallyByIds(purgeableIds);
+            log.info("回收站物理清理完成, candidates = {}, deleted = {}", candidates.size(), deleted);
+            // 审核日志按合规要求保留，物理删除图片后也不清理 picture_review_log
+            return deleted;
+        } catch (RuntimeException e) {
+            log.error("回收站物理清理失败，保留记录等待下一轮重试, ids = {}", purgeableIds, e);
+            return 0;
+        }
     }
 
     @Override

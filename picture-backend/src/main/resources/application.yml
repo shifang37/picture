@@ -135,6 +135,13 @@ app:
     # 搜索后端：mysql（默认，沿用原有模糊查询）| es（Elasticsearch 全文检索）
     # 设为 es 后公开列表由索引召回 id，Elasticsearch 异常时自动回落到 MySQL
     engine: ${SEARCH_ENGINE:mysql}
+  recycle:
+    # 删除后先进入回收站，保留期结束才物理删除图片与 COS 对象
+    retention-days: ${RECYCLE_RETENTION_DAYS:7}
+    # 关闭后回收站中的图片不会被自动清理（仍需手动处理）
+    purge-enabled: ${RECYCLE_PURGE_ENABLED:true}
+    # 单批物理清理条数
+    purge-batch-size: ${RECYCLE_PURGE_BATCH_SIZE:100}
 
 # 对象存储配置：生产环境通过环境变量注入，禁止把真实密钥写入仓库
 cos:

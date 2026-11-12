@@ -22,6 +22,8 @@
             <result property="editTime" column="editTime" />
             <result property="updateTime" column="updateTime" />
             <result property="isDelete" column="isDelete" />
+            <result property="deletedAt" column="deletedAt" />
+            <result property="deletedBy" column="deletedBy" />
             <result property="reviewStatus" column="reviewStatus" />
             <result property="reviewMessage" column="reviewMessage" />
             <result property="reviewerId" column="reviewerId" />
@@ -36,6 +38,7 @@
         id,url,name,introduction,category,tags,
         picSize,downloadCount,picWidth,picHeight,picScale,picFormat,
         userId,createTime,editTime,updateTime,isDelete,
+        deletedAt,deletedBy,
         reviewStatus,reviewMessage,reviewerId,reviewTime,
         machineReviewStatus,machineReviewLabel,machineReviewScore,machineReviewTime
     </sql>
@@ -60,4 +63,64 @@
         ) tag_match ON tag_match.pictureId = p.id
         ${ew.customSqlSegment}
     </select>
+
+    <!-- 移入回收站：逻辑删除插件只能更新 isDelete，这里一并写入删除时间与操作人 -->
+    <update id="logicalDeleteById">
+        UPDATE picture
+        SET isDelete  = 1,
+            deletedAt = #{deletedAt},
+            deletedBy = #{deletedBy}
+        WHERE id = #{id}
+          AND isDelete = 0
+    </update>
+
+    <!-- 回收站查询必须绕过逻辑删除插件的 isDelete = 0 过滤 -->
+    <select id="selectDeletedById" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM picture
+        WHERE id = #{id}
+          AND isDelete = 1
+    </select>
+
+    <update id="restoreById">
+        UPDATE picture
+        SET isDelete  = 0,
+            deletedAt = NULL,
+            deletedBy = NULL
+        WHERE id = #{id}
+          AND isDelete = 1
+    </update>
+
+    <!-- 回收站分页：条件由 ew.customSqlSegment 提供，调用方需显式带上 isDelete = 1 -->
+    <select id="selectRecyclePage" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM picture
+        ${ew.customSqlSegment}
+    </select>
+
+    <!--
+        到期清理：deletedAt 是首选依据；升级前的历史逻辑删除行没有该字段，用 updateTime 兜底。
+        单批限制条数，避免一次清理占用过多数据库连接与 COS 请求。
+    -->
+    <select id="selectPurgeCandidates" resultMap="BaseResultMap">
+        SELECT
+        <include refid="Base_Column_List"/>
+        FROM picture
+        WHERE isDelete = 1
+          AND COALESCE(deletedAt, updateTime) &lt; #{before}
+        ORDER BY COALESCE(deletedAt, updateTime) ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 只有回收站中的记录才允许物理删除，避免误删正常图片 -->
+    <delete id="deletePhysicallyByIds">
+        DELETE FROM picture
+        WHERE isDelete = 1
+          AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </delete>
 </mapper>

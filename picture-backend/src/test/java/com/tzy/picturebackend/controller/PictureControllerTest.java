@@ -237,6 +237,64 @@ class PictureControllerTest {
         verify(pictureService, never()).deletePicture(any(), any());
     }
 
+    // ==================== 回收站 ====================
+
+    @Test
+    @DisplayName("回收站列表：按分页与条件委托给 service")
+    void listRecyclePictureByPage_delegatesToService() throws Exception {
+        when(pictureService.pageRecyclePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+
+        mockMvc.perform(post("/picture/recycle/list/page")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"name\":\"海边\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<PictureQueryRequest> requestCaptor =
+                ArgumentCaptor.forClass(PictureQueryRequest.class);
+        verify(pictureService).pageRecyclePictures(any(Page.class), requestCaptor.capture());
+        assertEquals("海边", requestCaptor.getValue().getName());
+    }
+
+    @Test
+    @DisplayName("回收站列表：分页大小超过上限返回参数错误")
+    void listRecyclePictureByPage_rejectsOversizedPage() throws Exception {
+        mockMvc.perform(post("/picture/recycle/list/page")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":101}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(pictureService, never()).pageRecyclePictures(any(), any());
+    }
+
+    @Test
+    @DisplayName("回收站恢复：委托给 service")
+    void restorePicture_delegatesToService() throws Exception {
+        when(pictureService.restorePicture(1L)).thenReturn(true);
+
+        mockMvc.perform(post("/picture/recycle/restore")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").value(true));
+
+        verify(pictureService).restorePicture(1L);
+    }
+
+    @Test
+    @DisplayName("回收站恢复：空 body 返回参数错误")
+    void restorePicture_rejectsEmptyBody() throws Exception {
+        mockMvc.perform(post("/picture/recycle/restore")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(pictureService, never()).restorePicture(any());
+    }
+
     // ==================== 编辑 ====================
 
     @Test

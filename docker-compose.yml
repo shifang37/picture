@@ -151,6 +151,10 @@ services:
       ES_URIS: ${ES_URIS:-http://elasticsearch:9200}
       ES_USERNAME: ${ES_USERNAME:-elastic}
       ES_PASSWORD: ${ES_PASSWORD:-picture}
+      # 回收站保留天数与到期物理清理
+      RECYCLE_RETENTION_DAYS: ${RECYCLE_RETENTION_DAYS:-7}
+      RECYCLE_PURGE_ENABLED: ${RECYCLE_PURGE_ENABLED:-true}
+      RECYCLE_PURGE_BATCH_SIZE: ${RECYCLE_PURGE_BATCH_SIZE:-100}
     expose:
       - '8123'
       # 管理端口只在 Compose 内网开放，供 Prometheus 抓取，不映射到宿主机

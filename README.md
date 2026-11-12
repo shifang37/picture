@@ -25,6 +25,7 @@ picture/
 │       ├── manager/                 # COS 上传、数据万象机审、DeepSeek 标注、搜索查询构建与限流封装
 │       ├── event/                   # 图片事件模型与 Spring 事件转发
 │       ├── mq/                      # RabbitMQ 拓扑与队列消费者
+│       ├── task/                    # 定时任务（回收站到期物理清理等）
 │       ├── model/                   # entity / dto / vo / enums
 │       ├── aop/                     # @AuthCheck 权限切面
 │       ├── config/                  # CORS、MyBatis-Plus、Jackson、springdoc
@@ -55,7 +56,7 @@ picture/
 mysql -uroot -p -e "CREATE DATABASE IF NOT EXISTS picture DEFAULT CHARACTER SET utf8mb4"
 ```
 
-只需建库，所需表由后端启动时通过 Flyway 自动创建（基线脚本为 `picture-backend/src/main/resources/db/migration/V1__baseline.sql`，标签关系表由 `V8__picture_tag_relation.sql` 创建）。
+只需建库，所需表由后端启动时通过 Flyway 自动创建（基线脚本为 `picture-backend/src/main/resources/db/migration/V1__baseline.sql`，标签关系表由 `V8__picture_tag_relation.sql` 创建，回收站字段由 `V9__picture_recycle_bin.sql` 创建）。
 
 默认连接配置为 `localhost:3306/picture`，账号 `root` / `root`，如不一致请修改配置文件。旧库（Flyway 之前创建的库）的升级方式见「生产部署」一节。
 
@@ -128,7 +129,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 1. 登录后通过顶部「创建图片」进入上传页，也可以直接访问 `/add_picture`
 2. 支持 jpg / jpeg / png / webp，单张不超过 2MB；后端会同时校验后缀、MIME 类型和文件头
 3. 上传成功后填写名称、简介、分类、标签，提交后跳转到图片详情
-4. 「我的图片」（`/my_pictures`）可以查看自己上传的全部图片，按待审核 / 已通过 / 已拒绝筛选，并支持编辑、删除
+4. 「我的图片」（`/my_pictures`）可以查看自己上传的全部图片，按待审核 / 已通过 / 已拒绝筛选，并支持编辑、删除；删除后进入回收站，保留期内可由管理员恢复
 
 上传时后端会按需压缩原图，降低存储与下载流量：
 
@@ -163,6 +164,22 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 7. 审核历史会记录审核人（昵称/账号，用户已删除时显示 `用户#id`）、动作、时间和意见；管理员上传/重传自动通过时也会写入一条「管理员上传，自动通过」记录
 8. 机审开启时，上传后几秒内会写回机审结果，审核页按机审疑似 / 违规优先展示；默认的 `assist` 模式不改变审核状态，详见下一节
 9. 批量审核（`POST /api/picture/review/batch`）整批加事务：一条 `UPDATE ... WHERE id IN (...) AND reviewStatus = 0`、一条批量审核历史、结束时只失效一次公开列表缓存、只发一条 `picture.batch.changed` 事件；已不在待审核状态的图片计入失败明细，不会被覆盖
+
+## 图片回收站与删除策略
+
+删除图片不再立即销毁数据，而是先进入回收站；保留期结束后才物理删除：
+
+| 阶段 | 行为 |
+| --- | --- |
+| 删除（`POST /api/picture/delete`） | 逻辑删除并记录 `deletedAt` / `deletedBy`；**级联删除 AI 建议**（`picture_ai_suggestion`）与标签关系（`picture_tag`）；**不删 COS 对象**，否则回收站恢复后图片会打不开；**不删审核日志**（`picture_review_log` 按合规要求保留） |
+| 回收站（`/admin/pictureRecycle`） | 管理员按删除时间倒序查看已删除图片，支持按名称、分类、审核状态筛选，可一键恢复 |
+| 恢复（`POST /api/picture/recycle/restore`） | 清除 `isDelete` / `deletedAt` / `deletedBy`，按 `picture.tags` JSON 重建标签关系；保留原审核状态，失效公开列表缓存并重新同步搜索索引；删除时已清理的 AI 建议不会随恢复还原 |
+| 到期物理清理 | 默认保留 **7 天**，`PictureRecyclePurgeTask` 每小时执行一次：先删 COS 对象，成功后再物理删除 `picture` 行，并防御性清理该图片的标签关系与 AI 建议；COS 删除失败的图片保留到下一轮重试，避免留下孤儿对象 |
+
+- 回收站保留期由 `app.recycle.retention-days` 控制（环境变量 `RECYCLE_RETENTION_DAYS`，默认 7）；`app.recycle.purge-enabled=false` 可关闭自动清理，`app.recycle.purge-batch-size` 控制单批条数（默认 100）；
+- 物理删除时**不删除** `picture_review_log`：审核日志按图片 id 关联，图片被清理后仍可通过 `GET /api/picture/review/log?pictureId=` 追溯；
+- 管理端接口：`POST /api/picture/recycle/list/page`（分页查询，参数同图片管理列表）与 `POST /api/picture/recycle/restore`（body `{ "id": "图片 id" }`），均要求管理员权限；
+- 结构变更由 `V9__picture_recycle_bin.sql` 完成：新增 `picture.deletedAt`、`picture.deletedBy` 与 `idx_recycle_list(isDelete, deletedAt)`，并把升级前已逻辑删除的历史行按 `updateTime` 回填 `deletedAt`，确保它们也会到期清理。
 
 ## 机审初筛（数据万象）
 
@@ -309,7 +326,7 @@ app:
 
 - **标签/分类字典**（`GET /api/picture/tag_category`）：Spring Cache 存 Redis（key 为 `tagCategory::…`），TTL 30 分钟；管理员新增、删除、同步字典后立即失效，首页分类 Tab 马上更新。
 - **公开图片列表**（`POST /api/picture/list/page/vo`）：两级缓存，L1 是 Caffeine（最多 500 项、写入后 30 秒过期），L2 是 Redis（5 分钟 + 0~60 秒随机抖动）。「我的图片」、管理列表、详情页都不缓存。
-- **失效**：审核通过/拒绝（批量审核整批只失效一次）、编辑、删除、上传成功后对 `picture:list:ns` 自增，新请求换用新命名空间，旧 key 自然过期。因此审核结果立即可见，L1 最多比数据库滞后 30 秒。
+- **失效**：审核通过/拒绝（批量审核整批只失效一次）、编辑、删除、回收站恢复、上传成功后对 `picture:list:ns` 自增，新请求换用新命名空间，旧 key 自然过期。因此审核结果立即可见，L1 最多比数据库滞后 30 秒。
 - **降级**：缓存只保存公开可见的数据；Redis 读写异常时直接回源数据库，列表接口不受影响。
 - 实测（300 张图片、50 次请求）：公开列表热缓存 p95 约 8.5 ms，每次失效回源 p95 约 19 ms。
 
@@ -326,7 +343,7 @@ app:
 | --- | --- | --- |
 | `picture.uploaded` | 新上传或重传成功 | `picture.moderation.q`、`picture.search.q`、`picture.ai.q`（机审开启时 AI 消费者会跳过，等 `moderated`） |
 | `picture.moderated` | 机审完成 | `picture.ai.q` |
-| `picture.changed` | 人工审核、编辑、删除 | `picture.search.q` |
+| `picture.changed` | 人工审核、编辑、删除、回收站恢复 | `picture.search.q` |
 | `picture.batch.changed` | 批量审核完成（一条事件带整批 id） | `picture.search.q` |
 
 ### 事件模型
@@ -430,7 +447,7 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 - 健康检查：`/api/health`（Docker healthcheck，始终可用）。启用 `observability` profile 后 Actuator 搬到独立管理端口：`http://backend:8124/actuator/health`，该端口不经过 nginx、不映射到宿主机；Elasticsearch 健康项默认关闭，启用搜索后可设 `SEARCH_HEALTH_ENABLED=true`
 - **监控收口**：公网 `/api` 只暴露 `health` 与 `info`，`/api/actuator/prometheus` 不可访问；Prometheus 指标只在独立管理端口 8124 暴露，详见下一节「可观测性」
 - **限流来源 IP**：登录/上传限流按 Tomcat 解析后的真实 `remoteAddr` 计数；nginx 使用 `$remote_addr` 覆盖 `X-Forwarded-For`，后端不会再直接信任客户端可伪造的转发头。后端端口只应在 Docker 内网暴露，不要直接映射到公网
-- **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增更高版本的迁移脚本（如 `V7__xxx.sql`）
+- **数据库迁移**：表结构由 Flyway 管理，启动时自动执行 `picture-backend/src/main/resources/db/migration` 下未执行过的脚本。新库直接执行 `V1__baseline.sql`；接入前已有表的旧库会被自动标记为基线版本 1（不重复建表），若该库结构还没升到 v3，需先各执行一次 `picture-backend/sql/legacy/upgrade_v2.sql` 和 `upgrade_v3.sql`。迁移执行后不要修改旧脚本，结构变更请新增更高版本的迁移脚本（如 `V9__xxx.sql`）
 - **数据库账号**：应用不再使用 root。MySQL 首次初始化时会创建专用账号 `picture`（密码 `DB_PASSWORD`），对 `picture` 库有全部权限，Flyway 才能执行 DDL。已有 `mysql-data` 卷需要手工补一次：
   ```sql
   CREATE USER IF NOT EXISTS 'picture'@'%' IDENTIFIED BY '<DB_PASSWORD>';
@@ -562,7 +579,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **428 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **449 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
@@ -570,7 +587,7 @@ cd picture-backend
 ./mvnw verify   # 单元测试 + Testcontainers 集成测试，需要本机 Docker
 ```
 
-集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
+集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
 ## 持续集成与依赖更新
 

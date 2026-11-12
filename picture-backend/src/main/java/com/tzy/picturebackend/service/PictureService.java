@@ -19,6 +19,7 @@ import com.tzy.picturebackend.model.vo.PictureVO;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -53,13 +54,48 @@ public interface PictureService extends IService<Picture> {
     boolean editPicture(PictureEditRequest pictureEditRequest, User loginUser);
 
     /**
-     * 删除图片：先做数据库逻辑删除，成功后 best-effort 清理 COS 对象
+     * 删除图片：移入回收站（逻辑删除），同时级联清理 AI 建议与标签关系。
+     * <p>
+     * COS 对象不会立即删除，保留期内的回收站恢复需要原文件；审核历史按合规要求保留，
+     * 不随图片删除。对象与数据库行由 {@link #purgeExpiredPictures(Date, int)} 在到期后清理。
      *
      * @param id        图片 id
      * @param loginUser 当前登录用户
      * @return 是否删除成功
      */
     boolean deletePicture(Long id, User loginUser);
+
+    /**
+     * 分页查询回收站中的图片（仅管理员使用）
+     *
+     * @param page    分页参数
+     * @param request 查询条件；目前支持 id、名称、简介、分类、用户、审核状态与搜索词
+     * @return 已删除图片分页，按删除时间倒序
+     */
+    Page<Picture> pageRecyclePictures(Page<Picture> page, PictureQueryRequest request);
+
+    /**
+     * 从回收站恢复图片
+     * <p>
+     * 恢复图片记录，并按 {@code picture.tags} JSON 重建标签关系；恢复后发布 changed 事件，
+     * 让搜索索引按当前审核状态重新同步。
+     *
+     * @param id 图片 id
+     * @return 是否恢复成功
+     */
+    boolean restorePicture(Long id);
+
+    /**
+     * 物理删除超过保留期的回收站图片。
+     * <p>
+     * 先删除 COS 对象，成功后再删除数据库行；COS 删除失败时保留该行等下一轮重试，
+     * 避免对象留在桶里变成孤儿文件。审核日志不删除。
+     *
+     * @param before    删除时间早于该时刻的图片会被清理
+     * @param batchSize 单批最多处理条数
+     * @return 实际物理删除的图片数量
+     */
+    int purgeExpiredPictures(Date before, int batchSize);
 
     /**
      * 清理图片文件（best-effort，失败只记录日志，不抛异常）

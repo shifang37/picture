@@ -155,6 +155,49 @@ class FileManagerTest {
         assertFalse(assertDoesNotThrow(() -> manager.deletePicture(url)));
     }
 
+    // ==================== 回收站物理清理 ====================
+
+    @Test
+    @DisplayName("回收站清理：本桶对象删除成功返回 true")
+    void deletePictureForPurge_deletesOwnObject() {
+        FileManager manager = new FileManager();
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(manager, "cosManager", cosManager);
+        String url = "https://example.cos.myqcloud.com/public/1/a.jpg";
+        when(cosManager.parseObjectKey(url)).thenReturn("public/1/a.jpg");
+
+        assertTrue(manager.deletePictureForPurge(url));
+        verify(cosManager).deleteObject("public/1/a.jpg");
+    }
+
+    @Test
+    @DisplayName("回收站清理：空地址与非本桶地址视为无需删除，可继续清理数据库行")
+    void deletePictureForPurge_treatsBlankAndForeignUrlAsDone() {
+        FileManager manager = new FileManager();
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(manager, "cosManager", cosManager);
+        String foreignUrl = "https://other.com/a.jpg";
+        when(cosManager.parseObjectKey(foreignUrl)).thenReturn(null);
+
+        assertTrue(manager.deletePictureForPurge(null));
+        assertTrue(manager.deletePictureForPurge(""));
+        assertTrue(manager.deletePictureForPurge(foreignUrl));
+        verify(cosManager, never()).deleteObject(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("回收站清理：COS 删除失败返回 false，调用方保留记录重试")
+    void deletePictureForPurge_returnsFalseOnCosFailure() {
+        FileManager manager = new FileManager();
+        CosManager cosManager = mock(CosManager.class);
+        ReflectionTestUtils.setField(manager, "cosManager", cosManager);
+        String url = "https://example.cos.myqcloud.com/public/1/a.jpg";
+        when(cosManager.parseObjectKey(url)).thenReturn("public/1/a.jpg");
+        doThrow(new RuntimeException("cos down")).when(cosManager).deleteObject("public/1/a.jpg");
+
+        assertFalse(assertDoesNotThrow(() -> manager.deletePictureForPurge(url)));
+    }
+
     private MockMultipartFile file(String name, String contentType, byte[] content) {
         return new MockMultipartFile("file", name, contentType, content);
     }

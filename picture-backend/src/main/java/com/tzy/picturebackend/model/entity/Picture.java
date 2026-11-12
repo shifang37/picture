@@ -103,6 +103,16 @@ public class Picture implements Serializable {
     private Integer isDelete;
 
     /**
+     * 移入回收站时间；未删除时为空
+     */
+    private Date deletedAt;
+
+    /**
+     * 删除操作人 id
+     */
+    private Long deletedBy;
+
+    /**
      * 状态：0-待审核; 1-通过; 2-拒绝
      */
     private Integer reviewStatus;

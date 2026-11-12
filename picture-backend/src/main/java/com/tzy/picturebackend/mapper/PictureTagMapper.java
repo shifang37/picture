@@ -28,4 +28,12 @@ public interface PictureTagMapper {
      * @return 删除行数
      */
     int deleteByPictureId(@Param("pictureId") Long pictureId);
+
+    /**
+     * 批量删除多张图片的标签关系，供回收站到期物理清理使用
+     *
+     * @param pictureIds 图片 id 集合
+     * @return 删除行数
+     */
+    int deleteByPictureIds(@Param("pictureIds") Collection<Long> pictureIds);
 }

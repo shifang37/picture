@@ -81,7 +81,7 @@
               >编辑</a-button
             >
             <a-popconfirm
-              title="确定删除这张图片吗？删除后不可恢复。"
+              title="确定删除这张图片吗？删除后进入回收站，可在「图片回收站」中恢复。"
               ok-text="删除"
               cancel-text="取消"
               @confirm="doDelete(record.id)"

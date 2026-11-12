@@ -95,6 +95,11 @@ const originItems = [
     title: '图片管理',
   },
   {
+    key: '/admin/pictureRecycle',
+    label: '图片回收站',
+    title: '图片回收站',
+  },
+  {
     key: '/admin/userManage',
     label: '用户管理',
     title: '用户管理',

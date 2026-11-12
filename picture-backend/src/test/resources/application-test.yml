@@ -23,6 +23,9 @@ app:
       enabled: false
   ai:
     enabled: false
+  recycle:
+    # 集成测试不触发定时物理清理，避免测试过程中删除数据
+    purge-enabled: false
 # COS 只用于创建客户端 Bean，测试不会真正发起请求
 cos:
   client:

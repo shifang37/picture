@@ -53,7 +53,10 @@
           <a-space>
             <a-button type="link" size="small" @click="viewPicture(record)">查看</a-button>
             <a-button type="link" size="small" @click="editPictureItem(record)">编辑</a-button>
-            <a-popconfirm title="确定删除这张图片吗？" @confirm="doDelete(record)">
+            <a-popconfirm
+              title="确定删除这张图片吗？删除后进入回收站，可在保留期内由管理员恢复。"
+              @confirm="doDelete(record)"
+            >
               <a-button type="link" size="small" danger>删除</a-button>
             </a-popconfirm>
           </a-space>

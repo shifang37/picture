@@ -202,6 +202,8 @@ declare namespace API {
     editTime?: string
     updateTime?: string
     isDelete?: number
+    deletedAt?: string
+    deletedBy?: string
     reviewStatus?: number
     reviewMessage?: string
     reviewerId?: string

@@ -89,6 +89,37 @@ export async function listPictureReviewLogs(pictureId: string, options?: { [key:
 }
 
 /**
+ * 分页查询回收站中的图片（管理员）
+ */
+export async function listRecyclePictureByPage(
+  body: API.PictureQueryRequest,
+  options?: { [key: string]: any },
+) {
+  return request<API.BaseResponsePagePicture>('/picture/recycle/list/page', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    ...(options || {}),
+  })
+}
+
+/**
+ * 从回收站恢复图片（管理员）
+ */
+export async function restorePicture(id: string, options?: { [key: string]: any }) {
+  return request<API.BaseResponseBoolean>('/picture/recycle/restore', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    data: { id },
+    ...(options || {}),
+  })
+}
+
+/**
  * 分页获取当前登录用户的图片（含待审核 / 已拒绝）
  */
 export async function listMyPictureVoByPage(

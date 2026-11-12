@@ -148,7 +148,7 @@ class PictureApplicationIT {
         Integer applied = jdbcTemplate.queryForObject(
                 "select count(*) from flyway_schema_history where success = 1", Integer.class);
         assertNotNull(applied);
-        assertTrue(applied >= 8, "V1-V8 迁移应全部执行，实际 " + applied);
+        assertTrue(applied >= 9, "V1-V9 迁移应全部执行，实际 " + applied);
 
         List<String> columns = jdbcTemplate.queryForList(
                 "select column_name from information_schema.columns "
@@ -156,6 +156,8 @@ class PictureApplicationIT {
                 String.class);
         assertTrue(columns.stream().anyMatch("reviewStatus"::equalsIgnoreCase));
         assertTrue(columns.stream().anyMatch("machineReviewStatus"::equalsIgnoreCase));
+        assertTrue(columns.stream().anyMatch("deletedAt"::equalsIgnoreCase));
+        assertTrue(columns.stream().anyMatch("deletedBy"::equalsIgnoreCase));
 
         Integer aiSuggestionTable = jdbcTemplate.queryForObject(
                 "select count(*) from information_schema.tables "
@@ -288,6 +290,72 @@ class PictureApplicationIT {
         Integer isDelete = jdbcTemplate.queryForObject(
                 "select isDelete from picture where id = ?", Integer.class, picture.getId());
         assertEquals(1, isDelete);
+    }
+
+    @Test
+    @DisplayName("回收站：删除级联清理 AI 建议、保留审核日志，恢复后重建标签关系")
+    void recycleBinRestoresPictureAndRetainsReviewLog() {
+        User owner = createUser("recycle-owner");
+        Picture picture = savePicture(owner.getId(), "recycle-" + UUID.randomUUID() + ".jpg");
+        String tagA = "回收站标签A-" + UUID.randomUUID().toString().substring(0, 6);
+        String tagB = "回收站标签B-" + UUID.randomUUID().toString().substring(0, 6);
+        jdbcTemplate.update("update picture set tags = ? where id = ?",
+                "[\"" + tagA + "\",\"" + tagB + "\"]", picture.getId());
+        jdbcTemplate.update("insert into picture_tag (pictureId, tag) values (?, ?), (?, ?)",
+                picture.getId(), tagA, picture.getId(), tagB);
+        jdbcTemplate.update("insert into picture_ai_suggestion (pictureId, name, status) "
+                + "values (?, ?, 1)", picture.getId(), "AI 建议");
+        jdbcTemplate.update("insert into picture_review_log "
+                        + "(pictureId, reviewerId, reviewStatus, reviewMessage) values (?, ?, ?, ?)",
+                picture.getId(), owner.getId(), PictureReviewStatusEnum.PASS.getValue(), "审核通过");
+
+        assertTrue(pictureService.deletePicture(picture.getId(), owner));
+
+        // 图片进入回收站：逻辑删除、记录删除时间与删除人
+        assertNull(pictureService.getById(picture.getId()));
+        Map<String, Object> deletedRow = jdbcTemplate.queryForMap(
+                "select isDelete, deletedAt, deletedBy from picture where id = ?", picture.getId());
+        assertEquals(1, ((Number) deletedRow.get("isDelete")).intValue());
+        assertNotNull(deletedRow.get("deletedAt"));
+        assertEquals(owner.getId().longValue(), ((Number) deletedRow.get("deletedBy")).longValue());
+
+        // AI 建议级联清理；审核日志按合规要求保留；标签关系在删除时清理
+        Integer suggestions = jdbcTemplate.queryForObject(
+                "select count(*) from picture_ai_suggestion where pictureId = ?",
+                Integer.class, picture.getId());
+        assertEquals(0, suggestions);
+        Integer logs = jdbcTemplate.queryForObject(
+                "select count(*) from picture_review_log where pictureId = ?",
+                Integer.class, picture.getId());
+        assertEquals(1, logs, "审核日志不能随图片删除");
+        Integer relationsAfterDelete = jdbcTemplate.queryForObject(
+                "select count(*) from picture_tag where pictureId = ?", Integer.class, picture.getId());
+        assertEquals(0, relationsAfterDelete);
+
+        // 普通列表看不到，回收站列表可以看到
+        PictureQueryRequest query = new PictureQueryRequest();
+        query.setId(picture.getId());
+        Page<Picture> normalPage = pictureService.pagePictures(new Page<>(1, 10), query);
+        assertTrue(normalPage.getRecords().isEmpty(), "已删除图片不能出现在普通列表");
+        Page<Picture> recyclePage = pictureService.pageRecyclePictures(new Page<>(1, 10), query);
+        assertEquals(1, recyclePage.getRecords().size(), "回收站应能查到已删除图片");
+        assertEquals(picture.getId(), recyclePage.getRecords().get(0).getId());
+
+        // 恢复：清除删除标记，并按 picture.tags JSON 重建标签关系
+        assertTrue(pictureService.restorePicture(picture.getId()));
+        assertNotNull(pictureService.getById(picture.getId()));
+        Map<String, Object> restoredRow = jdbcTemplate.queryForMap(
+                "select isDelete, deletedAt, deletedBy from picture where id = ?", picture.getId());
+        assertEquals(0, ((Number) restoredRow.get("isDelete")).intValue());
+        assertNull(restoredRow.get("deletedAt"));
+        assertNull(restoredRow.get("deletedBy"));
+        Integer relationsAfterRestore = jdbcTemplate.queryForObject(
+                "select count(*) from picture_tag where pictureId = ?", Integer.class, picture.getId());
+        assertEquals(2, relationsAfterRestore, "恢复时应按 tags JSON 重建标签关系");
+        Integer logsAfterRestore = jdbcTemplate.queryForObject(
+                "select count(*) from picture_review_log where pictureId = ?",
+                Integer.class, picture.getId());
+        assertEquals(1, logsAfterRestore, "恢复不应影响审核日志");
     }
 
     @Test

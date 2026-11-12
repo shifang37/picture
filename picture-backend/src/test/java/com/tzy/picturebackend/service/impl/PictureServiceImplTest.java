@@ -7,6 +7,7 @@ import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
+import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.mapper.PictureTagMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
@@ -75,6 +76,8 @@ class PictureServiceImplTest {
 
     private PictureTagMapper pictureTagMapper;
 
+    private PictureAiSuggestionMapper pictureAiSuggestionMapper;
+
     private FileManager fileManager;
 
     private PictureReviewLogService pictureReviewLogService;
@@ -93,6 +96,7 @@ class PictureServiceImplTest {
         userService = mock(UserService.class);
         pictureMapper = mock(PictureMapper.class);
         pictureTagMapper = mock(PictureTagMapper.class);
+        pictureAiSuggestionMapper = mock(PictureAiSuggestionMapper.class);
         fileManager = mock(FileManager.class);
         pictureReviewLogService = mock(PictureReviewLogService.class);
         tagCategoryService = mock(TagCategoryService.class);
@@ -102,6 +106,7 @@ class PictureServiceImplTest {
         ReflectionTestUtils.setField(pictureService, "userService", userService);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "pictureTagMapper", pictureTagMapper);
+        ReflectionTestUtils.setField(pictureService, "pictureAiSuggestionMapper", pictureAiSuggestionMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
         ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);
         ReflectionTestUtils.setField(pictureService, "tagCategoryService", tagCategoryService);
@@ -388,56 +393,64 @@ class PictureServiceImplTest {
                 .tag("result", "failure").counter().count());
     }
 
-    // ==================== 删除 ====================
+    // ==================== 回收站：删除 ====================
 
     @Test
-    @DisplayName("删除：本人删除成功时同时清理 COS")
-    void deletePicture_ownerDeletesAndCleansCos() {
+    @DisplayName("删除：移入回收站并记录删除人，级联清理 AI 建议与标签关系，保留 COS 对象")
+    void deletePicture_movesToRecycleBinAndCascades() {
         User owner = user(100L, "user");
         Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
         existing.setUrl("https://example.com/public/100/2026-11-11_old.jpg");
         when(pictureMapper.selectById(1L)).thenReturn(existing);
-        when(pictureMapper.deleteById(1L)).thenReturn(1);
+        when(pictureMapper.logicalDeleteById(eq(1L), eq(100L), any(Date.class))).thenReturn(1);
 
         assertTrue(pictureService.deletePicture(1L, owner));
 
-        verify(pictureMapper).deleteById(1L);
-        verify(fileManager).deletePicture(existing.getUrl());
+        ArgumentCaptor<Date> deletedAtCaptor = ArgumentCaptor.forClass(Date.class);
+        verify(pictureMapper).logicalDeleteById(eq(1L), eq(100L), deletedAtCaptor.capture());
+        assertNotNull(deletedAtCaptor.getValue(), "应记录移入回收站时间");
+        // AI 建议只对正常图片有意义，删除时级联清理
+        verify(pictureAiSuggestionMapper).delete(any());
+        // 标签关系清理；恢复时按 picture.tags 重建
+        verify(pictureTagMapper).deleteByPictureId(1L);
+        // 回收站期间必须保留 COS 对象，否则恢复后图片无法访问
+        verifyNoInteractions(fileManager);
         verify(pictureListCache).invalidate();
         verify(pictureEventPublisher).pictureChanged(1L);
+        // 审核日志属于合规数据，不随图片删除
+        verifyNoInteractions(pictureReviewLogService);
     }
 
     @Test
-    @DisplayName("删除：管理员可以删除他人图片并清理 COS")
+    @DisplayName("删除：管理员删除他人图片时记录管理员为删除人")
     void deletePicture_adminDeletesOthersPicture() {
         User admin = admin();
         when(userService.isAdmin(admin)).thenReturn(true);
         Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
         existing.setUrl("https://example.com/public/100/a.jpg");
         when(pictureMapper.selectById(1L)).thenReturn(existing);
-        when(pictureMapper.deleteById(1L)).thenReturn(1);
+        when(pictureMapper.logicalDeleteById(eq(1L), eq(admin.getId()), any(Date.class))).thenReturn(1);
 
         assertTrue(pictureService.deletePicture(1L, admin));
 
-        verify(pictureMapper).deleteById(1L);
-        verify(fileManager).deletePicture(existing.getUrl());
+        verify(pictureMapper).logicalDeleteById(eq(1L), eq(admin.getId()), any(Date.class));
+        verify(pictureAiSuggestionMapper).delete(any());
         verify(pictureEventPublisher).pictureChanged(1L);
     }
 
     @Test
-    @DisplayName("删除：图片不存在时不删数据库、不删 COS")
+    @DisplayName("删除：图片不存在或已删除时不写回收站、不清理关联数据")
     void deletePicture_missingPictureDoesNothing() {
         when(pictureMapper.selectById(1L)).thenReturn(null);
 
         assertThrows(BusinessException.class, () -> pictureService.deletePicture(1L, user(100L, "user")));
 
-        verify(pictureMapper, never()).deleteById(any());
-        verifyNoInteractions(fileManager);
-        verifyNoInteractions(pictureEventPublisher);
+        verify(pictureMapper, never()).logicalDeleteById(any(), any(), any());
+        verifyNoInteractions(pictureAiSuggestionMapper, pictureTagMapper, fileManager, pictureEventPublisher);
     }
 
     @Test
-    @DisplayName("删除：普通用户不能删除他人图片，也不清理 COS")
+    @DisplayName("删除：普通用户不能删除他人图片，也不清理关联数据")
     void deletePicture_rejectsOtherUser() {
         User other = user(200L, "user");
         when(userService.isAdmin(other)).thenReturn(false);
@@ -445,24 +458,195 @@ class PictureServiceImplTest {
 
         assertThrows(BusinessException.class, () -> pictureService.deletePicture(1L, other));
 
-        verify(pictureMapper, never()).deleteById(any());
-        verifyNoInteractions(fileManager);
-        verifyNoInteractions(pictureEventPublisher);
+        verify(pictureMapper, never()).logicalDeleteById(any(), any(), any());
+        verifyNoInteractions(pictureAiSuggestionMapper, pictureTagMapper, fileManager, pictureEventPublisher);
     }
 
     @Test
-    @DisplayName("删除：数据库删除失败时不清理 COS（避免数据库仍有记录但对象已丢失）")
-    void deletePicture_dbFailureKeepsCos() {
+    @DisplayName("删除：并发下已被其他请求移入回收站时不再重复清理")
+    void deletePicture_concurrentDeleteDoesNotCascadeAgain() {
         User owner = user(100L, "user");
         Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
-        existing.setUrl("https://example.com/public/100/a.jpg");
         when(pictureMapper.selectById(1L)).thenReturn(existing);
-        when(pictureMapper.deleteById(1L)).thenReturn(0);
+        // 条件更新 isDelete = 0 未命中，说明另一请求已完成删除
+        when(pictureMapper.logicalDeleteById(eq(1L), eq(100L), any(Date.class))).thenReturn(0);
 
         assertThrows(BusinessException.class, () -> pictureService.deletePicture(1L, owner));
 
-        verifyNoInteractions(fileManager);
-        verifyNoInteractions(pictureEventPublisher);
+        verifyNoInteractions(pictureAiSuggestionMapper, pictureTagMapper, fileManager, pictureEventPublisher);
+    }
+
+    // ==================== 回收站：列表与恢复 ====================
+
+    @Test
+    @DisplayName("回收站列表：只查 isDelete = 1，支持条件过滤并按删除时间倒序")
+    void pageRecyclePictures_queriesDeletedRows() {
+        PictureQueryRequest request = new PictureQueryRequest();
+        request.setName("海边");
+        request.setCategory("风景");
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        request.setUserId(100L);
+        request.setSearchText("日落");
+        when(pictureMapper.selectRecyclePage(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Page<Picture> result = pictureService.pageRecyclePictures(new Page<>(1, 10), request);
+
+        assertNotNull(result);
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper).selectRecyclePage(any(), wrapperCaptor.capture());
+        String sql = wrapperCaptor.getValue().getSqlSegment();
+        assertTrue(sql.contains("isDelete"), "实际 SQL: " + sql);
+        assertTrue(sql.contains("name"), "实际 SQL: " + sql);
+        assertTrue(sql.contains("category"), "实际 SQL: " + sql);
+        assertTrue(sql.contains("reviewStatus"), "实际 SQL: " + sql);
+        assertTrue(sql.contains("userId"), "实际 SQL: " + sql);
+        assertTrue(sql.contains("ORDER BY deletedAt DESC"), "实际 SQL: " + sql);
+        verify(pictureMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    @DisplayName("恢复：清除删除标记并按 picture.tags 重建标签关系，同时刷新缓存与索引")
+    void restorePicture_restoresRowAndTags() {
+        Picture deleted = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        deleted.setTags("[\"标签A\",\"标签B\"]");
+        when(pictureMapper.selectDeletedById(1L)).thenReturn(deleted);
+        when(pictureMapper.restoreById(1L)).thenReturn(1);
+
+        assertTrue(pictureService.restorePicture(1L));
+
+        verify(pictureMapper).restoreById(1L);
+        verify(pictureTagMapper).deleteByPictureId(1L);
+        verify(pictureTagMapper).insertBatch(1L, List.of("标签A", "标签B"));
+        verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).pictureChanged(1L);
+    }
+
+    @Test
+    @DisplayName("恢复：超长标签按 picture_tag 约束过滤，不因历史脏数据整体失败")
+    void restorePicture_filtersTagsExceedingRelationLimit() {
+        Picture deleted = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        deleted.setTags("[\"标签A\",\"" + "x".repeat(40) + "\"]");
+        when(pictureMapper.selectDeletedById(1L)).thenReturn(deleted);
+        when(pictureMapper.restoreById(1L)).thenReturn(1);
+
+        assertTrue(pictureService.restorePicture(1L));
+
+        verify(pictureTagMapper).insertBatch(1L, List.of("标签A"));
+    }
+
+    @Test
+    @DisplayName("恢复：不在回收站时返回不存在，不写数据库")
+    void restorePicture_rejectsMissingDeletedPicture() {
+        when(pictureMapper.selectDeletedById(1L)).thenReturn(null);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> pictureService.restorePicture(1L));
+
+        assertEquals("回收站中不存在该图片", e.getMessage());
+        verify(pictureMapper, never()).restoreById(any());
+        verifyNoInteractions(pictureTagMapper, pictureListCache, pictureEventPublisher);
+    }
+
+    @Test
+    @DisplayName("恢复：并发下已被恢复或清理时提示刷新，不重建标签")
+    void restorePicture_rejectsConcurrentRestore() {
+        Picture deleted = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        when(pictureMapper.selectDeletedById(1L)).thenReturn(deleted);
+        when(pictureMapper.restoreById(1L)).thenReturn(0);
+
+        assertThrows(BusinessException.class, () -> pictureService.restorePicture(1L));
+
+        verifyNoInteractions(pictureTagMapper, pictureListCache, pictureEventPublisher);
+    }
+
+    // ==================== 回收站：到期物理清理 ====================
+
+    @Test
+    @DisplayName("清理：先删 COS 再物理删除数据库行，并防御性清理标签与 AI 建议")
+    void purgeExpiredPictures_deletesCosThenRows() {
+        Picture first = expiredPicture(1L, "https://example.com/a.jpg");
+        Picture second = expiredPicture(2L, "https://example.com/b.jpg");
+        when(pictureMapper.selectPurgeCandidates(any(Date.class), eq(100)))
+                .thenReturn(List.of(first, second));
+        when(fileManager.deletePictureForPurge(anyString())).thenReturn(true);
+        when(pictureMapper.deletePhysicallyByIds(anyCollection())).thenReturn(2);
+
+        int purged = pictureService.purgeExpiredPictures(new Date(), 100);
+
+        assertEquals(2, purged);
+        verify(fileManager).deletePictureForPurge(first.getUrl());
+        verify(fileManager).deletePictureForPurge(second.getUrl());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Collection<Long>> idsCaptor = ArgumentCaptor.forClass(Collection.class);
+        verify(pictureMapper).deletePhysicallyByIds(idsCaptor.capture());
+        assertEquals(2, idsCaptor.getValue().size());
+        assertTrue(idsCaptor.getValue().containsAll(List.of(1L, 2L)));
+        verify(pictureTagMapper).deleteByPictureIds(idsCaptor.getValue());
+        verify(pictureAiSuggestionMapper).delete(any());
+        // 审核日志按合规要求保留，物理清理不得触碰
+        verifyNoInteractions(pictureReviewLogService);
+    }
+
+    @Test
+    @DisplayName("清理：COS 删除失败的图片保留记录，成功删除的图片继续物理清理")
+    @SuppressWarnings("unchecked")
+    void purgeExpiredPictures_keepsRowWhenCosDeleteFails() {
+        Picture ok = expiredPicture(1L, "https://example.com/a.jpg");
+        Picture failed = expiredPicture(2L, "https://example.com/b.jpg");
+        when(pictureMapper.selectPurgeCandidates(any(Date.class), eq(100)))
+                .thenReturn(List.of(ok, failed));
+        when(fileManager.deletePictureForPurge(ok.getUrl())).thenReturn(true);
+        when(fileManager.deletePictureForPurge(failed.getUrl())).thenReturn(false);
+        when(pictureMapper.deletePhysicallyByIds(anyCollection())).thenReturn(1);
+
+        int purged = pictureService.purgeExpiredPictures(new Date(), 100);
+
+        assertEquals(1, purged);
+        ArgumentCaptor<Collection<Long>> idsCaptor = ArgumentCaptor.forClass(Collection.class);
+        verify(pictureMapper).deletePhysicallyByIds(idsCaptor.capture());
+        assertEquals(List.of(1L), List.copyOf(idsCaptor.getValue()),
+                "COS 删除失败的图片必须保留到下一轮");
+        verify(pictureTagMapper).deleteByPictureIds(idsCaptor.getValue());
+        verify(pictureAiSuggestionMapper).delete(any());
+    }
+
+    @Test
+    @DisplayName("清理：全部 COS 删除失败时不碰数据库")
+    void purgeExpiredPictures_allCosFailuresSkipDatabase() {
+        Picture failed = expiredPicture(1L, "https://example.com/a.jpg");
+        when(pictureMapper.selectPurgeCandidates(any(Date.class), eq(100)))
+                .thenReturn(List.of(failed));
+        when(fileManager.deletePictureForPurge(failed.getUrl())).thenReturn(false);
+
+        assertEquals(0, pictureService.purgeExpiredPictures(new Date(), 100));
+
+        verify(pictureMapper, never()).deletePhysicallyByIds(anyCollection());
+        verifyNoInteractions(pictureTagMapper, pictureAiSuggestionMapper);
+    }
+
+    @Test
+    @DisplayName("清理：没有到期图片时不访问 COS")
+    void purgeExpiredPictures_emptyCandidates() {
+        when(pictureMapper.selectPurgeCandidates(any(Date.class), eq(100))).thenReturn(List.of());
+
+        assertEquals(0, pictureService.purgeExpiredPictures(new Date(), 100));
+
+        verifyNoInteractions(fileManager, pictureTagMapper, pictureAiSuggestionMapper);
+    }
+
+    @Test
+    @DisplayName("清理：数据库删除异常时只记录日志，不中断定时任务")
+    void purgeExpiredPictures_swallowsDatabaseFailure() {
+        Picture expired = expiredPicture(1L, "https://example.com/a.jpg");
+        when(pictureMapper.selectPurgeCandidates(any(Date.class), eq(100)))
+                .thenReturn(List.of(expired));
+        when(fileManager.deletePictureForPurge(expired.getUrl())).thenReturn(true);
+        when(pictureMapper.deletePhysicallyByIds(anyCollection()))
+                .thenThrow(new RuntimeException("db down"));
+
+        assertEquals(0, assertDoesNotThrow(
+                () -> pictureService.purgeExpiredPictures(new Date(), 100)));
     }
 
     @Test
@@ -903,19 +1087,6 @@ class PictureServiceImplTest {
     }
 
     @Test
-    @DisplayName("删除：逻辑删除后清理 picture_tag 关系")
-    void deletePicture_cleansPictureTagRelation() {
-        User owner = user(100L, "user");
-        Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
-        when(pictureMapper.selectById(1L)).thenReturn(existing);
-        when(pictureMapper.deleteById(1L)).thenReturn(1);
-
-        assertTrue(pictureService.deletePicture(1L, owner));
-
-        verify(pictureTagMapper).deleteByPictureId(1L);
-    }
-
-    @Test
     @DisplayName("标签分类：直接从字典服务读取，不再扫描图片")
     void listTagCategory_delegatesToDictionary() {
         PictureTagCategory fromDictionary = new PictureTagCategory();
@@ -1249,6 +1420,14 @@ class PictureServiceImplTest {
         picture.setId(id);
         picture.setUserId(userId);
         picture.setReviewStatus(reviewStatus);
+        return picture;
+    }
+
+    private Picture expiredPicture(Long id, String url) {
+        Picture picture = picture(id, 100L, PictureReviewStatusEnum.PASS.getValue());
+        picture.setUrl(url);
+        picture.setIsDelete(1);
+        picture.setDeletedAt(new Date(System.currentTimeMillis() - 8L * 24 * 60 * 60 * 1000));
         return picture;
     }
 

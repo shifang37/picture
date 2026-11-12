@@ -60,6 +60,12 @@ const router = createRouter({
       meta: { requiresAdmin: true },
     },
     {
+      path: '/admin/pictureRecycle',
+      name: '图片回收站',
+      component: () => import('@/pages/admin/PictureRecyclePage.vue'),
+      meta: { requiresAdmin: true },
+    },
+    {
       path: '/admin/userManage',
       name: '用户管理',
       component: () => import('@/pages/admin/UserManagePage.vue'),

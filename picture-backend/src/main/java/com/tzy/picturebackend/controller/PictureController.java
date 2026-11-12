@@ -89,6 +89,9 @@ public class PictureController {
 
     /**
      * 删除图片
+     * <p>
+     * 图片移入回收站（逻辑删除），保留期内可由管理员恢复；AI 建议立即清理，
+     * 审核日志按合规要求保留。
      */
     @PostMapping("/delete")
     public BaseResponse<Boolean> deletePicture(@Valid @RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
@@ -96,8 +99,41 @@ public class PictureController {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
         User loginUser = userService.getLoginUser(request);
-        // 权限校验、数据库逻辑删除、COS 清理统一收敛到 service
+        // 权限校验、进入回收站、级联清理统一收敛到 service
         pictureService.deletePicture(deleteRequest.getId(), loginUser);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 分页获取回收站中的图片（仅管理员可用）
+     * <p>
+     * 回收站保留期由 {@code app.recycle.retention-days} 控制（默认 7 天），到期后自动物理删除。
+     */
+    @PostMapping("/recycle/list/page")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Page<Picture>> listRecyclePictureByPage(
+            @Valid @RequestBody PictureQueryRequest pictureQueryRequest) {
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
+        long current = pictureQueryRequest.getCurrent();
+        long size = pictureQueryRequest.getPageSize();
+        validPage(current, size, 100);
+        Page<Picture> picturePage = pictureService.pageRecyclePictures(
+                new Page<>(current, size), pictureQueryRequest);
+        return ResultUtils.success(picturePage);
+    }
+
+    /**
+     * 从回收站恢复图片（仅管理员可用）
+     * <p>
+     * 恢复会重建标签关系并刷新列表缓存与搜索索引；图片保留原审核状态。
+     */
+    @PostMapping("/recycle/restore")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> restorePicture(@Valid @RequestBody DeleteRequest deleteRequest) {
+        if (deleteRequest == null || deleteRequest.getId() == null || deleteRequest.getId() <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        pictureService.restorePicture(deleteRequest.getId());
         return ResultUtils.success(true);
     }
 

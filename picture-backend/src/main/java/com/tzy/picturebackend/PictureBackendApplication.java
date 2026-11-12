@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @MapperScan("com.tzy.picturebackend.mapper")
 @EnableAspectJAutoProxy(exposeProxy = true)
-// 机审兜底任务（MachineReviewFallbackTask）依赖定时调度
+// 机审兜底与回收站到期清理任务依赖定时调度
 @EnableScheduling
 public class PictureBackendApplication {
 

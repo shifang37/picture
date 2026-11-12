@@ -352,6 +352,36 @@ public class FileManager {
     }
 
     /**
+     * 回收站到期清理：删除 COS 对象，并区分「无需删除」与「删除失败」。
+     * <p>
+     * 与 {@link #deletePicture(String)} 不同，这里把「url 为空 / 不属于当前存储桶」视为无需删除，
+     * 返回 {@code true} 让调用方可以继续物理删除数据库行；只有 COS 调用失败才返回 {@code false}，
+     * 调用方应保留记录，等下一轮清理重试，避免数据库行先消失、对象却留在桶里。
+     *
+     * @param url 图片访问地址
+     * @return 是否可以安全地物理删除对应的数据库记录
+     */
+    public boolean deletePictureForPurge(String url) {
+        if (StrUtil.isBlank(url)) {
+            log.warn("回收站清理：url 为空，直接清理数据库记录");
+            return true;
+        }
+        String key = cosManager.parseObjectKey(url);
+        if (StrUtil.isBlank(key)) {
+            log.warn("回收站清理：url 不属于当前存储桶，跳过对象删除, url = {}", url);
+            return true;
+        }
+        try {
+            cosManager.deleteObject(key);
+            log.info("回收站清理：已删除图片文件, key = {}", key);
+            return true;
+        } catch (Exception e) {
+            log.error("回收站清理：删除图片文件失败，保留记录等待重试, key = {}", key, e);
+            return false;
+        }
+    }
+
+    /**
      * 删除临时文件
      */
     public void deleteTempFile(File file) {
