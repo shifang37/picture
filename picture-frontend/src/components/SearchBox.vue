@@ -59,11 +59,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { fetchSearchSuggest } from '@/api/searchExtra'
-import {
-  clearSearchHistory,
-  pushSearchHistory,
-  readSearchHistory,
-} from '@/utils/searchHistory'
+import { clearSearchHistory, pushSearchHistory, readSearchHistory } from '@/utils/searchHistory'
 
 /**
  * 搜索框：联想（名称 / 标签 / 分类）+ 本地历史 + 热词。
@@ -147,7 +143,10 @@ const suggestionGroups = computed(() => {
       groups.push({ label, options })
     }
   }
-  addGroup('图片', (suggestions.value.names ?? []).map((item) => item.name ?? ''))
+  addGroup(
+    '图片',
+    (suggestions.value.names ?? []).map((item) => item.name ?? ''),
+  )
   addGroup('标签', suggestions.value.tags ?? [])
   addGroup('分类', suggestions.value.categories ?? [])
   return groups

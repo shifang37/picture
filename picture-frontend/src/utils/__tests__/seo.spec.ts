@@ -42,7 +42,11 @@ describe('buildSeoMetaTags', () => {
       url: 'https://img.example.com/picture/1',
     })
 
-    expect(tags).toContainEqual({ attribute: 'property', key: 'og:title', content: '日落海边 - 云图库' })
+    expect(tags).toContainEqual({
+      attribute: 'property',
+      key: 'og:title',
+      content: '日落海边 - 云图库',
+    })
     expect(tags).toContainEqual({
       attribute: 'property',
       key: 'og:description',
@@ -58,7 +62,11 @@ describe('buildSeoMetaTags', () => {
       key: 'og:url',
       content: 'https://img.example.com/picture/1',
     })
-    expect(tags).toContainEqual({ attribute: 'property', key: 'og:site_name', content: DEFAULT_SITE_NAME })
+    expect(tags).toContainEqual({
+      attribute: 'property',
+      key: 'og:site_name',
+      content: DEFAULT_SITE_NAME,
+    })
     expect(tags).toContainEqual({
       attribute: 'name',
       key: 'twitter:card',

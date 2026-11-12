@@ -98,7 +98,11 @@
                 </template>
               </a-button>
             </a-popconfirm>
-            <a-button v-if="picture.reviewStatus === 1" data-testid="picture-share" @click="doShare">
+            <a-button
+              v-if="picture.reviewStatus === 1"
+              data-testid="picture-share"
+              @click="doShare"
+            >
               分享
               <template #icon>
                 <ShareAltOutlined />

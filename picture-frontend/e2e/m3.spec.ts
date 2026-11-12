@@ -115,20 +115,28 @@ test('首页搜索：联想建议点击后按关键词搜索，命中名称高�
 
   await searchInput(page).fill('日落')
   // 联想是防抖请求，等待下拉框出现分组标题与建议
-  await expect(page.locator('.ant-select-item-option').filter({ hasText: '日落海边与晚霞' })).toBeVisible()
+  await expect(
+    page.locator('.ant-select-item-option').filter({ hasText: '日落海边与晚霞' }),
+  ).toBeVisible()
   expect(suggestQuery).toBe('日落')
   // 名称 / 标签 / 分类三个分组都来自接口
   await expect(page.locator('.ant-select-item-group').filter({ hasText: '标签' })).toBeVisible()
 
-  await page.locator('.ant-select-item-option').filter({ hasText: '日落海边与晚霞' }).first().click()
+  await page
+    .locator('.ant-select-item-option')
+    .filter({ hasText: '日落海边与晚霞' })
+    .first()
+    .click()
 
   // 点击建议后按该关键词重新查询（不含分页参数干扰）
-  await expect
-    .poll(() => listBodies[listBodies.length - 1]?.searchText)
-    .toBe('日落海边与晚霞')
+  await expect.poll(() => listBodies[listBodies.length - 1]?.searchText).toBe('日落海边与晚霞')
   // 命中的名称用 <mark> 高亮，且同时保存进搜索历史
-  await expect(page.getByTestId('picture-name').first().locator('mark')).toHaveText('日落海边与晚霞')
-  await expect(page.getByTestId('search-history-item').filter({ hasText: '日落海边与晚霞' })).toBeVisible()
+  await expect(page.getByTestId('picture-name').first().locator('mark')).toHaveText(
+    '日落海边与晚霞',
+  )
+  await expect(
+    page.getByTestId('search-history-item').filter({ hasText: '日落海边与晚霞' }),
+  ).toBeVisible()
 })
 
 test('首页搜索：空输入不请求联想，空结果显示热词引导', async ({ page }) => {
@@ -182,7 +190,6 @@ test('首页搜索：历史记录写入本地、刷新后仍在、可清空', as
   await page.reload()
   await expect(page.getByTestId('search-history')).toHaveCount(0)
 })
-
 
 test('详情页分享：弹窗展示链接与二维码，并写入 OG 元信息', async ({ page }) => {
   // 用桩替换剪贴板：headless 下 navigator.clipboard 依赖窗口焦点，直接读会不稳定
@@ -270,9 +277,7 @@ test('详情页分享：弹窗展示链接与二维码，并写入 OG 元信息'
 
   await page.getByTestId('share-copy').click()
   await expect(page.getByText('链接已复制')).toBeVisible()
-  const copied = await page.evaluate(
-    () => (window as unknown as { __copied: string[] }).__copied,
-  )
+  const copied = await page.evaluate(() => (window as unknown as { __copied: string[] }).__copied)
   expect(copied[0]).toContain('/picture/1')
 
   // 关闭弹窗后返回首页，验证动态 meta 被清理
