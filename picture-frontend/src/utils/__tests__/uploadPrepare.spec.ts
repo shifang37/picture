@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/utils/heic', () => ({
   isHeicFile: vi.fn(() => false),
-  convertHeicToJpeg: vi.fn(async () => new File(['converted'], 'photo.jpg', { type: 'image/jpeg' })),
+  convertHeicToJpeg: vi.fn(
+    async () => new File(['converted'], 'photo.jpg', { type: 'image/jpeg' }),
+  ),
 }))
 
 import { convertHeicToJpeg, isHeicFile } from '@/utils/heic'
@@ -100,8 +102,8 @@ describe('prepareImageForUpload', () => {
       new Error('HEIC 转换失败，请确认照片未损坏，或先转换为 JPG 再上传'),
     )
 
-    await expect(
-      prepareImageForUpload(createFile('broken.heic', 'image/heic')),
-    ).rejects.toThrow('HEIC 转换失败')
+    await expect(prepareImageForUpload(createFile('broken.heic', 'image/heic'))).rejects.toThrow(
+      'HEIC 转换失败',
+    )
   })
 })

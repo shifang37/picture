@@ -48,9 +48,9 @@ describe('shouldCompress', () => {
 
   it('自定义阈值生效', () => {
     expect(shouldCompress(1.5 * 1024 * 1024, null, { maxSizeMB: 1 })).toBe(true)
-    expect(shouldCompress(500 * 1024, { width: 1200, height: 800 }, { maxWidthOrHeight: 1000 })).toBe(
-      true,
-    )
+    expect(
+      shouldCompress(500 * 1024, { width: 1200, height: 800 }, { maxWidthOrHeight: 1000 }),
+    ).toBe(true)
   })
 })
 
@@ -136,7 +136,10 @@ describe('compressImage', () => {
   })
 
   it('压缩结果反而更大时回退原文件', async () => {
-    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 3000, height: 2000, close: vi.fn() })))
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => ({ width: 3000, height: 2000, close: vi.fn() })),
+    )
     const huge = new Blob([new Uint8Array(5 * 1024 * 1024)], { type: 'image/jpeg' })
     const originalCreateElement = document.createElement.bind(document)
     vi.spyOn(document, 'createElement').mockImplementation((tagName: string) => {

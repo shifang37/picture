@@ -34,7 +34,10 @@ export function formatBytes(bytes: number | null | undefined, fractionDigits = 1
 /**
  * 计算百分比（0–100 的整数），分母为 0 时返回 0
  */
-export function percentOf(used: number | null | undefined, total: number | null | undefined): number {
+export function percentOf(
+  used: number | null | undefined,
+  total: number | null | undefined,
+): number {
   if (used == null || total == null || total <= 0 || used <= 0) {
     return 0
   }

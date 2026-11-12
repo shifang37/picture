@@ -67,7 +67,10 @@ export function describePictureQuota(summary: QuotaSummary): string {
  * @param summary    配额摘要
  * @param fileBytes  即将上传的文件体积
  */
-export function checkQuotaForUpload(summary: QuotaSummary | null, fileBytes: number): string | null {
+export function checkQuotaForUpload(
+  summary: QuotaSummary | null,
+  fileBytes: number,
+): string | null {
   if (!summary || summary.exempt) {
     return null
   }

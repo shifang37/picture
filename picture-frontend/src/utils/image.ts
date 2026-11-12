@@ -79,7 +79,10 @@ export function shouldCompress(
   if (!dimensions) {
     return false
   }
-  return Math.max(dimensions.width, dimensions.height) > (options.maxWidthOrHeight ?? DEFAULT_MAX_DIMENSION)
+  return (
+    Math.max(dimensions.width, dimensions.height) >
+    (options.maxWidthOrHeight ?? DEFAULT_MAX_DIMENSION)
+  )
 }
 
 /**
@@ -97,7 +100,12 @@ export async function compressImage(
   options: CompressImageOptions = {},
 ): Promise<CompressImageResult> {
   const originalSize = file.size
-  const passthrough: CompressImageResult = { file, compressed: false, originalSize, size: originalSize }
+  const passthrough: CompressImageResult = {
+    file,
+    compressed: false,
+    originalSize,
+    size: originalSize,
+  }
   if (!file.type.startsWith('image/') || typeof document === 'undefined') {
     return passthrough
   }

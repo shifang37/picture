@@ -20,7 +20,8 @@
       </p>
       <p class="ant-upload-text">点击或拖拽多张图片到此处</p>
       <p class="ant-upload-hint">
-        支持 jpg / jpeg / png / webp / heic，单张不超过 10MB；超过的目标体积会压缩到 2MB 以内，超限文件会显示为失败并可以重试。
+        支持 jpg / jpeg / png / webp / heic，单张不超过 10MB；超过的目标体积会压缩到 2MB
+        以内，超限文件会显示为失败并可以重试。
       </p>
     </a-upload-dragger>
 
