@@ -6,10 +6,13 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -36,7 +39,7 @@ class PictureEventPublisherTest {
 
         PictureEvent event = captureEvents(1).get(0);
         assertEquals(PictureEventType.UPLOADED, event.type());
-        assertEquals(Long.valueOf(1L), event.pictureId());
+        assertEquals(List.of(1L), event.pictureIds());
         assertNotNull(event.eventId());
         assertFalse(event.eventId().isBlank());
         assertNotNull(event.occurredAt());
@@ -50,9 +53,27 @@ class PictureEventPublisherTest {
 
         var events = captureEvents(2);
         assertEquals(PictureEventType.MODERATED, events.get(0).type());
-        assertEquals(Long.valueOf(2L), events.get(0).pictureId());
+        assertEquals(List.of(2L), events.get(0).pictureIds());
         assertEquals(PictureEventType.CHANGED, events.get(1).type());
-        assertEquals(Long.valueOf(3L), events.get(1).pictureId());
+        assertEquals(List.of(3L), events.get(1).pictureIds());
+    }
+
+    @Test
+    @DisplayName("批量变更：整批只发布一条事件，事件里带全部图片 id")
+    void picturesChanged_publishesSingleBatchEvent() {
+        publisher.picturesChanged(List.of(1L, 2L, 3L));
+
+        PictureEvent event = captureEvents(1).get(0);
+        assertEquals(PictureEventType.BATCH_CHANGED, event.type());
+        assertEquals(List.of(1L, 2L, 3L), event.pictureIds());
+    }
+
+    @Test
+    @DisplayName("批量变更：空列表不发布事件")
+    void picturesChanged_ignoresEmptyIds() {
+        publisher.picturesChanged(List.of());
+
+        verify(delegate, times(0)).publishEvent(any());
     }
 
     @Test

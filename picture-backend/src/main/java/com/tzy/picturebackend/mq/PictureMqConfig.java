@@ -21,9 +21,10 @@ import org.springframework.context.annotation.Configuration;
  * 拓扑（声明为 Declarable，应用启动时由 RabbitAdmin 自动创建，重复启动是幂等的）：
  * <pre>
  * picture.event (topic)
- *   ├─ picture.uploaded  → picture.moderation.q、picture.search.q、picture.ai.q
- *   ├─ picture.moderated → picture.ai.q
- *   └─ picture.changed   → picture.search.q
+ *   ├─ picture.uploaded      → picture.moderation.q、picture.search.q、picture.ai.q
+ *   ├─ picture.moderated     → picture.ai.q
+ *   ├─ picture.changed       → picture.search.q
+ *   └─ picture.batch.changed → picture.search.q
  *
  * 每个业务队列都绑定自己的死信队列 picture.*.q.dlq，交换机为 picture.dlx。
  * </pre>
@@ -99,6 +100,9 @@ public class PictureMqConfig {
                 // 人工审核、编辑、删除：只需要更新搜索索引
                 BindingBuilder.bind(searchQueue).to(eventExchange)
                         .with(PictureEventType.CHANGED.getRoutingKey()),
+                // 批量审核：一条消息带整批 id，同样只更新搜索索引
+                BindingBuilder.bind(searchQueue).to(eventExchange)
+                        .with(PictureEventType.BATCH_CHANGED.getRoutingKey()),
                 // 每个业务队列的死信都进各自的 *.dlq
                 BindingBuilder.bind(moderationDeadLetterQueue).to(deadLetterExchange)
                         .with(deadLetterRoutingKey(MODERATION_QUEUE)),

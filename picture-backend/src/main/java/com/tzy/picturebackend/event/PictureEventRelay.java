@@ -36,8 +36,8 @@ public class PictureEventRelay {
                     correlationData);
         } catch (RuntimeException e) {
             // RabbitMQ 不可用时只丢弃这次投递，上传等主流程已经成功，不能因此回滚或报错
-            log.error("图片事件投递失败, eventId={}, type={}, pictureId={}",
-                    event.eventId(), event.type(), event.pictureId(), e);
+            log.error("图片事件投递失败, eventId={}, type={}, pictureIds={}",
+                    event.eventId(), event.type(), event.pictureIds(), e);
         }
     }
 }

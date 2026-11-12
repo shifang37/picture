@@ -162,6 +162,7 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 6. 审核通过（`reviewStatus = 1`）后，图片才对所有访客可见；作者可在「我的图片」中看到拒绝原因
 7. 审核历史会记录审核人（昵称/账号，用户已删除时显示 `用户#id`）、动作、时间和意见；管理员上传/重传自动通过时也会写入一条「管理员上传，自动通过」记录
 8. 机审开启时，上传后几秒内会写回机审结果，审核页按机审疑似 / 违规优先展示；默认的 `assist` 模式不改变审核状态，详见下一节
+9. 批量审核（`POST /api/picture/review/batch`）整批加事务：一条 `UPDATE ... WHERE id IN (...) AND reviewStatus = 0`、一条批量审核历史、结束时只失效一次公开列表缓存、只发一条 `picture.batch.changed` 事件；已不在待审核状态的图片计入失败明细，不会被覆盖
 
 ## 机审初筛（数据万象）
 
@@ -196,7 +197,7 @@ app:
 ### 并发与安全
 
 - 写机审字段使用 `WHERE id = ? AND machineReviewStatus IS NULL`，重复投递或兜底任务并发时只处理一次；
-- 自动处置使用 `WHERE id = ? AND reviewStatus = 待审核`，管理员在机审返回前已手动审核的图片只写机审字段，**不会被覆盖**；`doPictureReview` 也改成了带原状态条件的更新，人工与机审同时操作时只有一方成功；
+- 自动处置使用 `WHERE id = ? AND reviewStatus = 待审核`，管理员在机审返回前已手动审核的图片只写机审字段，**不会被覆盖**；`doPictureReview` 也改成了带原状态条件的更新，人工与机审同时操作时只有一方成功；批量审核同样只更新仍为待审核的图片，已被处理的图片计入失败明细；
 - 机审自动处置会写一条审核历史，`reviewerId = 0`，展示为「系统机审」；
 - 重传新文件会清空四个机审字段，避免沿用旧文件的结论。
 
@@ -308,7 +309,7 @@ app:
 
 - **标签/分类字典**（`GET /api/picture/tag_category`）：Spring Cache 存 Redis（key 为 `tagCategory::…`），TTL 30 分钟；管理员新增、删除、同步字典后立即失效，首页分类 Tab 马上更新。
 - **公开图片列表**（`POST /api/picture/list/page/vo`）：两级缓存，L1 是 Caffeine（最多 500 项、写入后 30 秒过期），L2 是 Redis（5 分钟 + 0~60 秒随机抖动）。「我的图片」、管理列表、详情页都不缓存。
-- **失效**：审核通过/拒绝、编辑、删除、上传成功后对 `picture:list:ns` 自增，新请求换用新命名空间，旧 key 自然过期。因此审核结果立即可见，L1 最多比数据库滞后 30 秒。
+- **失效**：审核通过/拒绝（批量审核整批只失效一次）、编辑、删除、上传成功后对 `picture:list:ns` 自增，新请求换用新命名空间，旧 key 自然过期。因此审核结果立即可见，L1 最多比数据库滞后 30 秒。
 - **降级**：缓存只保存公开可见的数据；Redis 读写异常时直接回源数据库，列表接口不受影响。
 - 实测（300 张图片、50 次请求）：公开列表热缓存 p95 约 8.5 ms，每次失效回源 p95 约 19 ms。
 
@@ -326,19 +327,20 @@ app:
 | `picture.uploaded` | 新上传或重传成功 | `picture.moderation.q`、`picture.search.q`、`picture.ai.q`（机审开启时 AI 消费者会跳过，等 `moderated`） |
 | `picture.moderated` | 机审完成 | `picture.ai.q` |
 | `picture.changed` | 人工审核、编辑、删除 | `picture.search.q` |
+| `picture.batch.changed` | 批量审核完成（一条事件带整批 id） | `picture.search.q` |
 
 ### 事件模型
 
-- 消息体只带标识：`{ eventId, type, pictureId, occurredAt }`，不带名称、简介、状态等业务数据；消费者一律按 `pictureId` 回查数据库，重复投递和乱序都不会写入过期数据；
+- 消息体只带标识：`{ eventId, type, pictureIds, occurredAt }`，不带名称、简介、状态等业务数据；单图事件只带一个 id，批量审核用一条事件带整批 id。消费者一律按 `pictureIds` 回查数据库，重复投递和乱序都不会写入过期数据；
 - `PictureServiceImpl` 只发布 Spring 应用事件（`PictureEventPublisher`），由 `PictureEventRelay` 用 `@TransactionalEventListener(fallbackExecution = true)` 转发到 RabbitMQ。Service 单元测试只需要验证事件是否发出，不依赖 RabbitMQ；
-- `editPicture` / `updatePicture` 已加事务（同时更新 `picture` 与 `picture_tag`），事件会在事务提交后转发；上传、审核、删除仍无事务，事件立即转发。
+- `editPicture` / `updatePicture` / 批量审核已加事务（批量审核同时更新整批图片并写一条批量历史），事件会在事务提交后转发；上传、单张审核、删除仍无事务，事件立即转发。
 
 ### 可靠性
 
 - 生产者开启 `publisher-confirm-type: correlated` 与 `publisher-returns`，确认失败或无法路由只记录日志；RabbitMQ 停机时上传、审核等主流程仍然成功（发布失败只留错误日志，接口正常返回）；
 - 消费者失败最多尝试 3 次（首次后按 1s、2s 退避），仍失败则拒绝消息，由队列的 `x-dead-letter-exchange` 转入 `${queue}.dlq`；消息体无法解析等「毒消息」同样进死信，不会无限重入队；
 - 消费者按 id 回查并检查状态：图片已删除、已审核或机审字段已有值时直接确认消息，避免重复处理；
-- 机审消费者在开关开启时调用数据万象并写回机审字段，另有每 5 分钟的兜底扫描；AI 消费者机审开启时只处理机审正常的图片，机审关闭时直接消费上传事件；搜索索引消费者按 id 回查后写入或删除 Elasticsearch 文档（搜索未启用时空实现，不产生外部调用）。
+- 机审消费者在开关开启时调用数据万象并写回机审字段，另有每 5 分钟的兜底扫描；AI 消费者机审开启时只处理机审正常的图片，机审关闭时直接消费上传事件；搜索索引消费者按 id 批量回查后写入或删除 Elasticsearch 文档（搜索未启用时空实现，不产生外部调用），批量事件只查一次库、只失效一次列表缓存。
 
 管理界面可以查看队列、绑定与死信：`http://127.0.0.1:15672`（本地默认 `guest / guest`）。生产环境不映射 15672 到宿主机。
 
@@ -351,7 +353,7 @@ app:
 - **可降级**：Elasticsearch 调用异常时自动回落到原 MySQL 查询并记录 warn 日志，首页搜索保持可用；
 - **索引**：`picture_v1`，别名 `picture`；名称、简介使用内置 `cjk` 分析器（不需要 IK 插件），名称权重为 3；分类、标签、格式等使用 keyword；
 - **排序**：有搜索词时按相关度，否则按请求字段（默认 `createTime` 倒序），排序字段沿用原白名单；
-- **同步**：`picture.uploaded` / `picture.changed` 事件驱动，`picture.search.q` 消费者按 id 回查：公开可见就写入索引，待审核、拒绝、删除则删除文档；
+- **同步**：`picture.uploaded` / `picture.changed` / `picture.batch.changed` 事件驱动，`picture.search.q` 消费者按 id 回查：公开可见就写入索引，待审核、拒绝、删除则删除文档；
 - **全量重建**：`POST /api/search/reindex`（仅管理员），每批 500 条从 MySQL 写入临时索引，完成后原子切换别名再删除旧索引；首次启用、索引损坏或巡检不一致时使用；
 - **一致性巡检**：`SEARCH_ENGINE=es` 时每天 03:00 对比 MySQL 公开图片数与索引文档数，不一致时记录「搜索索引与数据库不一致」告警日志；
 - **健康检查**：默认不启用 Elasticsearch 健康项，避免 MySQL 搜索模式下 Actuator health 被误判为 DOWN；启用搜索后可设置 `SEARCH_HEALTH_ENABLED=true`。
@@ -560,7 +562,7 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 
 ## 测试
 
-后端目前包含 **418 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **428 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend

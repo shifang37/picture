@@ -45,13 +45,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -727,31 +730,101 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public PictureReviewBatchResult batchReview(PictureReviewBatchRequest request, User loginUser) {
         ThrowUtils.throwIf(request == null || CollUtil.isEmpty(request.getIds()),
                 ErrorCode.PARAMS_ERROR, "请选择要审核的图片");
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        Integer reviewStatus = request.getReviewStatus();
+        PictureReviewStatusEnum reviewStatusEnum = PictureReviewStatusEnum.getEnumByValue(reviewStatus);
+        // 审核的目标状态必须是通过或拒绝，不能是待审核
+        ThrowUtils.throwIf(reviewStatusEnum == null || PictureReviewStatusEnum.REVIEWING.equals(reviewStatusEnum),
+                ErrorCode.PARAMS_ERROR, "审核状态只能是通过或拒绝");
+        String reviewMessage = request.getReviewMessage();
+        ThrowUtils.throwIf(reviewMessage != null && reviewMessage.length() > 512,
+                ErrorCode.PARAMS_ERROR, "审核意见不能超过 512 个字符");
+
         PictureReviewBatchResult result = new PictureReviewBatchResult();
+        // 去重并剔除非法 id：批量 SQL 只带有效 id，非法 id 直接计入失败明细
+        Set<Long> pictureIds = new LinkedHashSet<>();
         for (Long id : request.getIds()) {
             if (id == null || id <= 0) {
-                result.setFailCount(result.getFailCount() + 1);
-                result.getErrors().add("存在非法图片 id");
-                continue;
-            }
-            PictureReviewRequest singleRequest = new PictureReviewRequest();
-            singleRequest.setId(id);
-            singleRequest.setReviewStatus(request.getReviewStatus());
-            singleRequest.setReviewMessage(request.getReviewMessage());
-            try {
-                doPictureReview(singleRequest, loginUser);
-                result.setSuccessCount(result.getSuccessCount() + 1);
-            } catch (BusinessException e) {
-                // 单张失败不阻断其他图片，前端展示失败明细
-                result.setFailCount(result.getFailCount() + 1);
-                result.getErrors().add("图片 " + id + "：" + e.getMessage());
+                addBatchFailure(result, null, "存在非法图片 id");
+            } else {
+                pictureIds.add(id);
             }
         }
+        if (pictureIds.isEmpty()) {
+            return result;
+        }
+        // 一条 IN 查询拿到整批图片的当前状态，替代逐张 getById
+        Map<Long, Picture> pictureMap = this.listByIds(pictureIds).stream()
+                .collect(Collectors.toMap(Picture::getId, Function.identity(), (left, right) -> left));
+        List<Long> pendingIds = new ArrayList<>(pictureIds.size());
+        for (Long id : pictureIds) {
+            Picture picture = pictureMap.get(id);
+            if (picture == null) {
+                addBatchFailure(result, id, "图片不存在");
+                continue;
+            }
+            Integer currentStatus = picture.getReviewStatus();
+            if (!Objects.equals(currentStatus, PictureReviewStatusEnum.REVIEWING.getValue())) {
+                addBatchFailure(result, id, currentStatus == null
+                        ? "图片状态异常，请刷新后重试"
+                        : Objects.equals(currentStatus, reviewStatus)
+                                ? "请勿重复审核"
+                                : "图片已审核，请刷新后重试");
+                continue;
+            }
+            pendingIds.add(id);
+        }
+        if (pendingIds.isEmpty()) {
+            return result;
+        }
+        Date reviewTime = new Date();
+        // 一条 UPDATE 处理整批，并带上原状态条件：并发的人工审核/机审只会有一方成功
+        UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
+                .in("id", pendingIds)
+                .eq("reviewStatus", PictureReviewStatusEnum.REVIEWING.getValue())
+                .set("reviewStatus", reviewStatus)
+                .set("reviewMessage", reviewMessage)
+                .set("reviewerId", loginUser.getId())
+                .set("reviewTime", reviewTime);
+        int updated = baseMapper.update(null, updateWrapper);
+        List<Long> reviewedIds = pendingIds;
+        if (updated != pendingIds.size()) {
+            // 少量图片在查询后已被其他请求处理：回查仍未审核的 id，给出准确的失败明细
+            Set<Long> stillPendingIds = this.list(new QueryWrapper<Picture>()
+                            .in("id", pendingIds)
+                            .eq("reviewStatus", PictureReviewStatusEnum.REVIEWING.getValue()))
+                    .stream()
+                    .map(Picture::getId)
+                    .collect(Collectors.toSet());
+            reviewedIds = pendingIds.stream()
+                    .filter(id -> !stillPendingIds.contains(id))
+                    .toList();
+            stillPendingIds.forEach(id ->
+                    addBatchFailure(result, id, "图片已被其他操作处理，请刷新后重试"));
+        }
+        result.setSuccessCount(reviewedIds.size());
+        if (reviewedIds.isEmpty()) {
+            return result;
+        }
+        // 整批只写一条批量审核历史
+        pictureReviewLogService.recordBatch(reviewedIds, loginUser.getId(), reviewStatus, reviewMessage);
+        // 整批只失效一次公开列表缓存
+        pictureListCache.invalidate();
+        // 整批只发一条批量事件；方法带事务，转发会等事务提交后再执行
+        pictureEventPublisher.picturesChanged(reviewedIds);
         return result;
+    }
+
+    /**
+     * 追加一条批量审核失败明细
+     */
+    private static void addBatchFailure(PictureReviewBatchResult result, Long pictureId, String message) {
+        result.setFailCount(result.getFailCount() + 1);
+        result.getErrors().add(pictureId == null ? message : "图片 " + pictureId + "：" + message);
     }
 
     @Override

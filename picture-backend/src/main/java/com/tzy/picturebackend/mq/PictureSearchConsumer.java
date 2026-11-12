@@ -1,5 +1,6 @@
 package com.tzy.picturebackend.mq;
 
+import cn.hutool.core.collection.CollUtil;
 import com.tzy.picturebackend.event.PictureEvent;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.model.entity.Picture;
@@ -10,15 +11,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * 搜索索引同步队列消费者。
  * <p>
- * 消费 {@code picture.uploaded} 与 {@code picture.changed}：按 id 回查数据库，
- * 已通过审核的图片写入索引，其余（待审核、已拒绝、已删除）一律按 id 删除索引文档。
+ * 消费 {@code picture.uploaded}、{@code picture.changed} 与 {@code picture.batch.changed}：
+ * 按 id 批量回查数据库，已通过审核的图片写入索引，其余（待审核、已拒绝、已删除）一律按 id 删除索引文档。
  * 图片查不到时不能跳过，否则已删除图片会一直留在索引里。
  * <p>
+ * 批量事件一次带整批 id，这里只查一次库、只失效一次列表缓存；单图事件也走同一条路径。
  * {@code app.search.engine=mysql} 时注入的是空实现，消费者只做状态判断，不产生任何外部调用。
  */
 @Component
@@ -45,33 +51,47 @@ public class PictureSearchConsumer {
     }
 
     /**
-     * 处理一条搜索索引事件。
+     * 处理一条搜索索引事件；批量事件会同步其中的全部图片。
      *
      * @return 是否是一条可同步的事件；返回值用于测试，消息最终都会被确认
      */
     boolean handle(PictureEvent event) {
-        if (event == null || event.pictureId() == null) {
+        if (event == null || CollUtil.isEmpty(event.pictureIds())) {
             log.warn("收到不完整的图片事件，直接确认: {}", event);
             return false;
         }
-        Long pictureId = event.pictureId();
-        Picture picture = pictureService.getById(pictureId);
-        if (picture == null) {
-            // 已逻辑删除：索引侧必须按 id 删除文档
-            pictureSearchService.deletePicture(pictureId);
-            invalidateListCache();
-            log.info("图片已删除，移除搜索索引, pictureId={}, eventId={}", pictureId, event.eventId());
-            return true;
+        List<Long> pictureIds = event.pictureIds().stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (pictureIds.isEmpty()) {
+            log.warn("收到不完整的图片事件，直接确认: {}", event);
+            return false;
         }
-        if (Objects.equals(picture.getReviewStatus(), PictureReviewStatusEnum.PASS.getValue())) {
-            pictureSearchService.indexPicture(picture);
-        } else {
-            // 待审核、已拒绝：不能留在公开索引里
-            pictureSearchService.deletePicture(pictureId);
+        // 一条 IN 查询拿到整批图片，避免批量审核后逐张 SELECT
+        Map<Long, Picture> pictureMap = pictureService.listByIds(pictureIds).stream()
+                .collect(Collectors.toMap(Picture::getId, Function.identity(), (left, right) -> left));
+        for (Long pictureId : pictureIds) {
+            Picture picture = pictureMap.get(pictureId);
+            if (picture == null) {
+                // 已逻辑删除：索引侧必须按 id 删除文档
+                pictureSearchService.deletePicture(pictureId);
+                log.info("图片已删除，移除搜索索引, pictureId={}, eventId={}", pictureId, event.eventId());
+                continue;
+            }
+            if (Objects.equals(picture.getReviewStatus(), PictureReviewStatusEnum.PASS.getValue())) {
+                pictureSearchService.indexPicture(picture);
+            } else {
+                // 待审核、已拒绝：不能留在公开索引里
+                pictureSearchService.deletePicture(pictureId);
+            }
+            log.info("搜索索引同步完成, pictureId={}, reviewStatus={}, eventId={}",
+                    pictureId, picture.getReviewStatus(), event.eventId());
         }
         invalidateListCache();
-        log.info("搜索索引同步完成, pictureId={}, reviewStatus={}, eventId={}",
-                pictureId, picture.getReviewStatus(), event.eventId());
+        if (pictureIds.size() > 1) {
+            log.info("批量搜索索引同步完成, size={}, eventId={}", pictureIds.size(), event.eventId());
+        }
         return true;
     }
 
@@ -81,6 +101,8 @@ public class PictureSearchConsumer {
      * 审核/删除会先失效缓存再发事件，如果此时有请求把「索引尚未更新」的结果写进缓存，
      * 最长 5 分钟内都搜不到刚通过的图片；索引写完后再失效一次可以避免这个窗口。
      * MySQL 搜索模式下索引操作是空实现，不需要额外失效。
+     * <p>
+     * 批量事件只在这里失效一次，不会随图片数量放大。
      */
     private void invalidateListCache() {
         if (pictureSearchService.enabled()) {

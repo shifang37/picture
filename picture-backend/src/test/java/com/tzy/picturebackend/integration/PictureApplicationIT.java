@@ -10,6 +10,7 @@ import com.tzy.picturebackend.mapper.AnalyzeMapper;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
+import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -20,12 +21,14 @@ import com.tzy.picturebackend.model.vo.AnalyzeReviewVO;
 import com.tzy.picturebackend.model.vo.AnalyzeTagVO;
 import com.tzy.picturebackend.model.vo.AnalyzeTopDownloadVO;
 import com.tzy.picturebackend.model.vo.AnalyzeUploadTrendVO;
+import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -59,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -171,6 +175,65 @@ class PictureApplicationIT {
                         + "and index_name = 'idx_tag_picture'",
                 Integer.class);
         assertEquals(1, tagPictureIndex, "picture_tag 应有 (tag, pictureId) 索引");
+    }
+
+    // ==================== 批量审核 ====================
+
+    @Test
+    @DisplayName("批量审核：整批一条 UPDATE、一条批量日志、一次缓存失效、一条批量事件")
+    void batchReviewUpdatesPendingPicturesAsOneBatch() {
+        User admin = createUser("batch-review");
+        jdbcTemplate.update("update user set userRole = 'admin' where id = ?", admin.getId());
+        Picture first = savePicture(admin.getId(), "batch-1.jpg");
+        Picture second = savePicture(admin.getId(), "batch-2.jpg");
+        Picture alreadyApproved = savePicture(admin.getId(), "batch-3.jpg");
+        jdbcTemplate.update("update picture set reviewStatus = ? where id = ?",
+                PictureReviewStatusEnum.PASS.getValue(), alreadyApproved.getId());
+
+        String namespaceBefore = redisTemplate.opsForValue().get("picture:list:ns");
+        long namespaceBeforeValue = namespaceBefore == null ? 0L : Long.parseLong(namespaceBefore);
+
+        PictureReviewBatchRequest request = new PictureReviewBatchRequest();
+        request.setIds(List.of(first.getId(), second.getId(), alreadyApproved.getId()));
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        request.setReviewMessage("批量通过");
+        PictureReviewBatchResult result = pictureService.batchReview(request, admin);
+
+        assertEquals(2, result.getSuccessCount());
+        assertEquals(1, result.getFailCount());
+        assertTrue(result.getErrors().get(0).contains("图片 " + alreadyApproved.getId()));
+
+        // 一条 UPDATE 落库：两张待审核图片都带上审核人、意见与时间
+        List<Map<String, Object>> reviewed = jdbcTemplate.queryForList(
+                "select reviewStatus, reviewMessage, reviewerId from picture where id in (?, ?)",
+                first.getId(), second.getId());
+        assertEquals(2, reviewed.size());
+        for (Map<String, Object> row : reviewed) {
+            assertEquals(PictureReviewStatusEnum.PASS.getValue(),
+                    ((Number) row.get("reviewStatus")).intValue());
+            assertEquals("批量通过", row.get("reviewMessage"));
+            assertEquals(admin.getId().longValue(), ((Number) row.get("reviewerId")).longValue());
+        }
+        // 已审核的图片不被覆盖
+        Integer reviewerOfApproved = jdbcTemplate.queryForObject(
+                "select reviewerId from picture where id = ?", Integer.class, alreadyApproved.getId());
+        assertNull(reviewerOfApproved);
+
+        // 一条批量 INSERT 写入两条审核历史
+        Integer logCount = jdbcTemplate.queryForObject(
+                "select count(*) from picture_review_log where pictureId in (?, ?)",
+                Integer.class, first.getId(), second.getId());
+        assertEquals(2, logCount);
+
+        // 整批只失效一次缓存
+        Long namespaceAfter = Long.parseLong(redisTemplate.opsForValue().get("picture:list:ns"));
+        assertEquals(namespaceBeforeValue + 1, namespaceAfter);
+
+        // 整批只发一条批量事件
+        ArgumentCaptor<java.util.Collection<Long>> idsCaptor = ArgumentCaptor.forClass(
+                java.util.Collection.class);
+        verify(pictureEventPublisher).picturesChanged(idsCaptor.capture());
+        assertEquals(List.of(first.getId(), second.getId()), List.copyOf(idsCaptor.getValue()));
     }
 
     // ==================== 重传与删除 ====================

@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -246,7 +248,7 @@ class PictureEventConsumerTest {
     @DisplayName("搜索：已通过的图片写入索引，并在写完后失效列表缓存")
     void search_existingPictureIsHandled() {
         Picture picture = picture(3L, PictureReviewStatusEnum.PASS.getValue());
-        when(pictureService.getById(3L)).thenReturn(picture);
+        when(pictureService.listByIds(List.of(3L))).thenReturn(List.of(picture));
         when(pictureSearchService.enabled()).thenReturn(true);
 
         assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 3L)));
@@ -259,7 +261,7 @@ class PictureEventConsumerTest {
     @Test
     @DisplayName("搜索：图片已删除时仍要按 id 删除索引，不能当成可忽略的消息")
     void search_deletedPictureIsStillHandled() {
-        when(pictureService.getById(4L)).thenReturn(null);
+        when(pictureService.listByIds(List.of(4L))).thenReturn(List.of());
 
         assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 4L)));
 
@@ -270,10 +272,10 @@ class PictureEventConsumerTest {
     @Test
     @DisplayName("搜索：待审核 / 已拒绝的图片从索引删除，避免未过审内容被搜到")
     void search_unreviewedPictureIsRemovedFromIndex() {
-        when(pictureService.getById(5L))
-                .thenReturn(picture(5L, PictureReviewStatusEnum.REVIEWING.getValue()));
-        when(pictureService.getById(6L))
-                .thenReturn(picture(6L, PictureReviewStatusEnum.REJECT.getValue()));
+        when(pictureService.listByIds(List.of(5L)))
+                .thenReturn(List.of(picture(5L, PictureReviewStatusEnum.REVIEWING.getValue())));
+        when(pictureService.listByIds(List.of(6L)))
+                .thenReturn(List.of(picture(6L, PictureReviewStatusEnum.REJECT.getValue())));
 
         assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 5L)));
         assertTrue(searchConsumer.handle(PictureEvent.of(PictureEventType.CHANGED, 6L)));
@@ -281,6 +283,24 @@ class PictureEventConsumerTest {
         verify(pictureSearchService).deletePicture(5L);
         verify(pictureSearchService).deletePicture(6L);
         verify(pictureSearchService, never()).indexPicture(any());
+    }
+
+    @Test
+    @DisplayName("搜索：批量事件只查一次库，逐张同步后只失效一次缓存")
+    void search_batchEventIsHandledInOneQuery() {
+        Picture approved = picture(10L, PictureReviewStatusEnum.PASS.getValue());
+        Picture rejected = picture(11L, PictureReviewStatusEnum.REJECT.getValue());
+        when(pictureService.listByIds(List.of(10L, 11L))).thenReturn(List.of(approved, rejected));
+        when(pictureSearchService.enabled()).thenReturn(true);
+
+        assertTrue(searchConsumer.handle(
+                PictureEvent.of(PictureEventType.BATCH_CHANGED, List.of(10L, 11L))));
+
+        verify(pictureService).listByIds(List.of(10L, 11L));
+        verify(pictureService, never()).getById(any());
+        verify(pictureSearchService).indexPicture(approved);
+        verify(pictureSearchService).deletePicture(11L);
+        verify(pictureListCache).invalidate();
     }
 
     @Test

@@ -52,34 +52,36 @@ public class PictureModerationConsumer {
             log.debug("机审未启用，跳过机审事件, event={}", event);
             return false;
         }
-        if (event == null || event.pictureId() == null) {
+        if (event == null || event.pictureIds() == null || event.pictureIds().size() != 1) {
+            // 机审只处理单图事件；批量事件不会绑定到这个队列
             log.warn("收到不完整的图片事件，直接确认: {}", event);
             return false;
         }
-        Picture picture = pictureService.getById(event.pictureId());
+        Long pictureId = event.pictureIds().get(0);
+        Picture picture = pictureService.getById(pictureId);
         if (picture == null) {
             // 图片已删除或 id 不存在：确认后丢弃，不能反复重试
             log.info("图片不存在，丢弃机审事件, pictureId={}, eventId={}",
-                    event.pictureId(), event.eventId());
+                    pictureId, event.eventId());
             return false;
         }
         if (!Objects.equals(picture.getReviewStatus(), PictureReviewStatusEnum.REVIEWING.getValue())) {
             // 管理员已经提前审核，或消息被重复投递：不再重复机审
             log.info("图片已不处于待审核状态，跳动机审事件, pictureId={}, reviewStatus={}",
-                    event.pictureId(), picture.getReviewStatus());
+                    pictureId, picture.getReviewStatus());
             return false;
         }
         if (picture.getMachineReviewStatus() != null) {
             // 机审字段已有值：重复投递，直接确认
             log.info("图片已完成机审，跳动机审事件, pictureId={}, machineReviewStatus={}",
-                    event.pictureId(), picture.getMachineReviewStatus());
+                    pictureId, picture.getMachineReviewStatus());
             return false;
         }
         try {
             machineReviewService.review(picture);
         } catch (RuntimeException e) {
             // 交给 RabbitMQ 重试；重试耗尽进死信，兜底任务还会重新发布
-            log.error("机审处理失败, pictureId={}, eventId={}", event.pictureId(), event.eventId(), e);
+            log.error("机审处理失败, pictureId={}, eventId={}", pictureId, event.eventId(), e);
             throw e;
         }
         return true;

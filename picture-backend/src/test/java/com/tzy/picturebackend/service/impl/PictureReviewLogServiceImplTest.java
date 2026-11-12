@@ -70,6 +70,37 @@ class PictureReviewLogServiceImplTest {
     }
 
     @Test
+    @DisplayName("批量记录审核：一条 INSERT 写入整批记录，主键与审核人一致")
+    void recordBatch_savesAllLogsInOneInsert() {
+        when(reviewLogMapper.insertBatch(any())).thenReturn(2);
+
+        reviewLogService.recordBatch(List.of(1L, 2L), 99L, 1, "审核通过");
+
+        ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
+        verify(reviewLogMapper).insertBatch(captor.capture());
+        List<PictureReviewLog> logs = captor.getValue();
+        assertEquals(2, logs.size());
+        for (int i = 0; i < logs.size(); i++) {
+            PictureReviewLog saved = logs.get(i);
+            assertNotNull(saved.getId(), "批量 INSERT 需要显式生成主键");
+            assertEquals(Long.valueOf(i + 1), saved.getPictureId());
+            assertEquals(Long.valueOf(99L), saved.getReviewerId());
+            assertEquals(Integer.valueOf(1), saved.getReviewStatus());
+            assertEquals("审核通过", saved.getReviewMessage());
+            assertNotNull(saved.getCreateTime());
+        }
+        verify(reviewLogMapper, never()).insert(any(PictureReviewLog.class));
+    }
+
+    @Test
+    @DisplayName("批量记录审核：数据库异常不影响调用方")
+    void recordBatch_swallowsDatabaseException() {
+        when(reviewLogMapper.insertBatch(any())).thenThrow(new RuntimeException("db down"));
+
+        reviewLogService.recordBatch(List.of(1L, 2L), 99L, 2, null);
+    }
+
+    @Test
     @DisplayName("查询历史：按图片 id 返回记录")
     void listByPictureId_returnsLogs() {
         PictureReviewLog log = new PictureReviewLog();

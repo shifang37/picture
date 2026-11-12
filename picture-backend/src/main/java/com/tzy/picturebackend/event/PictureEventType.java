@@ -24,7 +24,12 @@ public enum PictureEventType {
     /**
      * 人工审核、编辑、删除
      */
-    CHANGED("picture.changed");
+    CHANGED("picture.changed"),
+
+    /**
+     * 批量审核：一条消息带整批图片 id
+     */
+    BATCH_CHANGED("picture.batch.changed");
 
     private final String routingKey;
 

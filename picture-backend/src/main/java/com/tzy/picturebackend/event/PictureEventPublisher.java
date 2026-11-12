@@ -3,6 +3,8 @@ package com.tzy.picturebackend.event;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+
 /**
  * 图片事件发布入口。
  * <p>
@@ -39,7 +41,21 @@ public class PictureEventPublisher {
         publish(PictureEventType.CHANGED, pictureId);
     }
 
+    /**
+     * 批量审核完成：整批只发一条事件，由消费者按 id 批量同步搜索索引
+     */
+    public void picturesChanged(Collection<Long> pictureIds) {
+        if (pictureIds == null || pictureIds.isEmpty()) {
+            return;
+        }
+        publish(PictureEventType.BATCH_CHANGED, pictureIds);
+    }
+
     private void publish(PictureEventType type, Long pictureId) {
         applicationEventPublisher.publishEvent(PictureEvent.of(type, pictureId));
+    }
+
+    private void publish(PictureEventType type, Collection<Long> pictureIds) {
+        applicationEventPublisher.publishEvent(PictureEvent.of(type, pictureIds));
     }
 }

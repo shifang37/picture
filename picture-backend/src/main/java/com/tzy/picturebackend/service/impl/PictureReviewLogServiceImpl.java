@@ -3,6 +3,7 @@ package com.tzy.picturebackend.service.impl;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.tzy.picturebackend.mapper.PictureReviewLogMapper;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
@@ -15,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +68,42 @@ public class PictureReviewLogServiceImpl
         } catch (Exception e) {
             // 审核结果已经落库，历史记录失败不能反过来让审核接口报错
             log.error("保存审核记录异常, pictureId = {}", pictureId, e);
+        }
+    }
+
+    @Override
+    public void recordBatch(Collection<Long> pictureIds, Long reviewerId,
+                            Integer reviewStatus, String reviewMessage) {
+        if (CollUtil.isEmpty(pictureIds)) {
+            return;
+        }
+        try {
+            Date createTime = new Date();
+            List<PictureReviewLog> reviewLogs = pictureIds.stream()
+                    .filter(Objects::nonNull)
+                    .map(pictureId -> {
+                        PictureReviewLog reviewLog = new PictureReviewLog();
+                        // 这里走自定义多行 INSERT，MyBatis-Plus 的 ASSIGN_ID 不会生效，需要显式生成主键
+                        reviewLog.setId(IdWorker.getId());
+                        reviewLog.setPictureId(pictureId);
+                        reviewLog.setReviewerId(reviewerId);
+                        reviewLog.setReviewStatus(reviewStatus);
+                        reviewLog.setReviewMessage(reviewMessage);
+                        reviewLog.setCreateTime(createTime);
+                        return reviewLog;
+                    })
+                    .toList();
+            if (reviewLogs.isEmpty()) {
+                return;
+            }
+            int rows = baseMapper.insertBatch(reviewLogs);
+            if (rows != reviewLogs.size()) {
+                log.warn("批量保存审核记录数量不一致, expected = {}, actual = {}",
+                        reviewLogs.size(), rows);
+            }
+        } catch (Exception e) {
+            // 审核结果已经落库，历史记录失败不能反过来让审核接口报错
+            log.error("批量保存审核记录异常, pictureIds = {}", pictureIds, e);
         }
     }
 

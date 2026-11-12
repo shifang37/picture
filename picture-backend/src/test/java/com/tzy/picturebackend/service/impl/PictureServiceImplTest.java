@@ -52,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -965,12 +966,71 @@ class PictureServiceImplTest {
     }
 
     @Test
-    @DisplayName("批量审核：单张失败不影响其他图片，并返回失败明细")
+    @DisplayName("批量审核：一条条件 UPDATE 更新整批，只写一条日志、失效一次缓存、发一条批量事件")
+    void batchReview_updatesBatchAndSendsSingleEvent() {
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()),
+                picture(2L, 100L, PictureReviewStatusEnum.REVIEWING.getValue())));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(2);
+
+        PictureReviewBatchRequest request = new PictureReviewBatchRequest();
+        request.setIds(List.of(1L, 2L));
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        PictureReviewBatchResult result = pictureService.batchReview(request, admin());
+
+        assertEquals(2, result.getSuccessCount());
+        assertEquals(0, result.getFailCount());
+        assertEquals(0, result.getErrors().size());
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper).update(org.mockito.ArgumentMatchers.isNull(), wrapperCaptor.capture());
+        UpdateWrapper<Picture> wrapper = (UpdateWrapper<Picture>) wrapperCaptor.getValue();
+        assertTrue(wrapper.getSqlSegment().contains("id IN"), "实际 WHERE: " + wrapper.getSqlSegment());
+        assertTrue(wrapper.getSqlSegment().contains("reviewStatus"), "实际 WHERE: " + wrapper.getSqlSegment());
+        assertTrue(wrapper.getSqlSet().contains("reviewStatus"), "实际 SET: " + wrapper.getSqlSet());
+        assertTrue(wrapper.getSqlSet().contains("reviewerId"), "实际 SET: " + wrapper.getSqlSet());
+        // 整批只写一条审核历史、只失效一次缓存、只发一条批量事件
+        verify(pictureReviewLogService).recordBatch(List.of(1L, 2L), 1L,
+                PictureReviewStatusEnum.PASS.getValue(), null);
+        verify(pictureListCache).invalidate();
+        verify(pictureEventPublisher).picturesChanged(List.of(1L, 2L));
+        verify(pictureEventPublisher, never()).pictureChanged(any());
+    }
+
+    @Test
+    @DisplayName("批量审核：不存在与非待审核的图片计入失败明细，不影响其他图片")
     void batchReview_continuesAfterFailure() {
-        when(pictureMapper.selectById(1L))
-                .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()));
-        when(pictureMapper.selectById(2L)).thenReturn(null);
-        when(pictureMapper.update(any(), any(Wrapper.class))).thenReturn(1);
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()),
+                picture(2L, 100L, PictureReviewStatusEnum.PASS.getValue())));
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
+
+        PictureReviewBatchRequest request = new PictureReviewBatchRequest();
+        request.setIds(List.of(1L, 2L, 3L));
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        PictureReviewBatchResult result = pictureService.batchReview(request, admin());
+
+        assertEquals(1, result.getSuccessCount(), "只有 id=1 是待审核");
+        assertEquals(2, result.getFailCount());
+        assertEquals(2, result.getErrors().size());
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("图片 2")));
+        assertTrue(result.getErrors().stream().anyMatch(error -> error.contains("图片 3")));
+        verify(pictureReviewLogService).recordBatch(List.of(1L), 1L,
+                PictureReviewStatusEnum.PASS.getValue(), null);
+        verify(pictureEventPublisher).picturesChanged(List.of(1L));
+    }
+
+    @Test
+    @DisplayName("批量审核：并发下被其他请求抢先审核的图片重新回查，并给出失败明细")
+    void batchReview_rechecksIdsChangedConcurrently() {
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.REVIEWING.getValue()),
+                picture(2L, 100L, PictureReviewStatusEnum.REVIEWING.getValue())));
+        // 查询时两张都是待审核，UPDATE 只命中了一张
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
+        when(pictureMapper.selectList(any(Wrapper.class))).thenReturn(List.of(
+                picture(2L, 100L, PictureReviewStatusEnum.REVIEWING.getValue())));
 
         PictureReviewBatchRequest request = new PictureReviewBatchRequest();
         request.setIds(List.of(1L, 2L));
@@ -980,9 +1040,40 @@ class PictureServiceImplTest {
 
         assertEquals(1, result.getSuccessCount());
         assertEquals(1, result.getFailCount());
-        assertEquals(1, result.getErrors().size());
         assertTrue(result.getErrors().get(0).contains("图片 2"));
-        verify(pictureEventPublisher).pictureChanged(1L);
+        verify(pictureReviewLogService).recordBatch(List.of(1L), 1L,
+                PictureReviewStatusEnum.PASS.getValue(), null);
+        verify(pictureEventPublisher).picturesChanged(List.of(1L));
+    }
+
+    @Test
+    @DisplayName("批量审核：全部图片都已审核时不更新、不写日志、不失效缓存、不发事件")
+    void batchReview_skipsSideEffectsWhenNothingUpdated() {
+        when(pictureMapper.selectByIds(anyCollection())).thenReturn(List.of(
+                picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue())));
+
+        PictureReviewBatchRequest request = new PictureReviewBatchRequest();
+        request.setIds(List.of(1L));
+        request.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        PictureReviewBatchResult result = pictureService.batchReview(request, admin());
+
+        assertEquals(0, result.getSuccessCount());
+        assertEquals(1, result.getFailCount());
+        assertTrue(result.getErrors().get(0).contains("请勿重复审核"));
+        verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+        verifyNoInteractions(pictureReviewLogService, pictureListCache, pictureEventPublisher);
+    }
+
+    @Test
+    @DisplayName("批量审核：目标状态不能是待审核")
+    void batchReview_rejectsReviewingTarget() {
+        PictureReviewBatchRequest request = new PictureReviewBatchRequest();
+        request.setIds(List.of(1L));
+        request.setReviewStatus(PictureReviewStatusEnum.REVIEWING.getValue());
+
+        assertThrows(BusinessException.class, () -> pictureService.batchReview(request, admin()));
+        verifyNoInteractions(pictureMapper);
     }
 
     // ==================== 字段长度校验 ====================

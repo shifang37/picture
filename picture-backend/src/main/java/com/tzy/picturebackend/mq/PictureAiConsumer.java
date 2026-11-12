@@ -59,37 +59,39 @@ public class PictureAiConsumer {
             log.debug("AI 建议未启用，跳过事件: {}", event);
             return false;
         }
-        if (event == null || event.pictureId() == null) {
+        if (event == null || event.pictureIds() == null || event.pictureIds().size() != 1) {
+            // AI 建议只处理单图事件；批量事件不会绑定到这个队列
             log.warn("收到不完整的图片事件，直接确认: {}", event);
             return false;
         }
-        Picture picture = pictureService.getById(event.pictureId());
+        Long pictureId = event.pictureIds().get(0);
+        Picture picture = pictureService.getById(pictureId);
         if (picture == null) {
             log.info("图片不存在，丢弃 AI 建议事件, pictureId={}, eventId={}",
-                    event.pictureId(), event.eventId());
+                    pictureId, event.eventId());
             return false;
         }
         if (Objects.equals(picture.getReviewStatus(), PictureReviewStatusEnum.REJECT.getValue())) {
-            log.info("图片已拒绝，跳过 AI 建议, pictureId={}", event.pictureId());
+            log.info("图片已拒绝，跳过 AI 建议, pictureId={}", pictureId);
             return false;
         }
         if (event.type() == PictureEventType.UPLOADED) {
             // 机审开启且图片仍在待审核：等 moderated 事件；管理员直传的图片已通过，直接生成
             if (machineReviewProperties.isEnabled()
                     && !Objects.equals(picture.getReviewStatus(), PictureReviewStatusEnum.PASS.getValue())) {
-                log.info("机审开启，等待机审完成事件再生成 AI 建议, pictureId={}", event.pictureId());
+                log.info("机审开启，等待机审完成事件再生成 AI 建议, pictureId={}", pictureId);
                 return false;
             }
         } else if (event.type() == PictureEventType.MODERATED) {
             if (!machineReviewProperties.isEnabled()) {
-                log.debug("机审未启用，忽略 moderated 事件, pictureId={}", event.pictureId());
+                log.debug("机审未启用，忽略 moderated 事件, pictureId={}", pictureId);
                 return false;
             }
             // 只把机审为正常的图片发给第三方模型，疑似/违规内容不外发
             if (!Objects.equals(picture.getMachineReviewStatus(),
                     MachineReviewStatusEnum.NORMAL.getValue())) {
                 log.info("机审结果不是正常，跳过 AI 建议, pictureId={}, machineReviewStatus={}",
-                        event.pictureId(), picture.getMachineReviewStatus());
+                        pictureId, picture.getMachineReviewStatus());
                 return false;
             }
         } else {
@@ -99,7 +101,7 @@ public class PictureAiConsumer {
             aiSuggestionService.generate(picture);
         } catch (RuntimeException e) {
             log.error("AI 建议处理失败, pictureId={}, eventId={}",
-                    event.pictureId(), event.eventId(), e);
+                    pictureId, event.eventId(), e);
             throw e;
         }
         return true;

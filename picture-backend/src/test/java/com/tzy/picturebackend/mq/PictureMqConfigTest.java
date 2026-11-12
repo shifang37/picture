@@ -50,7 +50,7 @@ class PictureMqConfigTest {
     }
 
     @Test
-    @DisplayName("绑定：上传进机审与搜索，机审完成进 AI，变更只进搜索")
+    @DisplayName("绑定：上传进机审与搜索，机审完成进 AI，变更与批量变更只进搜索")
     void bindsRoutingKeysToExpectedQueues() {
         Set<String> bindings = declarables.getDeclarablesByType(Binding.class).stream()
                 .map(binding -> binding.getExchange() + " " + binding.getRoutingKey()
@@ -63,6 +63,7 @@ class PictureMqConfigTest {
                 "picture.event picture.uploaded -> picture.ai.q",
                 "picture.event picture.moderated -> picture.ai.q",
                 "picture.event picture.changed -> picture.search.q",
+                "picture.event picture.batch.changed -> picture.search.q",
                 "picture.dlx picture.moderation.q.dlq -> picture.moderation.q.dlq",
                 "picture.dlx picture.ai.q.dlq -> picture.ai.q.dlq",
                 "picture.dlx picture.search.q.dlq -> picture.search.q.dlq"), bindings);

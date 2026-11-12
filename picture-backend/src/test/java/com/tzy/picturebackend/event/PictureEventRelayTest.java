@@ -14,6 +14,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -72,6 +73,20 @@ class PictureEventRelayTest {
     }
 
     @Test
+    @DisplayName("转发：批量变更事件使用 picture.batch.changed 路由键")
+    void relay_usesBatchChangedRoutingKey() {
+        PictureEvent event = PictureEvent.of(PictureEventType.BATCH_CHANGED, List.of(1L, 2L, 3L));
+
+        relay.relay(event);
+
+        verify(rabbitTemplate).convertAndSend(
+                eq(PictureMqConfig.EVENT_EXCHANGE),
+                eq("picture.batch.changed"),
+                eq(event),
+                any(CorrelationData.class));
+    }
+
+    @Test
     @DisplayName("降级：RabbitMQ 不可用时只记录日志，不向业务抛异常")
     void relay_swallowsBrokerError() {
         PictureEvent event = PictureEvent.of(PictureEventType.CHANGED, 3L);
@@ -82,7 +97,7 @@ class PictureEventRelayTest {
     }
 
     @Test
-    @DisplayName("消息体：只包含 eventId、type、pictureId、occurredAt 四个字段")
+    @DisplayName("消息体：只包含 eventId、type、pictureIds、occurredAt 四个字段")
     void messageBody_containsOnlyIdentifiers() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         Jackson2JsonMessageConverter converter = new Jackson2JsonMessageConverter(objectMapper);
@@ -93,9 +108,10 @@ class PictureEventRelayTest {
         JsonNode body = objectMapper.readTree(message.getBody());
         Set<String> fieldNames = new HashSet<>();
         body.fieldNames().forEachRemaining(fieldNames::add);
-        assertEquals(Set.of("eventId", "type", "pictureId", "occurredAt"), fieldNames);
+        assertEquals(Set.of("eventId", "type", "pictureIds", "occurredAt"), fieldNames);
         assertEquals(event.eventId(), body.get("eventId").asText());
         assertEquals("MODERATED", body.get("type").asText());
+        assertEquals(123L, body.get("pictureIds").get(0).asLong());
         assertFalse(body.has("name"), "消息体不能带业务字段");
     }
 }

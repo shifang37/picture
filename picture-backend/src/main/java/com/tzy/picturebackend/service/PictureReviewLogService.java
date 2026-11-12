@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.spring.service.IService;
 import com.tzy.picturebackend.model.entity.PictureReviewLog;
 import com.tzy.picturebackend.model.vo.PictureReviewLogVO;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -22,6 +23,16 @@ public interface PictureReviewLogService extends IService<PictureReviewLog> {
      * 记录一次审核，失败只记录日志，不影响审核结果
      */
     void record(Long pictureId, Long reviewerId, Integer reviewStatus, String reviewMessage);
+
+    /**
+     * 记录一批审核：用一条 INSERT 写入整批历史，失败只记录日志，不影响审核结果
+     *
+     * @param pictureIds    本批审核成功的图片 id
+     * @param reviewerId    审核人 id
+     * @param reviewStatus  审核结果：通过或拒绝
+     * @param reviewMessage 审核意见
+     */
+    void recordBatch(Collection<Long> pictureIds, Long reviewerId, Integer reviewStatus, String reviewMessage);
 
     /**
      * 查询某张图片的审核历史，按时间倒序
