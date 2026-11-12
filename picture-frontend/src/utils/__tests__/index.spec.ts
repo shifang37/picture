@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatSize, getThumbnailUrl } from '@/utils'
+import { formatSize, getShareImageUrl, getThumbnailUrl } from '@/utils'
 
 describe('formatSize', () => {
   it('格式化 B / KB / MB', () => {
@@ -34,5 +34,25 @@ describe('getThumbnailUrl', () => {
   it('已有图片处理参数时不重复拼接', () => {
     const url = 'https://example.com/a.jpg?imageMogr2/thumbnail/200x'
     expect(getThumbnailUrl(url)).toBe(url)
+  })
+})
+
+describe('getShareImageUrl', () => {
+  it('为空时返回空字符串', () => {
+    expect(getShareImageUrl()).toBe('')
+  })
+
+  it('固定输出 JPEG（微信等平台对 WebP 支持不稳定）', () => {
+    expect(getShareImageUrl('https://example.com/a.jpg')).toBe(
+      'https://example.com/a.jpg?imageMogr2/thumbnail/1200x/format/jpeg/quality/85',
+    )
+    expect(getShareImageUrl('https://example.com/a.jpg?v=1', 800)).toBe(
+      'https://example.com/a.jpg?v=1&imageMogr2/thumbnail/800x/format/jpeg/quality/85',
+    )
+  })
+
+  it('已有图片处理参数时不重复拼接', () => {
+    const url = 'https://example.com/a.jpg?imageMogr2/thumbnail/200x'
+    expect(getShareImageUrl(url)).toBe(url)
   })
 })

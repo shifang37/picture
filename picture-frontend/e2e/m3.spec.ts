@@ -182,3 +182,103 @@ test('首页搜索：历史记录写入本地、刷新后仍在、可清空', as
   await page.reload()
   await expect(page.getByTestId('search-history')).toHaveCount(0)
 })
+
+
+test('详情页分享：弹窗展示链接与二维码，并写入 OG 元信息', async ({ page }) => {
+  // 用桩替换剪贴板：headless 下 navigator.clipboard 依赖窗口焦点，直接读会不稳定
+  await page.addInitScript(() => {
+    const copied: string[] = []
+    ;(window as unknown as { __copied: string[] }).__copied = copied
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text: string) => void copied.push(text) },
+    })
+  })
+  await page.route('**/mock-images/**', (route) =>
+    route.fulfill({ body: MOCK_IMAGE, contentType: 'image/png' }),
+  )
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({ json: { code: 40100, data: null, message: '未登录' } })
+      return
+    }
+    if (url.includes('/picture/get/vo')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: makePicture('1', '日落海边', { introduction: '夏天傍晚的海边' }),
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/interaction/status')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: { favorite: false, like: false, favoriteCount: '1', likeCount: '1' },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/picture/list/page/vo')) {
+      await route.fulfill({ json: { code: 0, data: { records: [], total: 0 }, message: 'ok' } })
+      return
+    }
+    if (url.includes('/picture/tag_category')) {
+      await route.fulfill({
+        json: { code: 0, data: { tagList: [], categoryList: [] }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/search/hot')) {
+      await route.fulfill({
+        json: { code: 0, data: { tags: [], categories: [] }, message: 'ok' },
+      })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  await page.goto('/picture/1')
+
+  // 人类访问时由前端动态写 title 与 og:*，规则与后端分享页一致
+  await expect(page).toHaveTitle('日落海边 - 云图库')
+  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
+    'content',
+    '日落海边 - 云图库',
+  )
+  const ogImage = await page.locator('meta[property="og:image"]').getAttribute('content')
+  // 分享封面固定用 JPEG，微信等平台对 WebP 支持不稳定
+  expect(ogImage).toContain('imageMogr2/thumbnail/1200x/format/jpeg')
+
+  await page.getByTestId('picture-share').click()
+  await expect(page.getByTestId('share-modal')).toBeVisible()
+  // a-input 没有前后缀时 data-testid 直接落在 <input> 上，这里两种结构都兼容
+  const shareLinkInput = page.locator(
+    'input[data-testid="share-link-input"], [data-testid="share-link-input"] input',
+  )
+  await expect(shareLinkInput).toHaveValue(/\/picture\/1$/)
+  // 二维码由 qrcode 动态加载后生成
+  await expect(page.getByTestId('share-qr').locator('img')).toBeVisible()
+
+  await page.getByTestId('share-copy').click()
+  await expect(page.getByText('链接已复制')).toBeVisible()
+  const copied = await page.evaluate(
+    () => (window as unknown as { __copied: string[] }).__copied,
+  )
+  expect(copied[0]).toContain('/picture/1')
+
+  // 关闭弹窗后返回首页，验证动态 meta 被清理
+  await page.getByTestId('share-modal').press('Escape')
+  await expect(page.getByTestId('share-modal')).toBeHidden()
+  await page.locator('.logo').click()
+  await expect(page).toHaveTitle('云图库')
+  await expect(page.locator('meta[property="og:title"]')).toHaveCount(0)
+})

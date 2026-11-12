@@ -98,7 +98,7 @@
                 </template>
               </a-button>
             </a-popconfirm>
-            <a-button v-if="picture.reviewStatus === 1" @click="doShare">
+            <a-button v-if="picture.reviewStatus === 1" data-testid="picture-share" @click="doShare">
               分享
               <template #icon>
                 <ShareAltOutlined />
@@ -114,11 +114,13 @@
         </a-card>
       </a-col>
     </a-row>
+    <!-- 分享弹窗：复制链接 / 二维码 / 系统分享 / 下载 -->
+    <ShareModal v-model:open="shareOpen" :picture="picture" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
@@ -129,9 +131,11 @@ import {
 } from '@ant-design/icons-vue'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { getPictureVoById, deletePicture } from '@/api/pictureController'
-import { downloadPicture, formatSize } from '@/utils'
+import { downloadPicture, formatSize, getShareImageUrl } from '@/utils'
 import { formatCount } from '@/utils/interaction'
+import { applySeoMeta, resetSeoMeta } from '@/utils/seo'
 import InteractionButtons from '@/components/InteractionButtons.vue'
+import ShareModal from '@/components/ShareModal.vue'
 
 const loginUserStore = useLoginUserStore()
 // 是否具有编辑权限
@@ -173,6 +177,9 @@ const reviewDescription = computed(() => {
   return ''
 })
 
+// 分享弹窗开关
+const shareOpen = ref(false)
+
 // 获取图片详情
 const fetchPictureDetail = async () => {
   loading.value = true
@@ -182,6 +189,7 @@ const fetchPictureDetail = async () => {
     })
     if (res.data.code === 0 && res.data.data) {
       picture.value = res.data.data
+      updateSeoMeta()
     } else {
       message.error('获取图片详情失败：' + (res.data.message || '图片不存在'))
       // 3秒后返回首页
@@ -225,15 +233,25 @@ const doDelete = async () => {
   }
 }
 
-// 分享：复制当前详情页链接
-const doShare = async () => {
-  const shareUrl = window.location.href
-  try {
-    await navigator.clipboard.writeText(shareUrl)
-    message.success('链接已复制，可以分享给他人了')
-  } catch {
-    message.info('复制失败，请手动复制浏览器地址栏链接：' + shareUrl)
-  }
+// 分享：打开弹窗（复制链接 / 二维码 / 系统分享）
+const doShare = () => {
+  shareOpen.value = true
+}
+
+/**
+ * 人类访问时动态写 title 与 og:*：爬虫走 nginx 分流的后端分享页，
+ * 这里保证浏览器标签、转发预览与后端卡片口径一致。
+ */
+const updateSeoMeta = () => {
+  const name = picture.value.name || '未命名图片'
+  const href = window.location.href
+  const withoutHash = href.split('#')[0] ?? href
+  applySeoMeta({
+    title: `${name} - 云图库`,
+    description: picture.value.introduction || '',
+    image: getShareImageUrl(picture.value.url),
+    url: withoutHash.split('?')[0] ?? withoutHash,
+  })
 }
 
 // 处理下载：直接走后端流式代理，后端在文件完整返回后按「用户/IP + 图片 + 天」去重计数
@@ -243,6 +261,11 @@ const doDownload = () => {
 
 onMounted(() => {
   fetchPictureDetail()
+})
+
+// 离开详情页时清掉动态 meta，避免标题/封面残留到下一个页面
+onUnmounted(() => {
+  resetSeoMeta()
 })
 </script>
 

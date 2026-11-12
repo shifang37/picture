@@ -73,5 +73,6 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SearchBox: typeof import('./src/components/SearchBox.vue')['default']
+    ShareModal: typeof import('./src/components/ShareModal.vue')['default']
   }
 }

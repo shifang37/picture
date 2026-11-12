@@ -30,6 +30,24 @@ export function getThumbnailUrl(url?: string, size = 300) {
 }
 
 /**
+ * 生成分享卡片用的图片地址（依赖腾讯云 COS 图片处理参数）
+ * <p>
+ * 与列表缩略图不同，这里固定输出 JPEG：微信等平台的抓取器对 WebP 支持不稳定，
+ * 分享卡片会因此变成空白封面。后端 `ShareCardRenderer` 使用相同规则，保证两侧一致。
+ * @param url 原图地址
+ * @param size 缩略图最长边
+ */
+export function getShareImageUrl(url?: string, size = 1200) {
+  if (!url) {
+    return ''
+  }
+  if (url.includes('imageMogr2')) {
+    return url
+  }
+  return `${url}${url.includes('?') ? '&' : '?'}imageMogr2/thumbnail/${size}x/format/jpeg/quality/85`
+}
+
+/**
  * 下载图片
  * <p>
  * 必须走后端流式代理：同源请求不依赖 COS 桶的跨域配置，后端会在文件完整写完后
