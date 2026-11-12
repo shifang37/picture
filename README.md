@@ -462,6 +462,80 @@ app:
 - `/album/:id`：专辑详情，浏览模式为作品瀑布流，作者/管理员可切换到管理模式设置封面、移除作品；
 - 「我的图片」多选后可「加入专辑」，弹窗选择目标专辑；加入成功后自动跳过重复项。
 
+## 搜索体验（M3）
+
+首页搜索框支持联想、本地历史与热词，结果列表里关键词高亮。
+
+### 接口
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/search/suggest?q=&limit=10` | 公开 | 名称 / 标签 / 分类三组前缀联想；`q` 1–32 字符，`limit` 1–20 |
+| GET | `/api/search/hot?limit=10` | 公开 | 热门标签与热门分类（带公开图片数量），`limit` 1–20 |
+
+- **固定走 MySQL**，不放进 `PictureSearchService`：`SEARCH_ENGINE=mysql`（默认）时同样可用，Elasticsearch 只是列表召回的另一种实现；
+- 只匹配公开图片（`isDelete = 0 AND reviewStatus = 1`）：待审核 / 已拒绝内容的名称不会通过联想被探测到；
+- 只用前缀匹配（`LIKE 'kw%'`）才能命中 `idx_name` / `idx_tag_picture`，不做 `%kw%` 全表扫描；名称完全匹配优先、更短的名称靠前；
+- 结果进 Redis `searchMeta` 缓存（TTL 10 分钟），重复输入直接命中；空结果同样缓存，避免用随机关键词打穿数据库；
+- 指标 `picture_search_meta_total{type=suggest|hot}`。
+
+### 前端
+
+- `SearchBox` 用 `a-auto-complete` 分组展示联想（图片 / 标签 / 分类）：输入 1 个字符触发、防抖 250ms、空输入不请求；同一关键词在三个分组里只出现一次（图片 > 标签 > 分类），点击建议直接按该关键词搜索；
+- 搜索历史只存 localStorage（`picture:search-history`，最多 10 条、去重、可一键清空），不上报后端；隐私模式写入失败时静默降级；
+- 热词来自 `/api/search/hot`，常驻搜索框下方；空结果文案会带上当前关键词并指回这一行热词；
+- 高亮用 `utils/highlight.ts` 把文本切成 `{ text, matched }` 片段后逐段文本插值渲染，**不使用 `v-html`**：`<script>`、`&`、正则元字符等输入天然安全；
+- 只有真正发起查询时才更新高亮关键词，边输入边联想不会让列表闪烁。
+
+## 分享与 SEO（M3）
+
+详情页的「分享」会打开弹窗（复制链接、二维码、系统分享、下载）；分享到微信 / Twitter 时卡片带标题、简介与封面。
+
+### 爬虫分流
+
+SPA 的 HTML 里没有图片信息，而社交平台的爬虫不执行 JS，因此采用「同一路径、按 UA 分流」：
+
+- 人类访问 `/picture/{id}`：nginx 返回 `index.html`，前端渲染后动态写 `document.title` 与 `og:*` / `twitter:*`；
+- 爬虫访问同一路径：nginx 代理到后端 `GET /api/share/picture/{id}`，返回带 OG 标签的最小 HTML。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/share/picture/{id}` | 公开 | `text/html`；只对已过审且未删除的图片返回卡片，其余返回 404 页面 |
+
+- 用户内容统一 `HtmlUtils.htmlEscape` 转义；Latin-1 区间标点会变成 `&middot;`、`&hellip;` 这类实体，属正常现象（浏览器与爬虫都会解码）；
+- `og:image` 走 COS 缩略图并**固定输出 JPEG**（`imageMogr2/thumbnail/1200x/format/jpeg/quality/85`）：微信等平台对 WebP 支持不稳定，WebP 封面会变成空白；
+- 成功响应 `Cache-Control: public, max-age=300`；不存在 / 未过审返回 404 + `no-store`，页面里没有任何图片信息，不能通过分享链接探测未过审内容；
+- 指标 `picture_share_total{result=rendered|not_found}`。
+
+### 防盗链注意
+
+微信 / Twitter 抓取封面时**不带 Referer**。开启 COS Referer 白名单（`COS_REFERER_ENABLED=true`）时必须同时设置 `COS_REFERER_ALLOW_EMPTY=true`，否则封面 403、分享卡片没有图。
+
+### 前端
+
+- `ShareModal`：复制链接（Clipboard API，非 HTTPS 回落 `execCommand`）、二维码（`qrcode` **动态 import**，只在打开弹窗时加载，不进首屏包）、系统分享（`navigator.share`，不支持的浏览器隐藏入口）、下载原图；
+- `utils/seo.ts`：`applySeoMeta` 写标题与 meta，`resetSeoMeta` 在离开详情页时清理并恢复原标题；脚本创建的标签带 `data-seo="managed"` 标记，不会误删 `index.html` 的静态标签；
+- 标题 / 描述截断按 Unicode 码点处理（emoji 不会被切成半个字符）；没有封面时 `twitter:card` 降级为 `summary`，避免平台抓到空白大图。
+
+### 配置
+
+| 配置 | 环境变量 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `app.share.frontend-base-url` | `SHARE_FRONTEND_BASE_URL` | `http://localhost:5173` | 站点根地址，用于 `og:url` 与「查看详情」链接；生产必须改成正式域名 |
+| `app.share.og-image-width` | `SHARE_OG_IMAGE_WIDTH` | 1200 | `og:image` 缩略图长边 |
+| `app.share.cache-seconds` | `SHARE_CACHE_SECONDS` | 300 | 分享页缓存秒数 |
+
+nginx 片段见 `picture-frontend/nginx.conf` 里的 `location ~ ^/picture/(?<sharePictureId>\d+)$`：用命名捕获避免 `if` 内的正则覆盖 `$1`，命中爬虫 UA 时直接 `proxy_pass` 到后端，其余请求仍 `try_files` 回 `index.html`。
+
+### 验证
+
+```powershell
+# 模拟爬虫抓取（应返回带 og: 标签的 HTML）
+curl.exe -s -H "User-Agent: Twitterbot/1.0" http://localhost:8080/picture/1
+# 人类 UA 仍返回 SPA 的 index.html
+curl.exe -s -H "User-Agent: Mozilla/5.0" http://localhost:8080/picture/1 | Select-String 'id="app"'
+```
+
 ## 下载与下载次数统计口径
 
 详情页的「免费下载」走同源后端接口 `GET /api/picture/download/{id}`：
@@ -488,6 +562,7 @@ app:
 - **公开图片列表**（`POST /api/picture/list/page/vo`）：两级缓存，L1 是 Caffeine（最多 500 项、写入后 30 秒过期），L2 是 Redis（5 分钟 + 0~60 秒随机抖动）。「我的图片」、管理列表、详情页都不缓存。
 - **失效**：审核通过/拒绝（批量审核整批只失效一次）、编辑、删除、回收站恢复、上传成功后对 `picture:list:ns` 自增，新请求换用新命名空间，旧 key 自然过期。因此审核结果立即可见，L1 最多比数据库滞后 30 秒。
 - **互动不失效列表**：收藏/点赞只改计数列，列表缓存里的计数最多滞后一个周期（L1 30 秒 / L2 5 分钟），详情页与互动状态接口实时读取；这样热门图片的互动不会把列表缓存反复打穿。
+- **搜索联想 / 热词**（`GET /api/search/suggest`、`/api/search/hot`）：Spring Cache 存 Redis（`searchMeta::…`），TTL 10 分钟；空结果同样缓存，避免随机关键词穿透到数据库。
 - **降级**：缓存只保存公开可见的数据；Redis 读写异常时直接回源数据库，列表接口不受影响。
 - 实测（300 张图片、50 次请求）：公开列表热缓存 p95 约 8.5 ms，每次失效回源 p95 约 19 ms。
 
@@ -680,6 +755,8 @@ Prometheus、8124 管理端口、RabbitMQ 15692 都只在 Compose 内网可达�
 | `picture_interaction_total{action,type}` | Counter | `PictureInteractionServiceImpl` | 收藏/点赞的 add/remove 量，可用于排查异常刷量 |
 | `notification_sent_total{type}` | Counter | `NotificationServiceImpl` | 按通知类型统计发送量，`REVIEW_REJECT` 突增通常意味着审核或机审策略异常 |
 | `notification_read_total` | Counter | `NotificationServiceImpl` | 已读条数，粗略反映通知触达效果 |
+| `picture_search_meta_total{type}` | Counter | `SearchController` | 联想 / 热词请求量，用于判断搜索入口使用情况 |
+| `picture_share_total{result}` | Counter | `ShareController` | 分享卡片渲染量；`not_found` 突增通常意味着有人在批量探测图片 id |
 | `cache_gets_total{cache="picture.list.local"}` | Counter | `PictureListCache` | Caffeine 开启 `recordStats` 后由 Micrometer 导出，可算命中率 |
 
 `http_server_requests_seconds` 已开启 `percentiles-histogram`，接口 p95 延迟可直接用
@@ -742,11 +819,11 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 ```
 
 > `npm run openapi` 需要后端已启动，它从 `http://localhost:8123/api/v3/api-docs` 拉取接口定义。
-> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传、「我的图片」与批量编辑/删除封装，`src/api/userExtra.ts` 中的个人中心/修改密码/作者主页封装，以及 `src/api/albumExtra.ts`、`src/api/interactionExtra.ts`、`src/api/notificationExtra.ts` 不会被覆盖。
+> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传、「我的图片」与批量编辑/删除封装，`src/api/userExtra.ts` 中的个人中心/修改密码/作者主页封装，以及 `src/api/albumExtra.ts`、`src/api/interactionExtra.ts`、`src/api/notificationExtra.ts`、`src/api/searchExtra.ts` 不会被覆盖。
 
 ## 测试
 
-后端目前包含 **550 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、收藏点赞写接口的按用户限流与用户隔离、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、Prometheus 指标名与标签/待审核 Gauge 刷新，M2 的作者主页统计口径与缓存失效、批量编辑的整批原子/只改变化项/重新审核规则、批量删除的归属过滤与并发失败明细、专辑的可见性/权限/幂等加图/计数与封面回退，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **571 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、收藏点赞写接口的按用户限流与用户隔离、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、搜索联想的参数校验/条数收敛/同名去重与热词聚合、分享卡片的 OG 标签/HTML 转义/截断/缩略图规则与未过审 404、Prometheus 指标名与标签/待审核 Gauge 刷新，M2 的作者主页统计口径与缓存失效、批量编辑的整批原子/只改变化项/重新审核规则、批量删除的归属过滤与并发失败明细、专辑的可见性/权限/幂等加图/计数与封面回退，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
@@ -756,7 +833,7 @@ cd picture-backend
 
 集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP，M1 的互动/通知（10 线程并发收藏只落 1 行关系且计数为 1、通知唯一键去重、只能读自己的通知、物理清理级联删除互动关系），以及 M2 的作者主页统计与缓存失效、V12 专辑表创建、专辑「创建 → 加图 → 公开统计 → 移图」的计数与封面回退。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
-前端测试：Vitest 56 个用例（含计数格式化、乐观更新与回滚、`useInteraction` 的连点保护/回滚/登录拦截、通知轮询在页面隐藏时暂停、批量编辑字段转换、批量上传的图片 id 收集），Playwright 22 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：M1 覆盖「收藏 → 我的收藏」「审核通知 → 图片详情」「首页卡片悬浮收藏」「卡片点击进入详情」四条主链路，M2 覆盖「详情页作者入口 → 作者主页统计与作品」「作者不存在 404」「作者主页空状态」「批量编辑」「批量删除」「创建专辑」「专辑管理模式移除作品」「我的图片加入专辑」八条主链路。
+前端测试：Vitest 90 个用例（含计数格式化、乐观更新与回滚、`useInteraction` 的连点保护/回滚/登录拦截、通知轮询在页面隐藏时暂停、批量编辑字段转换、批量上传的图片 id 收集、搜索历史去重与上限、高亮片段切分与 XSS 输入、SEO 标签生成与清理、分享封面 JPEG 规则），Playwright 26 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：M1 覆盖「收藏 → 我的收藏」「审核通知 → 图片详情」「首页卡片悬浮收藏」「卡片点击进入详情」四条主链路，M2 覆盖「详情页作者入口 → 作者主页统计与作品」「作者不存在 404」「作者主页空状态」「批量编辑」「批量删除」「创建专辑」「专辑管理模式移除作品」「我的图片加入专辑」八条主链路，M3 覆盖「联想建议 → 搜索并高亮」「空输入不请求联想 + 热词引导」「搜索历史持久化与清空」「分享弹窗的链接、二维码与 OG 元信息清理」四条主链路。
 
 ## 持续集成与依赖更新
 
