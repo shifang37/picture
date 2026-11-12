@@ -81,6 +81,11 @@ public class PictureMetrics {
      */
     public static final String BATCH = "picture.batch";
 
+    /**
+     * 搜索元数据请求计数（type=suggest/hot）
+     */
+    public static final String SEARCH_META = "picture.search.meta";
+
     private final MeterRegistry registry;
 
     /**
@@ -222,6 +227,19 @@ public class PictureMetrics {
                 .publishPercentileHistogram()
                 .register(registry)
                 .record(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * 记录一次搜索元数据请求（联想 / 热词）
+     *
+     * @param type suggest / hot
+     */
+    public void searchMeta(String type) {
+        Counter.builder(SEARCH_META)
+                .description("搜索联想与热词请求次数")
+                .tag("type", type == null ? "unknown" : type)
+                .register(registry)
+                .increment();
     }
 
     /**

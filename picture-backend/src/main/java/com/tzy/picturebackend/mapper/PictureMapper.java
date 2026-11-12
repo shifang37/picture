@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.toolkit.Constants;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.vo.AuthorStatsVO;
+import com.tzy.picturebackend.model.vo.SearchHotKeywordVO;
+import com.tzy.picturebackend.model.vo.SearchNameSuggestionVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import org.apache.ibatis.annotations.Param;
 
@@ -172,5 +174,55 @@ public interface PictureMapper extends BaseMapper<Picture> {
     IPage<Picture> selectPageByAlbum(Page<Picture> page,
                                      @Param("albumId") Long albumId,
                                      @Param("onlyPublic") boolean onlyPublic);
+
+    /**
+     * 搜索联想：名称前缀匹配的公开图片。
+     * <p>
+     * 只用「前缀」而不是「包含」：{@code name LIKE 'kw%'} 能走 {@code idx_name}，
+     * 包含匹配会退化为全表扫描。排序把「完全等于搜索词」的图片放最前，其余按名称长度升序，
+     * 让更短、更精确的名称优先出现在下拉框里。
+     *
+     * @param keyword 已裁剪的搜索词（1–32 字符）
+     * @param limit   最多返回条数
+     * @return 命中的公开图片 id 与名称
+     */
+    List<SearchNameSuggestionVO> selectNameSuggestions(@Param("keyword") String keyword,
+                                                       @Param("limit") int limit);
+
+    /**
+     * 搜索联想：标签前缀匹配，只统计公开图片下的标签。
+     *
+     * @param keyword 已裁剪的搜索词
+     * @param limit   最多返回条数
+     * @return 去重后的标签名
+     */
+    List<String> selectTagSuggestions(@Param("keyword") String keyword,
+                                      @Param("limit") int limit);
+
+    /**
+     * 搜索联想：分类前缀匹配，只统计公开图片的分类。
+     *
+     * @param keyword 已裁剪的搜索词
+     * @param limit   最多返回条数
+     * @return 去重后的分类名
+     */
+    List<String> selectCategorySuggestions(@Param("keyword") String keyword,
+                                           @Param("limit") int limit);
+
+    /**
+     * 热门标签：按公开图片的标签使用次数倒序。
+     *
+     * @param limit 最多返回条数
+     * @return 标签名与公开图片数量
+     */
+    List<SearchHotKeywordVO> selectHotTags(@Param("limit") int limit);
+
+    /**
+     * 热门分类：按公开图片的分类使用次数倒序。
+     *
+     * @param limit 最多返回条数
+     * @return 分类名与公开图片数量
+     */
+    List<SearchHotKeywordVO> selectHotCategories(@Param("limit") int limit);
 
 }

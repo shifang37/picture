@@ -38,6 +38,11 @@ public class CacheConfig {
      */
     public static final String USER_PROFILE_CACHE = "userProfile";
 
+    /**
+     * 搜索联想 / 热词缓存名
+     */
+    public static final String SEARCH_META_CACHE = "searchMeta";
+
     private static final Duration TAG_CATEGORY_TTL = Duration.ofMinutes(30);
 
     private static final Duration ANALYZE_TTL = Duration.ofMinutes(5);
@@ -47,6 +52,12 @@ public class CacheConfig {
      * 5 分钟延迟可接受；作者本人查看自己的准确数据请走「我的图片」。
      */
     private static final Duration USER_PROFILE_TTL = Duration.ofMinutes(5);
+
+    /**
+     * 搜索联想 / 热词 TTL：前缀匹配与标签聚合本身不重，但联想是「边输入边请求」的接口，
+     * 10 分钟缓存既能把 QPS 压到接近 0，又不会让新过审的图片长时间搜不到。
+     */
+    private static final Duration SEARCH_META_TTL = Duration.ofMinutes(10);
 
     @Bean
     public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
@@ -60,6 +71,7 @@ public class CacheConfig {
                         .fromSerializer(new GenericJackson2JsonRedisSerializer()));
         RedisCacheConfiguration analyzeConfig = defaults.entryTtl(ANALYZE_TTL);
         RedisCacheConfiguration userProfileConfig = defaults.entryTtl(USER_PROFILE_TTL);
+        RedisCacheConfiguration searchMetaConfig = defaults.entryTtl(SEARCH_META_TTL);
         return RedisCacheManager.builder(connectionFactory)
                 .cacheDefaults(defaults)
                 // 打开 RedisCache 的命中/未命中统计：否则 cache_gets_total 等指标恒为 0
@@ -67,7 +79,8 @@ public class CacheConfig {
                 .withInitialCacheConfigurations(Map.of(
                         TAG_CATEGORY_CACHE, defaults,
                         ANALYZE_CACHE, analyzeConfig,
-                        USER_PROFILE_CACHE, userProfileConfig))
+                        USER_PROFILE_CACHE, userProfileConfig,
+                        SEARCH_META_CACHE, searchMetaConfig))
                 .build();
     }
 }

@@ -207,4 +207,77 @@
         </if>
         ORDER BY ap.createTime DESC, ap.pictureId DESC
     </select>
+
+    <resultMap id="NameSuggestionMap" type="com.tzy.picturebackend.model.vo.SearchNameSuggestionVO">
+        <id property="id" column="id"/>
+        <result property="name" column="name"/>
+    </resultMap>
+
+    <resultMap id="HotKeywordMap" type="com.tzy.picturebackend.model.vo.SearchHotKeywordVO">
+        <result property="name" column="name"/>
+        <result property="count" column="cnt"/>
+    </resultMap>
+
+    <!--
+        搜索联想只看公开内容：待审核 / 已拒绝 / 回收站里的图片名称不能通过联想被外部探测。
+        前缀匹配（不加前导 %）才能命中 idx_name；完全匹配优先、名称更短优先。
+    -->
+    <select id="selectNameSuggestions" resultMap="NameSuggestionMap">
+        SELECT id, name
+        FROM picture
+        WHERE isDelete = 0
+          AND reviewStatus = 1
+          AND name IS NOT NULL
+          AND name &lt;&gt; ''
+          AND name LIKE CONCAT(#{keyword}, '%')
+        ORDER BY (name = #{keyword}) DESC, CHAR_LENGTH(name) ASC, id DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectTagSuggestions" resultType="java.lang.String">
+        SELECT DISTINCT pt.tag
+        FROM picture_tag pt
+                 JOIN picture p ON p.id = pt.pictureId
+        WHERE p.isDelete = 0
+          AND p.reviewStatus = 1
+          AND pt.tag LIKE CONCAT(#{keyword}, '%')
+        ORDER BY pt.tag
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectCategorySuggestions" resultType="java.lang.String">
+        SELECT DISTINCT p.category
+        FROM picture p
+        WHERE p.isDelete = 0
+          AND p.reviewStatus = 1
+          AND p.category IS NOT NULL
+          AND p.category &lt;&gt; ''
+          AND p.category LIKE CONCAT(#{keyword}, '%')
+        ORDER BY p.category
+        LIMIT #{limit}
+    </select>
+
+    <!-- 热词按公开图片聚合：标签走 picture_tag，分类直接用 picture.category -->
+    <select id="selectHotTags" resultMap="HotKeywordMap">
+        SELECT pt.tag AS name, COUNT(*) AS cnt
+        FROM picture_tag pt
+                 JOIN picture p ON p.id = pt.pictureId
+        WHERE p.isDelete = 0
+          AND p.reviewStatus = 1
+        GROUP BY pt.tag
+        ORDER BY cnt DESC, pt.tag ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectHotCategories" resultMap="HotKeywordMap">
+        SELECT p.category AS name, COUNT(*) AS cnt
+        FROM picture p
+        WHERE p.isDelete = 0
+          AND p.reviewStatus = 1
+          AND p.category IS NOT NULL
+          AND p.category &lt;&gt; ''
+        GROUP BY p.category
+        ORDER BY cnt DESC, p.category ASC
+        LIMIT #{limit}
+    </select>
 </mapper>
