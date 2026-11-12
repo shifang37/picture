@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 登录 / 上传限流过滤器测试
+ * 登录 / 注册 / 验证码 / 上传 / 收藏点赞限流过滤器测试
  */
 class RateLimitFilterTest {
 
@@ -155,6 +155,59 @@ class RateLimitFilterTest {
         assertNull(lastChain.getRequest(), "超过限流后不应继续执行");
         assertEquals(1.0, meterRegistry.get(PictureMetrics.RATE_LIMITED)
                 .tag("type", "captcha").counter().count());
+    }
+
+    @Test
+    @DisplayName("收藏/点赞：同一用户每分钟超过 120 次写操作返回 42900，add 与 remove 共用一个桶")
+    void interaction_blocksAfterUserLimit() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(UserConstant.USER_LOGIN_ID, 200L);
+
+        MockHttpServletResponse lastResponse = null;
+        MockFilterChain lastChain = null;
+        for (int i = 0; i < 121; i++) {
+            // add / remove 交替发起：限流按「写操作总数」计算，而不是每个接口各 120 次
+            String path = i % 2 == 0 ? "/api/interaction/add" : "/api/interaction/remove";
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+            request.setContextPath("/api");
+            request.setSession(session);
+            request.setRemoteAddr("10.0.0.6");
+            lastResponse = new MockHttpServletResponse();
+            lastChain = new MockFilterChain();
+            rateLimitFilter.doFilter(request, lastResponse, lastChain);
+        }
+
+        assertEquals(200, lastResponse.getStatus());
+        assertTrue(lastResponse.getContentAsString().contains("\"code\":42900"));
+        assertNull(lastChain.getRequest(), "超过限流后不应继续执行");
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.RATE_LIMITED)
+                .tag("type", "interaction").counter().count());
+    }
+
+    @Test
+    @DisplayName("收藏/点赞：限流按用户隔离，一个用户被限流不影响其他用户")
+    void interaction_limitIsPerUser() throws Exception {
+        MockHttpSession limitedSession = new MockHttpSession();
+        limitedSession.setAttribute(UserConstant.USER_LOGIN_ID, 201L);
+        for (int i = 0; i < 120; i++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/interaction/add");
+            request.setContextPath("/api");
+            request.setSession(limitedSession);
+            rateLimitFilter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
+        }
+
+        MockHttpSession otherSession = new MockHttpSession();
+        otherSession.setAttribute(UserConstant.USER_LOGIN_ID, 202L);
+        MockHttpServletRequest otherRequest = new MockHttpServletRequest("POST", "/api/interaction/add");
+        otherRequest.setContextPath("/api");
+        otherRequest.setSession(otherSession);
+        MockFilterChain otherChain = new MockFilterChain();
+        MockHttpServletResponse otherResponse = new MockHttpServletResponse();
+
+        rateLimitFilter.doFilter(otherRequest, otherResponse, otherChain);
+
+        assertNotNull(otherChain.getRequest(), "其他用户不应被前一个用户的限流影响");
+        assertEquals(200, otherResponse.getStatus());
     }
 
     @Test
