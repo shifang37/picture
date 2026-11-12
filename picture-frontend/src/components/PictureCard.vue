@@ -25,7 +25,16 @@
         </div>
       </div>
     </template>
-    <a-card-meta :title="picture.name || '未命名'">
+    <a-card-meta>
+      <template #title>
+        <!-- 搜索命中时高亮名称：逐段文本插值，不使用 v-html -->
+        <span class="picture-name" data-testid="picture-name">
+          <template v-for="(segment, index) in nameSegments" :key="index">
+            <mark v-if="segment.matched" class="picture-name-hit">{{ segment.text }}</mark>
+            <template v-else>{{ segment.text }}</template>
+          </template>
+        </span>
+      </template>
       <template #description>
         <div class="picture-tags">
           <a-tag color="green">
@@ -49,6 +58,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { getThumbnailUrl } from '@/utils'
+import { highlightSegments } from '@/utils/highlight'
 import { formatCount } from '@/utils/interaction'
 import { getPictureAspectRatio } from '@/utils/waterfall'
 import InteractionButtons from '@/components/InteractionButtons.vue'
@@ -58,8 +68,10 @@ const props = withDefaults(
     picture: API.PictureVO
     /** 当前列宽对应的缩略图尺寸，由瀑布流根据容器宽度计算 */
     thumbnailSize?: number
+    /** 当前生效的搜索词，用于名称高亮；为空时不做高亮 */
+    keyword?: string
   }>(),
-  { thumbnailSize: 400 },
+  { thumbnailSize: 400, keyword: '' },
 )
 
 const emit = defineEmits<{
@@ -67,6 +79,10 @@ const emit = defineEmits<{
 }>()
 
 const aspectRatio = computed(() => getPictureAspectRatio(props.picture))
+
+const nameSegments = computed(() =>
+  highlightSegments(props.picture.name || '未命名', props.keyword),
+)
 </script>
 
 <style scoped>
@@ -109,6 +125,12 @@ const aspectRatio = computed(() => getPictureAspectRatio(props.picture))
   .interaction-overlay {
     opacity: 1;
   }
+}
+
+.picture-name-hit {
+  padding: 0;
+  background: rgba(255, 214, 102, 0.55);
+  color: inherit;
 }
 
 .picture-tags {

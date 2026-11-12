@@ -257,8 +257,10 @@ test('首页从 URL 还原搜索词、分类和标签', async ({ page }) => {
     '/?searchText=%E6%B5%B7%E8%BE%B9&category=%E9%A3%8E%E6%99%AF&tags=%E8%93%9D%E8%89%B2&tags=%E6%97%A5%E8%90%BD',
   )
 
-  await expect(page.getByPlaceholder('从海量图片中搜索')).toHaveValue('海边')
-  await expect(page.getByText('暂无图片，换个搜索条件试试')).toBeVisible()
+  // 搜索框换成 AutoComplete 后，placeholder 由 Ant Design 渲染成占位层而不是 input 属性，
+  // 这里改为直接断言输入框的值与空结果引导文案
+  await expect(page.getByTestId('search-input').locator('input')).toHaveValue('海边')
+  await expect(page.getByTestId('home-empty')).toContainText('没有找到与「海边」相关的图片')
   expect(lastBody?.searchText).toBe('海边')
   expect(lastBody?.category).toBe('风景')
   expect(lastBody?.tags).toEqual(['蓝色', '日落'])

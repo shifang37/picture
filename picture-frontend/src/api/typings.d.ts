@@ -267,6 +267,29 @@ declare namespace API {
     id?: string
   }
 
+  // 搜索联想：名称（可点击进详情）、标签、分类三组前缀匹配结果
+  type SearchNameSuggestion = {
+    id?: string
+    name?: string
+  }
+
+  type SearchSuggestVO = {
+    names?: SearchNameSuggestion[]
+    tags?: string[]
+    categories?: string[]
+  }
+
+  // 热门搜索词：标签 / 分类 + 公开图片数量
+  type SearchHotKeyword = {
+    name?: string
+    count?: number
+  }
+
+  type SearchHotVO = {
+    tags?: SearchHotKeyword[]
+    categories?: SearchHotKeyword[]
+  }
+
   type PictureVO = {
     id?: string
     url?: string

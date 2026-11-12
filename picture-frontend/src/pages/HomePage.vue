@@ -1,13 +1,12 @@
 <template>
   <div id="homePage">
-    <!-- 搜索框 -->
+    <!-- 搜索框：联想 + 本地历史 + 热门搜索词 -->
     <div class="search-bar">
-      <a-input-search
-        v-model:value="searchText"
-        placeholder="从海量图片中搜索"
-        enter-button="搜索"
-        size="large"
-        @search="doSearch"
+      <SearchBox
+        v-model="searchText"
+        :hot-tags="hotTagList"
+        :hot-categories="hotCategoryList"
+        @search="handleSearchBoxSearch"
       />
     </div>
 
@@ -57,7 +56,7 @@
 
     <!-- 空结果 -->
     <div v-else-if="!dataList.length" class="state-block" data-testid="home-empty">
-      <a-empty description="暂无图片，换个搜索条件试试" />
+      <a-empty :description="emptyDescription" />
     </div>
 
     <!-- 瀑布流：按图片宽高比分配列，图片加载前即占好高度，避免布局跳动 -->
@@ -68,6 +67,7 @@
           :key="picture.id"
           :picture="picture"
           :thumbnail-size="thumbnailSize"
+          :keyword="appliedKeyword"
           @open="doClickPicture"
         />
       </div>
@@ -94,7 +94,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useDevicePixelRatio, useElementSize, useInfiniteScroll } from '@vueuse/core'
 import { listPictureTagCategory, listPictureVoByPage } from '@/api/pictureController'
+import { fetchSearchHot } from '@/api/searchExtra'
 import PictureCard from '@/components/PictureCard.vue'
+import SearchBox from '@/components/SearchBox.vue'
 import {
   distributeToColumns,
   getColumnCount,
@@ -127,6 +129,11 @@ const selectedCategory = ref<string>('all')
 const selectedTags = ref<string[]>([])
 const categoryList = ref<string[]>([])
 const tagList = ref<string[]>([])
+// 热门搜索词：搜索框与空结果引导共用同一份数据，避免两次请求
+const hotTagList = ref<string[]>([])
+const hotCategoryList = ref<string[]>([])
+// 当前列表实际使用的搜索词（用于卡片高亮），与用户正在输入的内容区分
+const appliedKeyword = ref('')
 
 // 排序：最新（默认）/ 最多收藏 / 最多点赞 / 最多下载
 const SORT_OPTIONS = [
@@ -138,6 +145,13 @@ const SORT_OPTIONS = [
 const sortField = ref<string>('createTime')
 
 const showInitialLoading = computed(() => initialLoading.value && dataList.value.length === 0)
+
+// 空结果文案：带上当前搜索词，并指向搜索框下方的热门搜索
+const emptyDescription = computed(() =>
+  appliedKeyword.value
+    ? `没有找到与「${appliedKeyword.value}」相关的图片，试试上方的热门搜索或更换条件`
+    : '暂无图片，换个搜索条件试试',
+)
 
 // 瀑布流列数与缩略图尺寸
 const listRef = ref<HTMLElement | null>(null)
@@ -185,6 +199,8 @@ const fetchPage = async (reset = false) => {
     currentPage.value = 0
     hasMore.value = false
     initialLoading.value = true
+    // 只有在真正发起查询时才更新高亮关键词，避免输入过程中列表闪烁
+    appliedKeyword.value = searchText.value.trim()
   }
   const page = currentPage.value + 1
   try {
@@ -302,6 +318,30 @@ const handleTagChange = (tag: string, checked: boolean) => {
   doSearch()
 }
 
+// 搜索框提交（回车 / 点击建议 / 点击历史或热词）：统一走 doSearch，同步 URL 并重新分页
+const handleSearchBoxSearch = (keyword: string) => {
+  searchText.value = keyword
+  doSearch()
+}
+
+// 热门搜索词：失败时静默降级，不影响搜索主流程
+const getHotKeywords = async () => {
+  try {
+    const res = await fetchSearchHot(10)
+    if (res.data.code !== 0 || !res.data.data) {
+      return
+    }
+    hotTagList.value = (res.data.data.tags ?? [])
+      .map((item) => (item.name ?? '').trim())
+      .filter((name) => name.length > 0)
+    hotCategoryList.value = (res.data.data.categories ?? [])
+      .map((item) => (item.name ?? '').trim())
+      .filter((name) => name.length > 0)
+  } catch {
+    // 热词只是发现入口，网络异常时不打扰用户
+  }
+}
+
 // 切换排序：回到顶部并重新分页，避免停留在旧列表的滚动位置
 const doSortChange = () => {
   syncQueryToUrl()
@@ -345,6 +385,7 @@ onMounted(() => {
   applyQueryToState()
   fetchPage(true)
   getTagCategoryOptions()
+  getHotKeywords()
 })
 
 onActivated(() => {
@@ -393,7 +434,7 @@ onDeactivated(() => {
 }
 
 #homePage .search-bar {
-  max-width: 480px;
+  max-width: 680px;
   margin: 0 auto 16px;
 }
 
