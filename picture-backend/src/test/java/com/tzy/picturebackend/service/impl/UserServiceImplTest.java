@@ -72,6 +72,9 @@ class UserServiceImplTest {
         ReflectionTestUtils.setField(userService, "sessionInvalidationManager", sessionInvalidationManager);
         pictureMapper = mock(PictureMapper.class);
         ReflectionTestUtils.setField(userService, "pictureMapper", pictureMapper);
+        // 注册时写入默认配额；配额本身的规则由 UserQuotaServiceTest 覆盖
+        ReflectionTestUtils.setField(userService, "userQuotaService",
+                mock(com.tzy.picturebackend.service.UserQuotaService.class));
     }
 
     // ==================== 密码加密 ====================

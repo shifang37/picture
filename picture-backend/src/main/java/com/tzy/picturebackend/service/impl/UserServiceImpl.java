@@ -19,6 +19,7 @@ import com.tzy.picturebackend.model.vo.LoginUserVO;
 import com.tzy.picturebackend.model.vo.PublicUserProfileVO;
 import com.tzy.picturebackend.model.vo.PublicUserVO;
 import com.tzy.picturebackend.model.vo.UserVO;
+import com.tzy.picturebackend.service.UserQuotaService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.mapper.UserMapper;
 import com.tzy.picturebackend.validation.PasswordPolicy;
@@ -55,6 +56,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
 
     @Resource
     private SessionInvalidationManager sessionInvalidationManager;
+
+    /**
+     * 新用户注册时写入默认配额；配额服务不依赖 UserService，不会形成循环依赖
+     */
+    @Resource
+    private UserQuotaService userQuotaService;
 
     /**
      * 作者主页统计直接走 SQL 聚合，不依赖 PictureService，避免与 PictureServiceImpl 形成循环依赖
@@ -115,6 +122,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         user.setUserName("无名");
         user.setUserRole(UserRoleEnum.USER.getValue());
         user.setPasswordChangeRequired(true);
+        // 配额默认值来自配置（app.quota.*），而不是只依赖数据库默认值
+        userQuotaService.applyDefaultQuota(user);
         boolean saveResult = this.save(user);
         if(!saveResult){
             throw new BusinessException(ErrorCode.SYSTEM_ERROR,"注册失败，数据库错误");

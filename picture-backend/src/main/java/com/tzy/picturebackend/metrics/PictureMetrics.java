@@ -96,6 +96,16 @@ public class PictureMetrics {
      */
     public static final String EXIF = "picture.exif";
 
+    /**
+     * 配额拒绝计数（type=storage/count）
+     */
+    public static final String QUOTA_REJECTED = "picture.quota.rejected";
+
+    /**
+     * 秒传命中计数
+     */
+    public static final String UPLOAD_DUPLICATE = "picture.upload.duplicate";
+
     private final MeterRegistry registry;
 
     /**
@@ -274,6 +284,29 @@ public class PictureMetrics {
         Counter.builder(EXIF)
                 .description("上传图片 EXIF 处理次数")
                 .tag("action", action == null ? "unknown" : action)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次配额拒绝
+     *
+     * @param type storage（存储不足）/ count（数量到达上限）
+     */
+    public void quotaRejected(String type) {
+        Counter.builder(QUOTA_REJECTED)
+                .description("因配额不足被拒绝的上传次数")
+                .tag("type", type == null ? "unknown" : type)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次秒传命中（同一用户上传了已存在的文件）
+     */
+    public void uploadDuplicate() {
+        Counter.builder(UPLOAD_DUPLICATE)
+                .description("同用户相同文件秒传命中次数")
                 .register(registry)
                 .increment();
     }

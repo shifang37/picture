@@ -14,6 +14,7 @@ import com.tzy.picturebackend.mapper.PictureInteractionMapper;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.mapper.PictureTagMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
+import com.tzy.picturebackend.model.dto.file.PreparedUpload;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.dto.picture.PictureBatchDeleteRequest;
@@ -36,6 +37,7 @@ import com.tzy.picturebackend.model.vo.PictureTagCategory;
 import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.PictureReviewLogService;
 import com.tzy.picturebackend.service.TagCategoryService;
+import com.tzy.picturebackend.service.UserQuotaService;
 import com.tzy.picturebackend.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,6 +84,8 @@ class PictureServiceImplTest {
 
     private UserService userService;
 
+    private UserQuotaService userQuotaService;
+
     private PictureMapper pictureMapper;
 
     private PictureTagMapper pictureTagMapper;
@@ -108,6 +112,7 @@ class PictureServiceImplTest {
     void setUp() {
         pictureService = new PictureServiceImpl();
         userService = mock(UserService.class);
+        userQuotaService = mock(UserQuotaService.class);
         pictureMapper = mock(PictureMapper.class);
         pictureTagMapper = mock(PictureTagMapper.class);
         pictureAiSuggestionMapper = mock(PictureAiSuggestionMapper.class);
@@ -120,6 +125,10 @@ class PictureServiceImplTest {
         notificationEventPublisher = mock(NotificationEventPublisher.class);
         meterRegistry = new SimpleMeterRegistry();
         ReflectionTestUtils.setField(pictureService, "userService", userService);
+        ReflectionTestUtils.setField(pictureService, "userQuotaService", userQuotaService);
+        // 默认额度充足；需要验证额度不足的用例单独覆盖
+        when(userQuotaService.reserve(any(User.class), anyLong(), anyInt())).thenReturn(true);
+        when(userQuotaService.reserve(anyLong(), anyLong(), anyInt())).thenReturn(true);
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "pictureTagMapper", pictureTagMapper);
         ReflectionTestUtils.setField(pictureService, "pictureAiSuggestionMapper", pictureAiSuggestionMapper);
@@ -280,7 +289,7 @@ class PictureServiceImplTest {
     void uploadPicture_normalUserEntersReviewing() {
         User normalUser = user(100L, "user");
         when(userService.isAdmin(normalUser)).thenReturn(false);
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        stubUpload(uploadResult());
         when(pictureMapper.insert(any(Picture.class))).thenAnswer(invocation -> {
             Picture saved = invocation.getArgument(0);
             saved.setId(1L);
@@ -308,7 +317,7 @@ class PictureServiceImplTest {
     void uploadPicture_adminAutoPasses() {
         User admin = admin();
         when(userService.isAdmin(admin)).thenReturn(true);
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        stubUpload(uploadResult());
         when(pictureMapper.insert(any(Picture.class))).thenAnswer(invocation -> {
             Picture saved = invocation.getArgument(0);
             saved.setId(1L);
@@ -336,7 +345,7 @@ class PictureServiceImplTest {
         when(userService.isAdmin(normalUser)).thenReturn(false);
         when(pictureMapper.selectById(1L))
                 .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()));
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        stubUpload(uploadResult());
         when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
 
         pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser);
@@ -370,7 +379,7 @@ class PictureServiceImplTest {
         when(userService.isAdmin(admin)).thenReturn(true);
         when(pictureMapper.selectById(1L))
                 .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.REJECT.getValue()));
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        stubUpload(uploadResult());
         when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
 
         pictureService.uploadPicture(jpegFile(), uploadRequest(1L), admin);
@@ -411,6 +420,55 @@ class PictureServiceImplTest {
                 .tag("result", "failure").counter().count());
     }
 
+    @Test
+    @DisplayName("上传：配额不足时拒绝，且不写对象存储、不入库")
+    void uploadPicture_rejectsWhenQuotaExceeded() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        stubUpload(uploadResult());
+        when(userQuotaService.reserve(any(User.class), anyLong(), anyInt())).thenReturn(false);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> pictureService.uploadPicture(jpegFile(), null, normalUser));
+
+        assertTrue(e.getMessage().contains("配额"));
+        verify(fileManager, never()).uploadPrepared(any(PreparedUpload.class));
+        verify(pictureMapper, never()).insert(any(Picture.class));
+    }
+
+    @Test
+    @DisplayName("上传：入库失败时回滚配额并删除刚上传的对象")
+    void uploadPicture_saveFailureReleasesQuota() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        stubUpload(uploadResult("https://example.com/new.jpg"));
+        when(pictureMapper.insert(any(Picture.class))).thenReturn(0);
+
+        assertThrows(BusinessException.class,
+                () -> pictureService.uploadPicture(jpegFile(), null, normalUser));
+
+        verify(fileManager).deletePicture("https://example.com/new.jpg");
+        // 新增图片：预留 +1024 字节 / +1 张，失败后按相反方向补偿
+        verify(userQuotaService).release(100L, -1024L, -1);
+    }
+
+    @Test
+    @DisplayName("上传：重传只按体积差预留配额，不重复占用图片数量")
+    void uploadPicture_reuploadReservesSizeDeltaOnly() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        existing.setPicSize(2048L);
+        when(pictureMapper.selectById(1L)).thenReturn(existing);
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
+        stubUpload(uploadResult());
+
+        pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser);
+
+        // 1024（新）- 2048（旧）= -1024 字节，图片数量 +0
+        verify(userQuotaService).reserve(normalUser, -1024L, 0);
+    }
+
     // ==================== 回收站：删除 ====================
 
     @Test
@@ -419,6 +477,7 @@ class PictureServiceImplTest {
         User owner = user(100L, "user");
         Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
         existing.setUrl("https://example.com/public/100/2026-11-11_old.jpg");
+        existing.setPicSize(4096L);
         when(pictureMapper.selectById(1L)).thenReturn(existing);
         when(pictureMapper.logicalDeleteById(eq(1L), eq(100L), any(Date.class))).thenReturn(1);
 
@@ -427,6 +486,8 @@ class PictureServiceImplTest {
         ArgumentCaptor<Date> deletedAtCaptor = ArgumentCaptor.forClass(Date.class);
         verify(pictureMapper).logicalDeleteById(eq(1L), eq(100L), deletedAtCaptor.capture());
         assertNotNull(deletedAtCaptor.getValue(), "应记录移入回收站时间");
+        // 软删除立即释放配额：-4096 字节 / -1 张
+        verify(userQuotaService).release(100L, -4096L, -1);
         // AI 建议只对正常图片有意义，删除时级联清理
         verify(pictureAiSuggestionMapper).delete(any());
         // 标签关系清理；恢复时按 picture.tags 重建
@@ -538,6 +599,8 @@ class PictureServiceImplTest {
         verify(pictureTagMapper).insertBatch(1L, List.of("标签A", "标签B"));
         verify(pictureListCache).invalidate();
         verify(pictureEventPublisher).pictureChanged(1L);
+        // 恢复等于重新占用配额
+        verify(userQuotaService).reserve(100L, 0L, 1);
     }
 
     @Test
@@ -575,6 +638,24 @@ class PictureServiceImplTest {
 
         assertThrows(BusinessException.class, () -> pictureService.restorePicture(1L));
 
+        verifyNoInteractions(pictureTagMapper, pictureListCache, pictureEventPublisher);
+        // 恢复未生效，刚预留的额度要还回去
+        verify(userQuotaService).release(100L, 0L, -1);
+    }
+
+    @Test
+    @DisplayName("恢复：配额不足时拒绝恢复，不写数据库")
+    void restorePicture_rejectsWhenQuotaExceeded() {
+        Picture deleted = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        deleted.setPicSize(8192L);
+        when(pictureMapper.selectDeletedById(1L)).thenReturn(deleted);
+        when(userQuotaService.reserve(anyLong(), anyLong(), anyInt())).thenReturn(false);
+
+        BusinessException e = assertThrows(BusinessException.class,
+                () -> pictureService.restorePicture(1L));
+
+        assertTrue(e.getMessage().contains("配额"));
+        verify(pictureMapper, never()).restoreById(any());
         verifyNoInteractions(pictureTagMapper, pictureListCache, pictureEventPublisher);
     }
 
@@ -674,7 +755,7 @@ class PictureServiceImplTest {
     void uploadPicture_saveReturnsFalseCompensatesCos() {
         User normalUser = user(100L, "user");
         when(userService.isAdmin(normalUser)).thenReturn(false);
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        stubUpload(uploadResult("https://example.com/new.jpg"));
         when(pictureMapper.insert(any(Picture.class))).thenReturn(0);
 
         assertThrows(BusinessException.class,
@@ -689,7 +770,7 @@ class PictureServiceImplTest {
     void uploadPicture_saveThrowsCompensatesCos() {
         User normalUser = user(100L, "user");
         when(userService.isAdmin(normalUser)).thenReturn(false);
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        stubUpload(uploadResult("https://example.com/new.jpg"));
         when(pictureMapper.insert(any(Picture.class))).thenThrow(new RuntimeException("db down"));
 
         assertThrows(RuntimeException.class,
@@ -707,7 +788,7 @@ class PictureServiceImplTest {
         Picture oldPicture = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
         oldPicture.setUrl("https://example.com/old.jpg");
         when(pictureMapper.selectById(1L)).thenReturn(oldPicture);
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        stubUpload(uploadResult("https://example.com/new.jpg"));
         when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
 
         pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser);
@@ -724,7 +805,7 @@ class PictureServiceImplTest {
         Picture oldPicture = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
         oldPicture.setUrl("https://example.com/old.jpg");
         when(pictureMapper.selectById(1L)).thenReturn(oldPicture);
-        when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult("https://example.com/new.jpg"));
+        stubUpload(uploadResult("https://example.com/new.jpg"));
         when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(0);
 
         assertThrows(BusinessException.class,
@@ -1712,6 +1793,25 @@ class PictureServiceImplTest {
     }
 
     // ==================== 辅助方法 ====================
+
+    /**
+     * 打桩“准备 + 上传”两段式上传，避免每个用例重复拼 PreparedUpload
+     */
+    private void stubUpload(UploadPictureResult result) {
+        when(fileManager.prepareUpload(any(), anyString())).thenReturn(preparedUpload());
+        when(fileManager.uploadPrepared(any(PreparedUpload.class))).thenReturn(result);
+    }
+
+    private PreparedUpload preparedUpload() {
+        PreparedUpload prepared = new PreparedUpload();
+        prepared.setUploadPath("public/1/2026-11-12_new.jpg");
+        prepared.setPicName("test");
+        prepared.setPicSize(1024L);
+        prepared.setFileHash("a".repeat(64));
+        prepared.setSuffix("jpg");
+        return prepared;
+    }
+
     private Picture validPictureEntity() {
         Picture picture = new Picture();
         picture.setId(1L);

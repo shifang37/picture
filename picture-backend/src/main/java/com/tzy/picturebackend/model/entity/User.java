@@ -73,6 +73,26 @@ public class User {
     private Date updateTime;
 
     /**
+     * 存储配额（字节），默认 1GB
+     */
+    private Long storageQuota;
+
+    /**
+     * 已用存储（字节，只统计未删除图片）
+     */
+    private Long storageUsed;
+
+    /**
+     * 图片数量上限
+     */
+    private Integer pictureQuota;
+
+    /**
+     * 已用图片数量（只统计未删除图片）
+     */
+    private Integer pictureUsed;
+
+    /**
      * 是否删除
      */
     @TableLogic

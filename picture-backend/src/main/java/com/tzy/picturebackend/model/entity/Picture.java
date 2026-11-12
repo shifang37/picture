@@ -87,6 +87,11 @@ public class Picture implements Serializable {
     private String picFormat;
 
     /**
+     * 文件 SHA-256（上传时对最终存储内容计算，用于同一用户的秒传）
+     */
+    private String fileHash;
+
+    /**
      * 创建用户 id
      */
     private Long userId;

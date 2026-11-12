@@ -19,6 +19,7 @@ import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
 import com.tzy.picturebackend.mapper.PictureInteractionMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
+import com.tzy.picturebackend.model.dto.file.PreparedUpload;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.notification.NotificationMessage;
 import com.tzy.picturebackend.model.dto.picture.PictureBatchDeleteRequest;
@@ -45,6 +46,7 @@ import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.mapper.PictureTagMapper;
 import com.tzy.picturebackend.service.TagCategoryService;
+import com.tzy.picturebackend.service.UserQuotaService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -102,6 +104,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private UserQuotaService userQuotaService;
 
     @Resource
     private PictureReviewLogService pictureReviewLogService;
@@ -172,86 +177,110 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 上传图片，得到信息
         // 按照用户 id 划分目录
         String uploadPathPrefix = String.format("public/%s", loginUser.getId());
-        UploadPictureResult uploadPictureResult = fileManager.uploadPicture(multipartFile, uploadPathPrefix);
-        String newUrl = uploadPictureResult.getUrl();
-        // 构造要入库的图片信息
-        Picture picture = new Picture();
-        picture.setUrl(newUrl);
-        picture.setName(uploadPictureResult.getPicName());
-        picture.setPicSize(uploadPictureResult.getPicSize());
-        picture.setPicWidth(uploadPictureResult.getPicWidth());
-        picture.setPicHeight(uploadPictureResult.getPicHeight());
-        picture.setPicScale(uploadPictureResult.getPicScale());
-        picture.setPicFormat(uploadPictureResult.getPicFormat());
-        picture.setUserId(loginUser.getId());
-        // 管理员上传/重传直接通过；普通用户上传/重传一律进入待审核
-        Date reviewTime = isAdmin ? new Date() : null;
-        picture.setReviewStatus(isAdmin
-                ? PictureReviewStatusEnum.PASS.getValue()
-                : PictureReviewStatusEnum.REVIEWING.getValue());
-        picture.setReviewMessage(isAdmin ? ADMIN_AUTO_REVIEW_MESSAGE : null);
-        picture.setReviewerId(isAdmin ? loginUser.getId() : null);
-        picture.setReviewTime(reviewTime);
-        // 如果 pictureId 不为空，表示更新，否则是新增
-        if (pictureId != null) {
-            // 如果是更新，需要补充 id 和编辑时间
-            picture.setId(pictureId);
-            // 保留原归属：管理员代用户重传时，图片作者不能被改成管理员
-            picture.setUserId(oldPicture.getUserId());
-            picture.setEditTime(new Date());
-            // 普通用户重传后必须重新审核，因此显式清空上一次的审核信息
-            // （updateById 默认忽略 null 字段，这里用 UpdateWrapper 才能把字段置空）
-            // reviewStatus 由上面的实体字段更新；这里只负责把其余可能为 null 的审核字段显式置空
-            UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
-                    .eq("id", pictureId)
-                    .set("reviewMessage", picture.getReviewMessage())
-                    .set("reviewerId", picture.getReviewerId())
-                    .set("reviewTime", picture.getReviewTime())
-                    // 重传的是新文件，上一次的机审结论必须清空，等待重新机审
-                    .set("machineReviewStatus", null)
-                    .set("machineReviewLabel", null)
-                    .set("machineReviewScore", null)
-                    .set("machineReviewTime", null);
-            boolean result;
-            try {
-                result = this.update(picture, updateWrapper);
-            } catch (RuntimeException e) {
-                // 数据库更新失败：删除刚上传的新对象，避免产生孤儿文件
-                deletePictureFile(newUrl);
-                throw e;
-            }
-            if (!result) {
-                deletePictureFile(newUrl);
+        // 准备阶段完成校验、方向纠正、压缩与哈希，不触碰 COS；失败不会产生对象
+        PreparedUpload prepared = fileManager.prepareUpload(multipartFile, uploadPathPrefix);
+        try {
+            return persistUploadedPicture(prepared, oldPicture, pictureId, loginUser, isAdmin);
+        } finally {
+            // 无论成功失败都清理临时文件
+            prepared.cleanup();
+        }
+    }
+
+    /**
+     * 配额预留 → 上传对象存储 → 入库。
+     * <p>
+     * 配额在 COS 调用之前预留，避免超限请求产生孤儿对象；上传或入库失败时补偿释放，
+     * 并删除已经上传的对象。
+     *
+     * @param prepared   准备阶段结果
+     * @param oldPicture 重传时的原图片；新增时为 null
+     * @param pictureId  重传的图片 id；新增时为 null
+     * @param loginUser  当前登录用户
+     * @param isAdmin    是否管理员（管理员上传自动通过审核）
+     * @return 上传后的图片 VO
+     */
+    private PictureVO persistUploadedPicture(PreparedUpload prepared, Picture oldPicture, Long pictureId,
+                                             User loginUser, boolean isAdmin) {
+        // 配额增量：新增图片 +1 张；重传只按体积差调整，不重复计数
+        long oldSize = oldPicture == null || oldPicture.getPicSize() == null ? 0L : oldPicture.getPicSize();
+        long deltaBytes = prepared.getPicSize() - oldSize;
+        int deltaPictures = oldPicture == null ? 1 : 0;
+        boolean reserved = userQuotaService.reserve(loginUser, deltaBytes, deltaPictures);
+        ThrowUtils.throwIf(!reserved, ErrorCode.PARAMS_ERROR,
+                "存储空间不足或图片数量已达上限，请联系管理员调整配额");
+        String newUrl = null;
+        try {
+            UploadPictureResult uploadPictureResult = fileManager.uploadPrepared(prepared);
+            newUrl = uploadPictureResult.getUrl();
+            // 构造要入库的图片信息
+            Picture picture = new Picture();
+            picture.setUrl(newUrl);
+            picture.setName(uploadPictureResult.getPicName());
+            picture.setPicSize(uploadPictureResult.getPicSize());
+            picture.setPicWidth(uploadPictureResult.getPicWidth());
+            picture.setPicHeight(uploadPictureResult.getPicHeight());
+            picture.setPicScale(uploadPictureResult.getPicScale());
+            picture.setPicFormat(uploadPictureResult.getPicFormat());
+            // 哈希对应最终存储内容，供同用户秒传判断
+            picture.setFileHash(prepared.getFileHash());
+            picture.setUserId(loginUser.getId());
+            // 管理员上传/重传直接通过；普通用户上传/重传一律进入待审核
+            Date reviewTime = isAdmin ? new Date() : null;
+            picture.setReviewStatus(isAdmin
+                    ? PictureReviewStatusEnum.PASS.getValue()
+                    : PictureReviewStatusEnum.REVIEWING.getValue());
+            picture.setReviewMessage(isAdmin ? ADMIN_AUTO_REVIEW_MESSAGE : null);
+            picture.setReviewerId(isAdmin ? loginUser.getId() : null);
+            picture.setReviewTime(reviewTime);
+            // 如果 pictureId 不为空，表示更新，否则是新增
+            if (pictureId != null) {
+                // 如果是更新，需要补充 id 和编辑时间
+                picture.setId(pictureId);
+                // 保留原归属：管理员代用户重传时，图片作者不能被改成管理员
+                picture.setUserId(oldPicture.getUserId());
+                picture.setEditTime(new Date());
+                // 普通用户重传后必须重新审核，因此显式清空上一次的审核信息
+                // （updateById 默认忽略 null 字段，这里用 UpdateWrapper 才能把字段置空）
+                // reviewStatus 由上面的实体字段更新；这里只负责把其余可能为 null 的审核字段显式置空
+                UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
+                        .eq("id", pictureId)
+                        .set("reviewMessage", picture.getReviewMessage())
+                        .set("reviewerId", picture.getReviewerId())
+                        .set("reviewTime", picture.getReviewTime())
+                        // 重传的是新文件，上一次的机审结论必须清空，等待重新机审
+                        .set("machineReviewStatus", null)
+                        .set("machineReviewLabel", null)
+                        .set("machineReviewScore", null)
+                        .set("machineReviewTime", null);
+                if (!this.update(picture, updateWrapper)) {
+                    throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片上传失败");
+                }
+                // 更新成功后再清理旧对象；旧对象清理失败不影响新图片
+                if (!Objects.equals(newUrl, oldPicture.getUrl())) {
+                    deletePictureFile(oldPicture.getUrl());
+                }
+            } else if (!this.save(picture)) {
                 throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片上传失败");
             }
-            // 更新成功后再清理旧对象；旧对象清理失败不影响新图片
-            if (!Objects.equals(newUrl, oldPicture.getUrl())) {
-                deletePictureFile(oldPicture.getUrl());
+            // 管理员上传/重传会自动通过，补一条审核历史（best-effort，失败不影响上传结果）
+            if (isAdmin) {
+                pictureReviewLogService.record(picture.getId(), loginUser.getId(),
+                        PictureReviewStatusEnum.PASS.getValue(), ADMIN_AUTO_REVIEW_MESSAGE);
             }
-        } else {
-            boolean result;
-            try {
-                result = this.save(picture);
-            } catch (RuntimeException e) {
-                // 数据库保存失败：删除刚上传的对象，避免产生孤儿文件
+            // 新增或重传都会改变公开列表内容（重传会让已通过图片重新进入待审核）
+            pictureListCache.invalidate();
+            // 新上传或重传成功：通知机审与搜索索引
+            pictureEventPublisher.pictureUploaded(picture.getId());
+            return PictureVO.objToVo(picture);
+        } catch (RuntimeException e) {
+            // 失败补偿：删除刚上传的对象并回滚配额，避免孤儿文件与用量虚高
+            if (newUrl != null) {
                 deletePictureFile(newUrl);
-                throw e;
             }
-            if (!result) {
-                deletePictureFile(newUrl);
-                throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片上传失败");
-            }
+            userQuotaService.release(loginUser.getId(), -deltaBytes, -deltaPictures);
+            throw e;
         }
-        // 管理员上传/重传会自动通过，补一条审核历史（best-effort，失败不影响上传结果）
-        if (isAdmin) {
-            pictureReviewLogService.record(picture.getId(), loginUser.getId(),
-                    PictureReviewStatusEnum.PASS.getValue(), ADMIN_AUTO_REVIEW_MESSAGE);
-        }
-        // 新增或重传都会改变公开列表内容（重传会让已通过图片重新进入待审核）
-        pictureListCache.invalidate();
-        // 新上传或重传成功：通知机审与搜索索引
-        pictureEventPublisher.pictureUploaded(picture.getId());
-        return PictureVO.objToVo(picture);
     }
 
     @Override
@@ -445,6 +474,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 .eq("pictureId", id));
         // 标签关系不随回收站保留；恢复时会按 picture.tags JSON 重建
         pictureTagMapper.deleteByPictureId(id);
+        // 软删除立即释放配额，用户可以继续上传；回收站保留期内的 COS 占用不在配额口径内
+        userQuotaService.release(oldPicture.getUserId(),
+                oldPicture.getPicSize() == null ? 0L : -oldPicture.getPicSize(), -1);
         // 审核日志（picture_review_log）按合规要求保留，这里不做任何删除
         pictureListCache.invalidate();
         // 删除后索引侧也要移除文档
@@ -490,8 +522,18 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "id 不能为空");
         Picture deletedPicture = baseMapper.selectDeletedById(id);
         ThrowUtils.throwIf(deletedPicture == null, ErrorCode.NOT_FOUND_ERROR, "回收站中不存在该图片");
+        // 恢复等于重新占用配额：额度不足时拒绝恢复，避免“恢复后超额”导致上传永久失败
+        long pictureSize = deletedPicture.getPicSize() == null ? 0L : deletedPicture.getPicSize();
+        Long ownerId = deletedPicture.getUserId();
+        boolean reserved = ownerId != null && userQuotaService.reserve(ownerId, pictureSize, 1);
+        ThrowUtils.throwIf(!reserved, ErrorCode.PARAMS_ERROR,
+                "该用户配额不足，无法恢复图片，请先调整配额");
         int restored = baseMapper.restoreById(id);
-        ThrowUtils.throwIf(restored <= 0, ErrorCode.OPERATION_ERROR, "图片已被恢复或清理，请刷新后重试");
+        if (restored <= 0) {
+            // 并发恢复/清理：把刚预留的额度还回去
+            userQuotaService.release(ownerId, -pictureSize, -1);
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片已被恢复或清理，请刷新后重试");
+        }
         // 删除时清理了标签关系，恢复时用图片上的 JSON 副本重建；
         // 历史数据可能存在超长/超量标签，先按 picture_tag 的约束过滤，避免恢复整体失败
         replacePictureTags(id, restorableTags(deletedPicture.getTags()));
@@ -1176,6 +1218,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             pictureAiSuggestionMapper.delete(new QueryWrapper<PictureAiSuggestion>()
                     .in("pictureId", deletedIds));
             pictureTagMapper.deleteByPictureIds(deletedIds);
+            // 软删除释放配额：按作者聚合，避免逐张一次 UPDATE
+            releaseDeletedQuota(pictureMap, deletedIds);
             result.setSuccessCount(deletedIds.size());
             pictureListCache.invalidate();
             pictureEventPublisher.picturesChanged(deletedIds);
@@ -1183,6 +1227,24 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         } finally {
             pictureMetrics.batch("delete", System.nanoTime() - startNanos);
         }
+    }
+
+    /**
+     * 批量删除后按作者聚合释放配额：同一作者只发一条 UPDATE
+     */
+    private void releaseDeletedQuota(Map<Long, Picture> pictureMap, List<Long> deletedIds) {
+        Map<Long, long[]> released = new LinkedHashMap<>();
+        for (Long id : deletedIds) {
+            Picture picture = pictureMap.get(id);
+            if (picture == null || picture.getUserId() == null) {
+                continue;
+            }
+            long[] aggregate = released.computeIfAbsent(picture.getUserId(), key -> new long[2]);
+            aggregate[0] += picture.getPicSize() == null ? 0L : picture.getPicSize();
+            aggregate[1] += 1;
+        }
+        released.forEach((userId, aggregate) ->
+                userQuotaService.release(userId, -aggregate[0], (int) -aggregate[1]));
     }
 
     /**

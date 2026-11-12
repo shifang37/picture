@@ -30,6 +30,7 @@ import com.tzy.picturebackend.model.vo.UserVO;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.AlbumService;
 import com.tzy.picturebackend.service.NotificationService;
+import com.tzy.picturebackend.service.UserQuotaService;
 import com.tzy.picturebackend.service.UserService;
 import com.tzy.picturebackend.validation.PasswordPolicy;
 import jakarta.annotation.Resource;
@@ -68,6 +69,9 @@ public class UserController {
 
     @Resource
     private AlbumService albumService;
+
+    @Resource
+    private UserQuotaService userQuotaService;
 
     /**
      * 获取注册用图形验证码。
@@ -187,6 +191,8 @@ public class UserController {
         String initialPassword = PasswordPolicy.generateTemporaryPassword();
         user.setUserPassword(userService.getEncryptPassword(initialPassword));
         user.setPasswordChangeRequired(true);
+        // 与注册一致：按 app.quota.* 写入默认配额
+        userQuotaService.applyDefaultQuota(user);
         boolean result = userService.save(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(new UserAddResult(user.getId(), initialPassword));

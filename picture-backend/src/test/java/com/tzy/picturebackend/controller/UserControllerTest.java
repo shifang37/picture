@@ -87,6 +87,8 @@ class UserControllerTest {
         ReflectionTestUtils.setField(userController, "notificationService", notificationService);
         ReflectionTestUtils.setField(userController, "notificationEventPublisher", notificationEventPublisher);
         ReflectionTestUtils.setField(userController, "albumService", albumService);
+        ReflectionTestUtils.setField(userController, "userQuotaService",
+                org.mockito.Mockito.mock(com.tzy.picturebackend.service.UserQuotaService.class));
         ReflectionTestUtils.setField(userController, "sessionInvalidationManager",
                 new SessionInvalidationManager(InMemoryRedis.createTemplate(new ConcurrentHashMap<>())));
 

@@ -165,6 +165,17 @@ app:
     max-concurrent-decodes: ${UPLOAD_MAX_CONCURRENT_DECODES:2}
     # 等待解码许可的超时（毫秒），超时返回 42900，避免请求线程无限堆积
     decode-wait-millis: ${UPLOAD_DECODE_WAIT_MS:5000}
+  quota:
+    # 是否启用配额；关闭后所有用户都不受限制（上线初期如需快速止血可临时关闭）
+    enabled: ${QUOTA_ENABLED:true}
+    # 新用户默认存储配额：1GB
+    default-storage-bytes: ${QUOTA_DEFAULT_STORAGE_BYTES:1073741824}
+    # 新用户默认图片数量上限
+    default-picture-count: ${QUOTA_DEFAULT_PICTURE_COUNT:1000}
+    # 管理员默认不受配额限制，避免运营/审核账号被卡
+    exempt-admin: ${QUOTA_EXEMPT_ADMIN:true}
+    # 全量重算时单批用户数
+    recalc-batch-size: ${QUOTA_RECALC_BATCH_SIZE:500}
 
 # 对象存储配置：生产环境通过环境变量注入，禁止把真实密钥写入仓库
 cos:

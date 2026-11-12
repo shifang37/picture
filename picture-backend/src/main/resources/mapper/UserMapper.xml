@@ -12,6 +12,10 @@
             <result property="userAvatar" column="userAvatar" />
             <result property="userProfile" column="userProfile" />
             <result property="userRole" column="userRole" />
+            <result property="storageQuota" column="storageQuota" />
+            <result property="storageUsed" column="storageUsed" />
+            <result property="pictureQuota" column="pictureQuota" />
+            <result property="pictureUsed" column="pictureUsed" />
             <result property="editTime" column="editTime" />
             <result property="createTime" column="createTime" />
             <result property="updateTime" column="updateTime" />
@@ -20,6 +24,70 @@
 
     <sql id="Base_Column_List">
         id,userAccount,userPassword,userName,userAvatar,userProfile,
-        userRole,editTime,createTime,updateTime,isDelete
+        userRole,storageQuota,storageUsed,pictureQuota,pictureUsed,
+        editTime,createTime,updateTime,isDelete
     </sql>
+
+    <!--
+      配额预留：存储与数量一次校验，避免两次往返。
+      delta 为负时（重传缩小 / 释放）跳过对应的限额判断，只做 GREATEST 兜底。
+    -->
+    <update id="reserveQuota">
+        UPDATE user
+        SET storageUsed = GREATEST(0, storageUsed + #{deltaBytes}),
+            pictureUsed = GREATEST(0, pictureUsed + #{deltaPictures})
+        WHERE id = #{userId}
+          AND isDelete = 0
+          AND (#{deltaBytes} &lt;= 0 OR storageUsed + #{deltaBytes} &lt;= storageQuota)
+          AND (#{deltaPictures} &lt;= 0 OR pictureUsed + #{deltaPictures} &lt;= pictureQuota)
+    </update>
+
+    <update id="adjustQuota">
+        UPDATE user
+        SET storageUsed = GREATEST(0, storageUsed + #{deltaBytes}),
+            pictureUsed = GREATEST(0, pictureUsed + #{deltaPictures})
+        WHERE id = #{userId}
+          AND isDelete = 0
+    </update>
+
+    <update id="updateQuota">
+        UPDATE user
+        <set>
+            <if test="storageQuota != null">storageQuota = #{storageQuota},</if>
+            <if test="pictureQuota != null">pictureQuota = #{pictureQuota},</if>
+        </set>
+        WHERE id = #{userId}
+          AND isDelete = 0
+    </update>
+
+    <!--
+      按 picture 重算已用：只统计未删除图片。
+      用 LEFT JOIN 聚合而不是相关子查询，避免每个用户各扫一遍 picture。
+    -->
+    <update id="recalcQuota">
+        UPDATE user u
+            LEFT JOIN (
+                SELECT userId,
+                       COALESCE(SUM(picSize), 0) AS usedBytes,
+                       COUNT(*) AS usedCount
+                FROM picture
+                WHERE isDelete = 0
+                GROUP BY userId
+            ) p ON p.userId = u.id
+        SET u.storageUsed = COALESCE(p.usedBytes, 0),
+            u.pictureUsed = COALESCE(p.usedCount, 0)
+        WHERE u.isDelete = 0
+        <if test="userId != null">
+            AND u.id = #{userId}
+        </if>
+    </update>
+
+    <select id="selectIdsForQuotaRecalc" resultType="java.lang.Long">
+        SELECT id
+        FROM user
+        WHERE isDelete = 0
+          AND id &gt; #{afterId}
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
 </mapper>

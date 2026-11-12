@@ -39,6 +39,26 @@ public class UserVO implements Serializable {
     private String userRole;
 
     /**
+     * 存储配额（字节）
+     */
+    private Long storageQuota;
+
+    /**
+     * 已用存储（字节，只统计未删除图片）
+     */
+    private Long storageUsed;
+
+    /**
+     * 图片数量上限
+     */
+    private Integer pictureQuota;
+
+    /**
+     * 已用图片数量（只统计未删除图片）
+     */
+    private Integer pictureUsed;
+
+    /**
      * 创建时间
      */
     private Date createTime;
