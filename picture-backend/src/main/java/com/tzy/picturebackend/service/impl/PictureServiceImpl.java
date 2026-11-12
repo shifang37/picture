@@ -202,6 +202,16 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      */
     private PictureVO persistUploadedPicture(PreparedUpload prepared, Picture oldPicture, Long pictureId,
                                              User loginUser, boolean isAdmin) {
+        // 秒传：同一用户上传过相同内容时直接复用已有图片，不写 COS、不新增行、不重复占配额
+        Picture duplicated = baseMapper.selectByUserAndHash(
+                loginUser.getId(), prepared.getFileHash(), pictureId);
+        if (duplicated != null) {
+            pictureMetrics.uploadDuplicate();
+            log.info("命中同用户秒传, userId = {}, pictureId = {}", loginUser.getId(), duplicated.getId());
+            PictureVO pictureVO = PictureVO.objToVo(duplicated);
+            pictureVO.setDuplicated(true);
+            return pictureVO;
+        }
         // 配额增量：新增图片 +1 张；重传只按体积差调整，不重复计数
         long oldSize = oldPicture == null || oldPicture.getPicSize() == null ? 0L : oldPicture.getPicSize();
         long deltaBytes = prepared.getPicSize() - oldSize;

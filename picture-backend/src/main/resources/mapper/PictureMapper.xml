@@ -19,6 +19,7 @@
             <result property="picHeight" column="picHeight" />
             <result property="picScale" column="picScale" />
             <result property="picFormat" column="picFormat" />
+            <result property="fileHash" column="fileHash" />
             <result property="userId" column="userId" />
             <result property="createTime" column="createTime" />
             <result property="editTime" column="editTime" />
@@ -38,7 +39,7 @@
 
     <sql id="Base_Column_List">
         id,url,name,introduction,category,tags,
-        picSize,downloadCount,favoriteCount,likeCount,picWidth,picHeight,picScale,picFormat,
+        picSize,downloadCount,favoriteCount,likeCount,picWidth,picHeight,picScale,picFormat,fileHash,
         userId,createTime,editTime,updateTime,isDelete,
         deletedAt,deletedBy,
         reviewStatus,reviewMessage,reviewerId,reviewTime,
@@ -64,6 +65,24 @@
             HAVING COUNT(DISTINCT pt.tag) = #{tagCount}
         ) tag_match ON tag_match.pictureId = p.id
         ${ew.customSqlSegment}
+    </select>
+
+    <!--
+        秒传：同一用户上传过相同文件（SHA-256 相同、未删除）时直接复用。
+        自定义 SQL 不经过逻辑删除插件，isDelete = 0 必须显式写出；
+        excludeId 用于重传场景，避免命中“自己”。
+    -->
+    <select id="selectByUserAndHash" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM picture
+        WHERE userId = #{userId}
+          AND fileHash = #{fileHash}
+          AND isDelete = 0
+        <if test="excludeId != null">
+            AND id != #{excludeId}
+        </if>
+        ORDER BY id DESC
+        LIMIT 1
     </select>
 
     <!-- 移入回收站：逻辑删除插件只能更新 isDelete，这里一并写入删除时间与操作人 -->

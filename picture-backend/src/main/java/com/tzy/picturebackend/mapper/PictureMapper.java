@@ -150,6 +150,21 @@ public interface PictureMapper extends BaseMapper<Picture> {
     int recountInteractions(@Param("ids") Collection<Long> ids);
 
     /**
+     * 按「用户 + 文件哈希」查询未删除图片，用于同用户秒传。
+     * <p>
+     * 历史数据 {@code fileHash} 为 NULL，不会命中；重传时通过 {@code excludeId} 排除自身，
+     * 保证重传仍然走上传/重审流程。
+     *
+     * @param userId   用户 id
+     * @param fileHash 文件 SHA-256
+     * @param excludeId 需要排除的图片 id；null 表示不排除
+     * @return 已存在的图片；没有命中时返回 null
+     */
+    Picture selectByUserAndHash(@Param("userId") Long userId,
+                                @Param("fileHash") String fileHash,
+                                @Param("excludeId") Long excludeId);
+
+    /**
      * 作者维度的公开作品聚合统计。
      * <p>
      * 口径固定为 {@code isDelete = 0 AND reviewStatus = 1}：作者主页只展示公开作品，

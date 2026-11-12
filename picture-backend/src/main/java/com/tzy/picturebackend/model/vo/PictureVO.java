@@ -108,6 +108,11 @@ public class PictureVO implements Serializable {
     private Integer reviewStatus;
 
     /**
+     * 是否命中同用户秒传：true 表示返回的是已存在的图片，本次没有新增文件
+     */
+    private Boolean duplicated;
+
+    /**
      * 创建用户信息（公开字段，不包含账号和角色）
      */
     private PublicUserVO user;

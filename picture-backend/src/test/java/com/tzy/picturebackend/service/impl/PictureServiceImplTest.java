@@ -68,6 +68,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -467,6 +468,63 @@ class PictureServiceImplTest {
 
         // 1024（新）- 2048（旧）= -1024 字节，图片数量 +0
         verify(userQuotaService).reserve(normalUser, -1024L, 0);
+    }
+
+    @Test
+    @DisplayName("上传：同用户相同哈希命中秒传，不写 COS、不入库、不占配额")
+    void uploadPicture_reusesExistingPictureWhenHashMatches() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        stubUpload(uploadResult());
+        Picture existing = picture(5L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        existing.setUrl("https://example.com/public/100/existing.jpg");
+        when(pictureMapper.selectByUserAndHash(eq(100L), anyString(), isNull())).thenReturn(existing);
+
+        PictureVO pictureVO = pictureService.uploadPicture(jpegFile(), null, normalUser);
+
+        assertEquals(Long.valueOf(5L), pictureVO.getId());
+        assertEquals(Boolean.TRUE, pictureVO.getDuplicated());
+        verify(fileManager, never()).uploadPrepared(any(PreparedUpload.class));
+        verify(pictureMapper, never()).insert(any(Picture.class));
+        verify(userQuotaService, never()).reserve(any(User.class), anyLong(), anyInt());
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.UPLOAD_DUPLICATE).counter().count());
+        assertEquals(1.0, meterRegistry.get(PictureMetrics.UPLOAD)
+                .tag("result", "success").counter().count());
+    }
+
+    @Test
+    @DisplayName("上传：重传时秒传查询排除自身图片 id")
+    void uploadPicture_reuploadExcludesCurrentPictureFromDedupe() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        Picture existing = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        existing.setPicSize(1024L);
+        when(pictureMapper.selectById(1L)).thenReturn(existing);
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
+        stubUpload(uploadResult());
+
+        pictureService.uploadPicture(jpegFile(), uploadRequest(1L), normalUser);
+
+        verify(pictureMapper).selectByUserAndHash(eq(100L), anyString(), eq(1L));
+    }
+
+    @Test
+    @DisplayName("上传：哈希写入图片记录，供后续秒传使用")
+    void uploadPicture_persistsFileHash() {
+        User normalUser = user(100L, "user");
+        when(userService.isAdmin(normalUser)).thenReturn(false);
+        stubUpload(uploadResult());
+        when(pictureMapper.insert(any(Picture.class))).thenAnswer(invocation -> {
+            Picture saved = invocation.getArgument(0);
+            saved.setId(1L);
+            return 1;
+        });
+
+        pictureService.uploadPicture(jpegFile(), null, normalUser);
+
+        ArgumentCaptor<Picture> captor = ArgumentCaptor.forClass(Picture.class);
+        verify(pictureMapper).insert(captor.capture());
+        assertEquals("a".repeat(64), captor.getValue().getFileHash());
     }
 
     // ==================== 回收站：删除 ====================
