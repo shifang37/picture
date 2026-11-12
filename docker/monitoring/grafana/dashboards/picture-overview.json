@@ -921,6 +921,128 @@
       ],
       "title": "分享卡片渲染速率（按结果）",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 68
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(picture_upload_total{job=\"picture-backend\"}[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(picture_upload_duplicate_total{job=\"picture-backend\"}[5m]))",
+          "legendFormat": "秒传命中",
+          "refId": "B"
+        }
+      ],
+      "title": "上传结果与秒传命中速率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 68
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (type) (rate(picture_quota_rejected_total{job=\"picture-backend\"}[5m]))",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "配额拒绝速率（按原因）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 68
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (action) (rate(picture_exif_total{job=\"picture-backend\"}[5m]))",
+          "legendFormat": "{{action}}",
+          "refId": "A"
+        }
+      ],
+      "title": "EXIF 处理速率（方向纠正 / 元数据剥离）",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

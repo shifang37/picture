@@ -128,20 +128,21 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = 'your-account';
 ## 普通用户上传图片
 
 1. 登录后通过顶部「创建图片」进入上传页，也可以直接访问 `/add_picture`
-2. 支持 jpg / jpeg / png / webp，单张不超过 2MB；后端会同时校验后缀、MIME 类型和文件头
+2. 支持 jpg / jpeg / png / webp / heic，单张不超过 10MB；前端会先把 HEIC 转成 JPG、把超过 2MB 的图片压到 2MB 以内，后端再同时校验后缀、MIME 类型和文件头
 3. 上传成功后填写名称、简介、分类、标签，提交后跳转到图片详情
 4. 「我的图片」（`/my_pictures`）可以查看自己上传的全部图片，按待审核 / 已通过 / 已拒绝筛选，并支持编辑、删除；删除后进入回收站，保留期内可由管理员恢复
 
-上传时后端会按需压缩原图，降低存储与下载流量：
+上传时前后端都会按需压缩原图，降低存储与下载流量：
 
-- 长边超过 `1920` 的图片等比缩小；
-- JPEG 超过约 `1.5MB` 时以 `0.85` 质量重新编码；
+- 前端：长边超过 `1920` 或体积超过 `2MB` 时用 Canvas 压缩，PNG 保留透明通道，JPEG 按质量阶梯降到目标体积；压缩失败回退原文件；
+- 后端：长边超过 `1920` 的图片等比缩小；JPEG 超过约 `1.5MB` 时以 `0.85` 质量重新编码；
 - PNG 只缩放、保留透明通道；WebP 当前保持原文件（JDK 没有内置 WebP 编码器）；
 - 压缩前只读取图片头校验像素数，超过 `2000 万` 像素直接拒绝上传，避免解压炸弹耗尽内存；
 - 大图按长边用 `ImageReadParam.setSourceSubsampling` 降采样解码，上传接口再用信号量限制同时解码的图片数（默认 2，可用 `UPLOAD_MAX_CONCURRENT_DECODES` 调整），避免 768MB 容器被并发解码打爆；等待解码许可超时返回 `42900`；
-- 压缩失败会自动回退原文件，不阻断上传；数据库中的 `picSize` 为压缩后的大小。
+- 压缩失败会自动回退原文件，不阻断上传；数据库中的 `picSize` 为压缩后的大小；
+- 手机竖拍照片会按 EXIF 方向纠正，含 GPS 的 JPEG 会重新编码剥离元数据，详见「上传体验与存储配额（M4）」。
 
-上传接口 `POST /api/picture/upload` 使用 `multipart/form-data`：`file` 为图片文件，`id` 可选（重新上传已有图片时传）。该接口只要求登录，普通用户也可以调用。
+上传接口 `POST /api/picture/upload` 使用 `multipart/form-data`：`file` 为图片文件，`id` 可选（重新上传已有图片时传）。该接口只要求登录，普通用户也可以调用；响应中的 `duplicated=true` 表示命中了同用户秒传。
 
 ## 个人中心与用户管理
 
@@ -534,6 +535,77 @@ nginx 片段见 `picture-frontend/nginx.conf` 里的 `location ~ ^/picture/(?<sh
 curl.exe -s -H "User-Agent: Twitterbot/1.0" http://localhost:8080/picture/1
 # 人类 UA 仍返回 SPA 的 index.html
 curl.exe -s -H "User-Agent: Mozilla/5.0" http://localhost:8080/picture/1 | Select-String 'id="app"'
+```
+
+## 上传体验与存储配额（M4）
+
+### 前端上传链路
+
+1. 选择文件后先做格式与体积校验（jpg / jpeg / png / webp / heic，单张 ≤10MB），不合格直接提示、不发请求；
+2. HEIC / HEIF 用 `heic2any` 转成 JPEG，库通过动态 `import()` 加载（约 1.35MB 的独立 chunk），只在选择 HEIC 时才下载；
+3. 长边超过 1920 或体积超过 2MB 时用 Canvas 压缩：PNG 保留透明通道、WebP 交给浏览器编码、其余输出 JPEG；JPEG 仍超目标体积时按 0.85 → 0.70 → 0.55 → 0.40 逐级降质量，压缩结果反而更大时回退原文件；
+4. 单张与批量上传都显示百分比进度（axios `onUploadProgress`），批量上传每个文件一行进度与阶段文案；
+5. 上传前读取 `/api/user/quota` 做客户端预检查，配额不足时直接提示「已用 / 上限」，不发起上传；服务端仍会做最终校验。
+
+### EXIF 方向与元数据
+
+- 使用 `metadata-extractor` 读取 EXIF Orientation 与 GPS IFD；
+- 方向 3 / 6 / 8 分别旋转 180° / 90° / 270°，**先旋转再缩放**，竖拍照片不会变成横的；
+- 存在方向或 GPS 信息时重新编码 JPEG，顺带剥离 EXIF（包括拍摄地点坐标）；PNG / WebP 不做重编码，元数据保持原样；
+- 解析失败或重编码失败都回退原文件，不阻断上传；指标 `picture_exif_total{action=rotated|stripped}`。
+
+### 服务端上限
+
+| 配置 | 环境变量 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `app.upload.max-file-size-bytes` | `UPLOAD_MAX_FILE_SIZE_BYTES` | 10485760（10MB） | 单张图片上限，`FileManager` 校验 |
+| `app.upload.max-request-size-bytes` | `UPLOAD_MAX_REQUEST_SIZE_BYTES` | 12582912（12MB） | multipart 请求体上限 |
+| `spring.servlet.multipart.max-file-size` | — | 10MB | 必须与上面保持一致 |
+| `spring.servlet.multipart.max-request-size` | — | 12MB | — |
+
+- nginx 反向代理 `/api/` 的 `client_max_body_size` 已同步为 `12m`，否则请求会先被 nginx 拒绝；
+- 放宽体积后，`20MP` 像素上限与 `ImageDecodeLimiter` 并发闸门保持不变，避免并发解码把 768MB 容器打爆。
+
+### 存储配额
+
+`V13__user_quota_and_picture_hash.sql`：
+
+- `user` 新增 `storageQuota` / `storageUsed` / `pictureQuota` / `pictureUsed`，默认 **1GB / 1000 张**；
+- `picture` 新增 `fileHash`（SHA-256）与 `idx_user_hash(userId, fileHash)`；
+- 迁移末尾按 `picture` 回填历史用量，老用户不会显示 0 已用。
+
+语义与一致性：
+
+- 配额只统计**未删除**图片：软删除（进回收站）立即释放额度，恢复时重新占用；回收站保留期内 COS 仍占用存储，因此**配额 ≠ COS 实际用量**；
+- 预留用一条原子 SQL 同时校验存储与数量（`UPDATE user ... WHERE ... AND storageUsed + ? <= storageQuota AND ...`），并发上传不会把用量加超；
+- 先预留、再上传 COS；上传或入库失败按相反增量补偿；释放走独立的 `adjustQuota`（不做额度校验），保证「删图一定能腾出空间」；
+- 管理员默认不受配额限制（`QUOTA_EXEMPT_ADMIN=true`）；`QUOTA_ENABLED=false` 可全局关闭配额；
+- 删除用户/批量删除按作者聚合释放；恢复时额度不足返回 `40000`，提示先调整配额。
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/user/quota` | 登录 | 我的配额：`storageUsed/storageQuota/pictureUsed/pictureQuota/exempt` |
+| POST | `/api/user/quota/update` | 管理员 | `{ userId, storageQuota?, pictureQuota? }`，立即生效 |
+| POST | `/api/user/quota/recalc` | 管理员 | `{ userId? }`，按 `picture` 重算已用；不传 userId 时全量分批 |
+
+上线顺序：执行 `V13` → 发布后端 → 调用一次全量 `recalc`（修正发布窗口内旧代码上传的偏差）→ 观察 `picture_quota_rejected_total` 与上传失败率。
+
+### 同用户秒传
+
+- 哈希在“准备阶段”对**最终要上传的文件**计算，即先旋转、再压缩、最后算 SHA-256，保证哈希与实际存储内容一致；
+- 命中条件：同一 `userId` + 相同 `fileHash` + `isDelete = 0`，重传时排除当前图片 id；
+- 命中后直接返回已有图片并置 `duplicated = true`：不写 COS、不新增行、不重复占用配额，前端提示「已存在相同图片，已为你复用」；
+- 不同用户上传同一文件**不**去重（避免越权与版权争议）；历史数据 `fileHash` 为 `NULL`，天然不命中；
+- 指标 `picture_upload_duplicate_total`。
+
+### 验证
+
+```powershell
+# 后端：上传上限、EXIF、配额、秒传与迁移用例
+cd picture-backend; .\mvnw.cmd -o test
+
+# 前端：压缩/配额工具单测 + 上传主链路 E2E
+cd picture-frontend; npm run test; npx playwright test e2e/m4.spec.ts
 ```
 
 ## 下载与下载次数统计口径
