@@ -12,6 +12,7 @@ import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
+import com.tzy.picturebackend.manager.PictureDownloadManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.manager.PictureSearchSortException;
 import com.tzy.picturebackend.model.dto.picture.*;
@@ -30,6 +31,7 @@ import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -37,6 +39,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -64,6 +67,9 @@ public class PictureController {
 
     @Resource
     private PictureSearchService pictureSearchService;
+
+    @Resource
+    private PictureDownloadManager pictureDownloadManager;
 
 
 
@@ -160,11 +166,16 @@ public class PictureController {
     }
 
     /**
-     * 记录图片下载次数
+     * 下载图片（后端流式代理）
+     * <p>
+     * 由后端从 COS 读取原图并带 {@code Content-Disposition: attachment} 写回，文件完整写完后
+     * 才按「用户/IP + 图片 + 天」去重并自增下载次数。与直接访问 COS 地址相比，不依赖桶的
+     * 跨域配置，也无法通过重复调用计数接口刷下载量。
      */
-    @PostMapping("/download/{id}")
-    public BaseResponse<Boolean> downloadPicture(@PathVariable Long id, HttpServletRequest request) {
-        return ResultUtils.success(pictureService.incrementDownloadCount(id, request));
+    @GetMapping("/download/{id}")
+    public void downloadPicture(@PathVariable Long id, HttpServletRequest request,
+                                HttpServletResponse response) throws IOException {
+        pictureDownloadManager.download(id, request, response);
     }
 
     /**

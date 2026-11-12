@@ -10,6 +10,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.ArrayList;
+import java.util.List;
+
 @Configuration
 @ConfigurationProperties(prefix = "cos.client")
 @Data
@@ -39,6 +42,30 @@ public class CosClientConfig {
      * 桶名
      */
     private String bucket;
+
+    /**
+     * 防盗链（Referer 白名单）配置；应用启动时自动写入 COS 桶
+     */
+    private Referer referer = new Referer();
+
+    @Data
+    public static class Referer {
+
+        /**
+         * 是否在启动时写入防盗链配置；域名列表为空时会自动跳过
+         */
+        private boolean enabled = true;
+
+        /**
+         * 允许的 Referer 域名，例如 example.com、*.example.com，不要带协议和路径
+         */
+        private List<String> domains = new ArrayList<>();
+
+        /**
+         * 是否允许空 Referer（浏览器直接打开图片地址、部分安全软件会去掉 Referer）
+         */
+        private boolean allowEmptyReferer = false;
+    }
 
     @Bean
     public COSClient cosClient() {

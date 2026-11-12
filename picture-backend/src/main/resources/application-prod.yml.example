@@ -66,6 +66,10 @@ cos:
     secretKey: ${COS_SECRET_KEY}
     region: ${COS_REGION:ap-beijing}
     bucket: ${COS_BUCKET}
+    referer:
+      enabled: ${COS_REFERER_ENABLED:true}
+      domains: ${COS_REFERER_DOMAINS:}
+      allow-empty-referer: ${COS_REFERER_ALLOW_EMPTY:false}
 app:
   cors:
     allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost}

@@ -31,6 +31,9 @@ cos:
     secretKey: test-secret-key
     region: ap-beijing
     bucket: test-1410438387
+    referer:
+      # 测试不修改真实桶配置
+      enabled: false
 logging:
   level:
     root: INFO

@@ -132,13 +132,23 @@ public interface PictureService extends IService<Picture> {
     PictureTagCategory listTagCategory();
 
     /**
-     * 记录一次图片下载（原子自增），并校验图片对当前访问者可见
+     * 读取可下载的图片，并校验图片对当前访问者可见
+     * <p>
+     * 未通过审核的图片只有作者本人和管理员可以下载。
      *
      * @param id      图片 id
      * @param request 当前请求
-     * @return 是否记录成功
+     * @return 图片实体
      */
-    boolean incrementDownloadCount(Long id, HttpServletRequest request);
+    Picture getDownloadablePicture(Long id, HttpServletRequest request);
+
+    /**
+     * 下载成功且通过去重后，原子自增下载次数
+     *
+     * @param id 图片 id
+     * @return 是否更新成功（图片在下载过程中被删除时返回 false）
+     */
+    boolean incrementDownloadCount(Long id);
 
     /**
      * 批量审核，单张失败不影响其他图片

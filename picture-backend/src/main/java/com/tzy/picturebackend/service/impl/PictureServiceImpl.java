@@ -607,12 +607,19 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     }
 
     @Override
-    public boolean incrementDownloadCount(Long id, HttpServletRequest request) {
+    public Picture getDownloadablePicture(Long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "图片 id 不能为空");
         Picture picture = this.getById(id);
         ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
-        // 未通过审核的图片只有作者/管理员可访问，下载统计也要遵守同样的可见性规则
+        // 未通过审核的图片只有作者/管理员可访问，下载也要遵守同样的可见性规则
         checkPictureVisible(picture, request);
+        return picture;
+    }
+
+    @Override
+    public boolean incrementDownloadCount(Long id) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR, "图片 id 不能为空");
+        // 调用方在流式下载成功后才走到这里，不再重复校验可见性
         return this.update(new UpdateWrapper<Picture>()
                 .eq("id", id)
                 .setSql("downloadCount = downloadCount + 1"));

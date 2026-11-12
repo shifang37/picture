@@ -144,6 +144,11 @@ cos:
     secretKey: ${COS_SECRET_KEY:}
     region: ${COS_REGION:ap-beijing}
     bucket: ${COS_BUCKET:}
+    # 启动时把 Referer 白名单写入 COS 桶（防盗链）；domains 为空时跳过
+    referer:
+      enabled: ${COS_REFERER_ENABLED:true}
+      domains: ${COS_REFERER_DOMAINS:}
+      allow-empty-referer: ${COS_REFERER_ALLOW_EMPTY:false}
 
 # 健康检查（observability profile 下通过 8124 管理端口的 /actuator/health 探测）
 # 公网 /api 会经过 nginx 反向代理，只暴露 health/info；metrics 属于内部信息。

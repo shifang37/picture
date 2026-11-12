@@ -74,6 +74,8 @@ cp application-local.yml.example application-local.yml
 >
 > 存储桶需要开启**公有读**（前端直接以 URL 展示图片）并**绑定数据万象**（上传时用于获取图片宽高信息）。
 > 如需开启机审，还需在数据万象开通内容审核，并给访问密钥授予 `ci:CreateAuditingPictureJob` 权限。
+>
+> 防盗链由应用启动时自动写入 COS 桶：配置 `cos.client.referer.domains`（或环境变量 `COS_REFERER_DOMAINS`，逗号分隔，不带协议），域名列表为空时自动跳过；本地开发可填 `localhost,127.0.0.1`。该功能需要密钥具备 `cos:PutBucketReferer` 权限。
 
 ### 3. 启动本地基础设施
 
@@ -272,9 +274,17 @@ app:
 - 删除字典项不会修改已有图片的 `category` / `tags` 字段；图片仍在使用时只是不再作为新选项出现
 - 旧库升级到该结构：执行 `picture-backend/sql/legacy/upgrade_v3.sql`，会建表并初始化现有图片的标签/分类（新库无需执行，Flyway 会自动建表）
 
-## 下载次数统计口径
+## 下载与下载次数统计口径
 
-详情页的「下载次数」按**下载按钮点击次数**统计：点击后前端请求 `POST /api/picture/download/{id}` 自增，然后由浏览器直接下载 COS 原图。因此重复点击、统计请求成功但用户取消保存等情况都会被计入，它不代表「实际完成的下载次数」。如果后续需要精确统计，可改为后端下载代理后再自增。
+详情页的「免费下载」走同源后端接口 `GET /api/picture/download/{id}`：
+
+- 后端用 COS SDK 读取原图并**流式写回**，响应带 `Content-Disposition: attachment`，浏览器直接保存文件；不依赖 COS 桶的 CORS 配置，也不会把真实对象地址暴露给前端；
+- 只有文件字节完整写给客户端后才自增下载次数，用户取消保存、网络中断不会计数；
+- 自增前用 Redis 做「**用户 / IP + 图片 + 天**」去重（key 形如 `picture:download:dedup:20261112:<pictureId>:user:<userId>`，未登录时用 `ip:<remoteAddr>`，TTL 到当天 24:00），同一用户重复点击同一张图每天只计一次；
+- Redis 故障时下载仍可正常进行，但本次不计数（宁可少计，也不让刷量在故障期间穿透）；
+- 旧的无去重 `POST /api/picture/download/{id}` 计数接口已移除。
+
+> 下载次数现在代表「按用户/IP 按天去重后的成功下载次数」，不再等于按钮点击次数。
 
 ## 登录态与会话（Redis）
 
@@ -422,6 +432,7 @@ JDK 21 的虚拟线程已评估但**未启用**，`spring.threads.virtual.enable
 - **Elasticsearch**：compose 内置 `elasticsearch` 服务（版本 8.18.8，堆内存 512MB，持久化卷 `elasticsearch-data`，只在内网可达，不映射 9200 到宿主机），开启基础认证（`ES_USERNAME` / `ES_PASSWORD`）并关闭 HTTP TLS（仅内网访问）。`SEARCH_ENGINE` 默认 `mysql`，此时只启动不连接；切换为 `es` 后需管理员调用一次 `POST /api/search/reindex` 初始化索引
 - **图片事件**：队列与交换机在应用启动时由 `RabbitAdmin` 幂等声明；RabbitMQ 不可用时上传与审核仍然成功，只是事件投递失败并记录日志。机审开启时每 5 分钟兜底补发遗漏图片（Redis 互斥），可用 `MACHINE_REVIEW_ENABLED` / `MACHINE_REVIEW_MODE` 控制；关闭机审则不会有任何外部审核调用
 - **机审费用与权限**：开启机审前确认 COS 桶已绑定数据万象、账号具备 `ci:CreateAuditingPictureJob`；图片审核按张计费，默认关闭
+- **COS 防盗链**：生产 `.env` 填写 `COS_REFERER_DOMAINS=your-domain.com`（多个用逗号分隔，可写 `*.your-domain.com`），应用启动时会调用 COS API 写入 Referer 白名单；需给密钥补 `cos:PutBucketReferer` 权限，写入失败只记日志不影响启动。`COS_REFERER_ALLOW_EMPTY` 默认 `false`，即直接打开 COS 原图地址会被拒绝
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
 ## 可观测性（Prometheus / Grafana）

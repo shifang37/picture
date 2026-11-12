@@ -5,6 +5,7 @@ import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
+import com.tzy.picturebackend.manager.PictureDownloadManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureListPage;
@@ -33,11 +34,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,6 +49,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -68,6 +72,8 @@ class PictureControllerTest {
 
     private PictureSearchService pictureSearchService;
 
+    private PictureDownloadManager pictureDownloadManager;
+
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
@@ -76,6 +82,7 @@ class PictureControllerTest {
         pictureEventPublisher = mock(PictureEventPublisher.class);
         aiSuggestionService = mock(AiSuggestionService.class);
         pictureSearchService = mock(PictureSearchService.class);
+        pictureDownloadManager = mock(PictureDownloadManager.class);
         PictureController pictureController = new PictureController();
         ReflectionTestUtils.setField(pictureController, "pictureService", pictureService);
         ReflectionTestUtils.setField(pictureController, "userService", userService);
@@ -83,6 +90,7 @@ class PictureControllerTest {
         ReflectionTestUtils.setField(pictureController, "pictureEventPublisher", pictureEventPublisher);
         ReflectionTestUtils.setField(pictureController, "aiSuggestionService", aiSuggestionService);
         ReflectionTestUtils.setField(pictureController, "pictureSearchService", pictureSearchService);
+        ReflectionTestUtils.setField(pictureController, "pictureDownloadManager", pictureDownloadManager);
         mockMvc = MockMvcBuilders.standaloneSetup(pictureController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -438,14 +446,22 @@ class PictureControllerTest {
     }
 
     @Test
-    @DisplayName("下载统计：记录下载成功")
-    void downloadPicture_recordsCount() throws Exception {
-        when(pictureService.incrementDownloadCount(eq(1L), any())).thenReturn(true);
+    @DisplayName("下载：GET 走后端流式代理，返回文件字节而不是 JSON")
+    void downloadPicture_streamsFile() throws Exception {
+        byte[] bytes = new byte[]{1, 2, 3};
+        doAnswer(invocation -> {
+            HttpServletResponse response = invocation.getArgument(2);
+            response.setContentType("image/jpeg");
+            response.getOutputStream().write(bytes);
+            return null;
+        }).when(pictureDownloadManager).download(eq(1L), any(), any());
 
-        mockMvc.perform(post("/picture/download/1"))
+        mockMvc.perform(get("/picture/download/1"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data").value(true));
+                .andExpect(content().contentType("image/jpeg"))
+                .andExpect(content().bytes(bytes));
+
+        verify(pictureDownloadManager).download(eq(1L), any(), any());
     }
 
     @Test

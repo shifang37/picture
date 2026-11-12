@@ -836,26 +836,39 @@ class PictureServiceImplTest {
     }
 
     @Test
-    @DisplayName("下载统计：已通过审核的图片可以自增下载次数")
-    void incrementDownloadCount_incrementsApprovedPicture() {
-        when(pictureMapper.selectById(1L))
-                .thenReturn(picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue()));
+    @DisplayName("下载：已通过审核的图片可以读取用于下载")
+    void getDownloadablePicture_returnsApprovedPicture() {
+        Picture approved = picture(1L, 100L, PictureReviewStatusEnum.PASS.getValue());
+        when(pictureMapper.selectById(1L)).thenReturn(approved);
+
+        assertSame(approved, pictureService.getDownloadablePicture(1L, new MockHttpServletRequest()));
+    }
+
+    @Test
+    @DisplayName("下载：图片不存在时不返回内容")
+    void getDownloadablePicture_rejectsMissingPicture() {
+        when(pictureMapper.selectById(1L)).thenReturn(null);
+
+        assertThrows(BusinessException.class,
+                () -> pictureService.getDownloadablePicture(1L, new MockHttpServletRequest()));
+    }
+
+    @Test
+    @DisplayName("下载统计：下载完成后原子自增下载次数")
+    void incrementDownloadCount_incrementsDownloadCount() {
         when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(1);
 
-        assertTrue(pictureService.incrementDownloadCount(1L, new MockHttpServletRequest()));
+        assertTrue(pictureService.incrementDownloadCount(1L));
 
         verify(pictureMapper).update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class));
     }
 
     @Test
-    @DisplayName("下载统计：图片不存在时不更新")
-    void incrementDownloadCount_rejectsMissingPicture() {
-        when(pictureMapper.selectById(1L)).thenReturn(null);
+    @DisplayName("下载统计：图片在下载过程中被删除时返回 false")
+    void incrementDownloadCount_returnsFalseWhenPictureMissing() {
+        when(pictureMapper.update(org.mockito.ArgumentMatchers.isNull(), any(Wrapper.class))).thenReturn(0);
 
-        assertThrows(BusinessException.class,
-                () -> pictureService.incrementDownloadCount(1L, new MockHttpServletRequest()));
-
-        verify(pictureMapper, never()).update(any(), any(Wrapper.class));
+        assertFalse(pictureService.incrementDownloadCount(1L));
     }
 
     @Test

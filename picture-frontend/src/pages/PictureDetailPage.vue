@@ -54,7 +54,7 @@
             <a-descriptions-item label="大小">
               {{ formatSize(picture.picSize) }}
             </a-descriptions-item>
-            <a-descriptions-item label="下载次数（按点击统计）">
+            <a-descriptions-item label="下载次数（按用户/日去重）">
               {{ picture.downloadCount ?? 0 }}
             </a-descriptions-item>
           </a-descriptions>
@@ -110,8 +110,7 @@ import {
 } from '@ant-design/icons-vue'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { getPictureVoById, deletePicture } from '@/api/pictureController'
-import { recordPictureDownload } from '@/api/pictureExtra'
-import { downloadImage, formatSize } from '@/utils'
+import { downloadPicture, formatSize } from '@/utils'
 
 const loginUserStore = useLoginUserStore()
 // 是否具有编辑权限
@@ -216,20 +215,9 @@ const doShare = async () => {
   }
 }
 
-// 处理下载：下载次数按「下载按钮点击次数」统计，点击后 best-effort 自增，统计失败不影响实际下载
-const doDownload = async () => {
-  const id = picture.value.id
-  if (id) {
-    try {
-      const res = await recordPictureDownload(id)
-      if (res.data.code === 0) {
-        picture.value.downloadCount = String((Number(picture.value.downloadCount) || 0) + 1)
-      }
-    } catch {
-      // 下载统计是 best-effort，忽略异常继续下载
-    }
-  }
-  downloadImage(picture.value.url)
+// 处理下载：直接走后端流式代理，后端在文件完整返回后按「用户/IP + 图片 + 天」去重计数
+const doDownload = () => {
+  downloadPicture(picture.value.id)
 }
 
 onMounted(() => {

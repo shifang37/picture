@@ -2,6 +2,7 @@ package com.tzy.picturebackend.manager;
 
 import cn.hutool.core.util.StrUtil;
 import com.qcloud.cos.COSClient;
+import com.qcloud.cos.model.BucketRefererConfiguration;
 import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.GetObjectRequest;
 import com.qcloud.cos.model.PutObjectRequest;
@@ -79,6 +80,18 @@ public class CosManager {
      */
     public void deleteObject(String key) {
         cosClient.deleteObject(cosClientConfig.getBucket(), key);
+    }
+
+    /**
+     * 设置桶的防盗链配置（Referer 白名单）。
+     * <p>
+     * 仓库默认在应用启动时按配置自动写入，避免只依赖控制台手工配置；
+     * 配置失败只记录日志，不影响应用启动和图片读写。
+     *
+     * @param configuration 防盗链配置
+     */
+    public void setBucketReferer(BucketRefererConfiguration configuration) {
+        cosClient.setBucketRefererConfiguration(cosClientConfig.getBucket(), configuration);
     }
 
     /**

@@ -1,5 +1,3 @@
-import { saveAs } from 'file-saver'
-
 /**
  * 格式化文件大小
  * 后端将 Long 序列化为字符串，因此这里同时接受 number 和 string
@@ -33,12 +31,20 @@ export function getThumbnailUrl(url?: string, size = 300) {
 
 /**
  * 下载图片
- * @param url 图片下载地址
- * @param fileName 要保存为的文件名
+ * <p>
+ * 必须走后端流式代理：同源请求不依赖 COS 桶的跨域配置，后端会在文件完整写完后
+ * 按「用户/IP + 图片 + 天」去重并自增下载次数。前端不再单独调用计数接口。
+ * @param id 图片 id
  */
-export function downloadImage(url?: string, fileName?: string) {
-  if (!url) {
+export function downloadPicture(id?: string) {
+  if (!id) {
     return
   }
-  saveAs(url, fileName)
+  const link = document.createElement('a')
+  link.href = `/api/picture/download/${encodeURIComponent(id)}`
+  link.rel = 'noopener'
+  // 后端返回 Content-Disposition: attachment，浏览器会直接保存而不会跳转页面
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
 }

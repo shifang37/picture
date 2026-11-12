@@ -189,7 +189,7 @@ const overviewCards = computed(() => [
   {
     label: '总下载次数',
     value: formatCount(overview.value?.totalDownloadCount),
-    hint: '按点击次数统计',
+    hint: '按用户/IP 每日去重',
   },
 ])
 

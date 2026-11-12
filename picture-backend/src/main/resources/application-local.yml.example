@@ -50,3 +50,8 @@ cos:
     secretKey: <你的腾讯云 SecretKey>
     region: ap-beijing
     bucket: tzy-1410438387
+    # 防盗链（可选）：本地开发直连 5173 时使用 localhost,127.0.0.1
+    # referer:
+    #   enabled: true
+    #   domains: localhost,127.0.0.1
+    #   allow-empty-referer: false
