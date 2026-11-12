@@ -5,6 +5,10 @@ import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.NumberUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
+import com.drew.imaging.ImageMetadataReader;
+import com.drew.metadata.Metadata;
+import com.drew.metadata.exif.ExifIFD0Directory;
+import com.drew.metadata.exif.GpsDirectory;
 import com.qcloud.cos.model.PutObjectResult;
 import com.qcloud.cos.model.ciModel.persistence.ImageInfo;
 import com.tzy.picturebackend.config.CosClientConfig;
@@ -25,6 +29,8 @@ import javax.imageio.ImageIO;
 import javax.imageio.ImageReadParam;
 import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -143,8 +149,13 @@ public class FileManager {
             File file = File.createTempFile("picture-upload-", "." + suffix);
             tempFiles.add(file);
             multipartFile.transferTo(file);
-            // M4 阶段在压缩前先按 EXIF 方向纠正（见 rotateIfNeeded）
-            File uploadFile = compressIfNeeded(file, suffix);
+            // 手机竖拍照片带 EXIF Orientation：先纠正方向、剥离元数据，再进入压缩
+            ExifInfo exif = readExif(file);
+            File oriented = applyExif(file, suffix, exif);
+            if (!tempFiles.contains(oriented)) {
+                tempFiles.add(oriented);
+            }
+            File uploadFile = compressIfNeeded(oriented, suffix);
             if (!tempFiles.contains(uploadFile)) {
                 tempFiles.add(uploadFile);
             }
@@ -200,6 +211,175 @@ public class FileManager {
             log.error("图片上传到存储失败", e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
         }
+    }
+
+    /**
+     * EXIF 中与上传处理相关的信息。
+     * <p>
+     * {@code orientation} 取 EXIF 标准值（1–8），{@code hasGps} 表示是否存在 GPS IFD；
+     * 两者任一命中都需要重新编码：方向要纠正，GPS 属于隐私数据必须剥离。
+     */
+    record ExifInfo(int orientation, boolean hasGps) {
+
+        static final ExifInfo NONE = new ExifInfo(1, false);
+
+        /**
+         * 是否需要重新编码（方向非 1 或含 GPS）
+         */
+        boolean needsRewrite() {
+            return orientation != 1 || hasGps;
+        }
+
+        /**
+         * 需要顺时针旋转的角度：3→180°，6→90°，8→270°；其余按 0° 处理
+         */
+        int rotationDegrees() {
+            return switch (orientation) {
+                case 3 -> 180;
+                case 6 -> 90;
+                case 8 -> 270;
+                default -> 0;
+            };
+        }
+    }
+
+    /**
+     * 读取 EXIF 方向与 GPS 信息；不支持的格式或解析失败时返回 {@link ExifInfo#NONE}，不阻断上传。
+     *
+     * @param file 图片文件
+     * @return EXIF 信息（永不为 null）
+     */
+    static ExifInfo readExif(File file) {
+        if (file == null || !file.exists()) {
+            return ExifInfo.NONE;
+        }
+        try {
+            Metadata metadata = ImageMetadataReader.readMetadata(file);
+            int orientation = 1;
+            ExifIFD0Directory ifd0 = metadata.getFirstDirectoryOfType(ExifIFD0Directory.class);
+            if (ifd0 != null && ifd0.containsTag(ExifIFD0Directory.TAG_ORIENTATION)) {
+                try {
+                    orientation = ifd0.getInt(ExifIFD0Directory.TAG_ORIENTATION);
+                } catch (RuntimeException e) {
+                    log.debug("读取 EXIF 方向失败，按 1 处理", e);
+                }
+            }
+            boolean hasGps = metadata.containsDirectoryOfType(GpsDirectory.class);
+            return new ExifInfo(orientation, hasGps);
+        } catch (Exception e) {
+            // 非 JPEG / 无元数据 / 元数据损坏都走这里：保持原文件
+            log.debug("读取 EXIF 失败，跳过方向与元数据处理", e);
+            return ExifInfo.NONE;
+        }
+    }
+
+    /**
+     * 按 EXIF 方向旋转并（在存在 GPS 时）重新编码剥离元数据。
+     * <p>
+     * 只处理 JPEG：JDK 没有 PNG/WebP 的 EXIF 写入语义，WebP 更是缺少编码器，
+     * 强行重编码可能损坏原图，因此这两种格式保持原样（在文档中说明）。
+     *
+     * @param source 原始临时文件
+     * @param suffix 文件后缀（小写）
+     * @param exif   EXIF 信息
+     * @return 处理后的临时文件；无需处理或处理失败时返回原文件
+     */
+    File applyExif(File source, String suffix, ExifInfo exif) {
+        if (source == null || exif == null || !exif.needsRewrite()) {
+            return source;
+        }
+        boolean jpeg = "jpg".equals(suffix) || "jpeg".equals(suffix);
+        if (!jpeg) {
+            return source;
+        }
+        int degrees = exif.rotationDegrees();
+        File target = null;
+        int[] dimensions;
+        try {
+            dimensions = readImageDimensions(source);
+        } catch (Exception e) {
+            log.warn("读取图片尺寸失败，跳过 EXIF 处理, suffix = {}", suffix, e);
+            return source;
+        }
+        if (dimensions == null) {
+            return source;
+        }
+        validatePixelCount(dimensions[0], dimensions[1]);
+        // 旋转需要完整解码，必须与压缩共用同一并发闸门，避免大图并发解码 OOM
+        imageDecodeLimiter.acquire();
+        try {
+            BufferedImage decoded = decodeImage(source, 1);
+            if (decoded == null) {
+                throw new IOException("无法解码图片");
+            }
+            BufferedImage oriented = degrees == 0 ? decoded : rotate(decoded, degrees);
+            target = File.createTempFile("picture-exif-", "." + suffix);
+            if (!ImageIO.write(oriented, "jpg", target)) {
+                throw new IOException("没有可用的 JPEG 编码器");
+            }
+            if (degrees != 0) {
+                pictureMetrics.exif("rotated");
+                log.info("已按 EXIF 方向纠正图片, orientation = {}, degrees = {}", exif.orientation(), degrees);
+            }
+            if (exif.hasGps()) {
+                pictureMetrics.exif("stripped");
+                log.info("已剥离图片 GPS 元数据");
+            }
+            return target;
+        } catch (Exception e) {
+            // 方向纠正是优化项，失败不能阻断上传
+            log.warn("EXIF 方向/元数据处理失败，回退原文件, suffix = {}", suffix, e);
+            if (target != null) {
+                deleteTempFile(target);
+            }
+            return source;
+        } finally {
+            imageDecodeLimiter.release();
+        }
+    }
+
+    /**
+     * 顺时针旋转图片：90° / 180° / 270°
+     *
+     * @param source  原图
+     * @param degrees 顺时针角度
+     * @return 旋转后的图片
+     */
+    static BufferedImage rotate(BufferedImage source, int degrees) {
+        int width = source.getWidth();
+        int height = source.getHeight();
+        boolean rightAngle = degrees == 90 || degrees == 270;
+        int targetWidth = rightAngle ? height : width;
+        int targetHeight = rightAngle ? width : height;
+        int type = source.getColorModel().hasAlpha()
+                ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB;
+        BufferedImage target = new BufferedImage(targetWidth, targetHeight, type);
+        Graphics2D graphics = target.createGraphics();
+        try {
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            switch (degrees) {
+                case 90 -> {
+                    graphics.translate(height, 0);
+                    graphics.rotate(Math.PI / 2);
+                }
+                case 180 -> {
+                    graphics.translate(width, height);
+                    graphics.rotate(Math.PI);
+                }
+                case 270 -> {
+                    graphics.translate(0, width);
+                    graphics.rotate(3 * Math.PI / 2);
+                }
+                default -> {
+                    // 0° 不旋转
+                }
+            }
+            graphics.drawImage(source, 0, 0, null);
+        } finally {
+            graphics.dispose();
+        }
+        return target;
     }
 
     /**

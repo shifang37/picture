@@ -91,6 +91,11 @@ public class PictureMetrics {
      */
     public static final String SHARE = "picture.share";
 
+    /**
+     * EXIF 处理计数（action=rotated/stripped）
+     */
+    public static final String EXIF = "picture.exif";
+
     private final MeterRegistry registry;
 
     /**
@@ -256,6 +261,19 @@ public class PictureMetrics {
         Counter.builder(SHARE)
                 .description("图片分享卡片渲染次数")
                 .tag("result", result == null ? "unknown" : result)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次 EXIF 处理
+     *
+     * @param action rotated（方向纠正）/ stripped（剥离 GPS 等元数据）
+     */
+    public void exif(String action) {
+        Counter.builder(EXIF)
+                .description("上传图片 EXIF 处理次数")
+                .tag("action", action == null ? "unknown" : action)
                 .register(registry)
                 .increment();
     }

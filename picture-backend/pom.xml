@@ -193,6 +193,13 @@
             <version>0.4.20</version>
         </dependency>
 
+        <!-- 读取 EXIF 方向与 GPS 信息：手机竖拍照片需要按 Orientation 纠正，含 GPS 的图片需要剥离元数据 -->
+        <dependency>
+            <groupId>com.drewnoakes</groupId>
+            <artifactId>metadata-extractor</artifactId>
+            <version>2.19.0</version>
+        </dependency>
+
     </dependencies>
 
     <dependencyManagement>
