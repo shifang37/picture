@@ -1,34 +1,26 @@
 <template>
   <div ref="listRef" class="waterfall" data-testid="picture-waterfall">
-    <div v-for="(column, columnIndex) in columns" :key="columnIndex" class="waterfall-column">
-      <PictureCard
-        v-for="picture in column"
-        :key="picture.id"
-        :picture="picture"
-        :thumbnail-size="thumbnailSize"
-        @open="emit('open', $event)"
-      />
-    </div>
+    <PictureCard
+      v-for="picture in pictures"
+      :key="picture.id"
+      :picture="picture"
+      :thumbnail-size="thumbnailSize"
+      @open="emit('open', $event)"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 /**
- * 通用图片瀑布流：按图片宽高比分配列，图片加载前就占好高度，避免布局跳动。
- * 首页、作者主页、专辑详情共用同一套列分配与缩略图尺寸计算逻辑。
+ * 通用图片网格：封面统一 4:3，一行高度齐平。
+ * 首页、作者主页、专辑详情共用同一套列宽与缩略图尺寸计算逻辑。
  */
 import { computed, ref, watch } from 'vue'
 import { useDevicePixelRatio, useElementSize } from '@vueuse/core'
 import PictureCard from '@/components/PictureCard.vue'
-import {
-  distributeToColumns,
-  getColumnCount,
-  getColumnWidth,
-  getPictureAspectRatio,
-  getThumbnailSize,
-} from '@/utils/waterfall'
+import { getColumnCount, getColumnWidth, getThumbnailSize } from '@/utils/waterfall'
 
-const props = defineProps<{
+defineProps<{
   pictures: API.PictureVO[]
 }>()
 
@@ -51,23 +43,31 @@ const columnCount = computed(() => getColumnCount(effectiveWidth.value))
 const thumbnailSize = computed(() =>
   getThumbnailSize(getColumnWidth(effectiveWidth.value, columnCount.value), pixelRatio.value),
 )
-const columns = computed(() =>
-  distributeToColumns(props.pictures, columnCount.value, getPictureAspectRatio),
-)
 </script>
 
 <style scoped>
 .waterfall {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+  align-items: stretch;
 }
 
-.waterfall-column {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
+@media (max-width: 1100px) {
+  .waterfall {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .waterfall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .waterfall {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

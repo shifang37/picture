@@ -8,7 +8,7 @@
     @click="emit('open', picture)"
   >
     <template #cover>
-      <div class="picture-cover" :style="{ aspectRatio: `1 / ${aspectRatio}` }">
+      <div class="picture-cover">
         <img
           :alt="picture.name || '图片'"
           :src="getThumbnailUrl(picture.url, thumbnailSize)"
@@ -60,7 +60,6 @@ import { DownloadOutlined, HeartOutlined, StarOutlined } from '@ant-design/icons
 import { getThumbnailUrl } from '@/utils'
 import { highlightSegments } from '@/utils/highlight'
 import { formatCount } from '@/utils/interaction'
-import { getPictureAspectRatio } from '@/utils/waterfall'
 import InteractionButtons from '@/components/InteractionButtons.vue'
 
 const props = withDefaults(
@@ -78,8 +77,6 @@ const emit = defineEmits<{
   (event: 'open', picture: API.PictureVO): void
 }>()
 
-const aspectRatio = computed(() => getPictureAspectRatio(props.picture))
-
 const nameSegments = computed(() =>
   highlightSegments(props.picture.name || '未命名', props.keyword),
 )
@@ -87,6 +84,9 @@ const nameSegments = computed(() =>
 
 <style scoped>
 .picture-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   overflow: hidden;
   background: #fff;
   border-radius: 18px;
@@ -107,13 +107,16 @@ const nameSegments = computed(() =>
 }
 
 .picture-card :deep(.ant-card-body) {
+  flex: 1 1 auto;
   padding: 12px 14px 14px;
 }
 
+/* 统一 4:3 封面：所有卡片等高，网格每行自动对齐 */
 .picture-cover {
   position: relative;
   width: 100%;
   overflow: hidden;
+  aspect-ratio: 4 / 3;
   background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
 }
 
@@ -177,10 +180,14 @@ const nameSegments = computed(() =>
 }
 
 .picture-name {
+  display: block;
+  overflow: hidden;
   color: var(--ink-900);
   font-weight: 600;
   font-size: 14px;
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .picture-name-hit {
@@ -192,9 +199,10 @@ const nameSegments = computed(() =>
 
 .picture-tags {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   margin-bottom: 8px;
+  overflow: hidden;
 }
 
 .picture-tag {

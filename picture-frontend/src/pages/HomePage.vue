@@ -68,18 +68,16 @@
       <a-empty :description="emptyDescription" />
     </div>
 
-    <!-- 瀑布流：按图片宽高比分配列，图片加载前即占好高度，避免布局跳动 -->
+    <!-- 等比例网格：所有封面统一 4:3，一行高度齐平，避免瀑布流的错落感 -->
     <div v-show="dataList.length" ref="listRef" class="waterfall" data-testid="waterfall">
-      <div v-for="(column, columnIndex) in columns" :key="columnIndex" class="waterfall-column">
-        <PictureCard
-          v-for="picture in column"
-          :key="picture.id"
-          :picture="picture"
-          :thumbnail-size="thumbnailSize"
-          :keyword="appliedKeyword"
-          @open="doClickPicture"
-        />
-      </div>
+      <PictureCard
+        v-for="picture in dataList"
+        :key="picture.id"
+        :picture="picture"
+        :thumbnail-size="thumbnailSize"
+        :keyword="appliedKeyword"
+        @open="doClickPicture"
+      />
     </div>
 
     <!-- 加载更多 / 没有更多 -->
@@ -106,13 +104,7 @@ import { listPictureTagCategory, listPictureVoByPage } from '@/api/pictureContro
 import { fetchSearchHot } from '@/api/searchExtra'
 import PictureCard from '@/components/PictureCard.vue'
 import SearchBox from '@/components/SearchBox.vue'
-import {
-  distributeToColumns,
-  getColumnCount,
-  getColumnWidth,
-  getPictureAspectRatio,
-  getThumbnailSize,
-} from '@/utils/waterfall'
+import { getColumnCount, getColumnWidth, getThumbnailSize } from '@/utils/waterfall'
 
 // 后端公开列表每页上限 20 条
 const PAGE_SIZE = 20
@@ -177,9 +169,6 @@ const effectiveWidth = computed(() => lastContainerWidth.value || 1200)
 const columnCount = computed(() => getColumnCount(effectiveWidth.value))
 const thumbnailSize = computed(() =>
   getThumbnailSize(getColumnWidth(effectiveWidth.value, columnCount.value), pixelRatio.value),
-)
-const columns = computed(() =>
-  distributeToColumns(dataList.value, columnCount.value, getPictureAspectRatio),
 )
 
 // 请求序号：切换搜索条件时丢弃过期响应
@@ -603,17 +592,28 @@ onDeactivated(() => {
 }
 
 .waterfall {
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
+  align-items: stretch;
 }
 
-.waterfall-column {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
+@media (max-width: 1100px) {
+  .waterfall {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .waterfall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .waterfall {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .load-more {
@@ -645,9 +645,8 @@ onDeactivated(() => {
     padding: 0 14px 12px;
   }
 
-  .waterfall,
-  .waterfall-column {
-    gap: 14px;
+  .waterfall {
+    gap: 12px;
   }
 }
 </style>
