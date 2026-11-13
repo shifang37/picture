@@ -1,0 +1,140 @@
+/**
+ * 全局设计系统：颜色 / 圆角 / 阴影 / 字体 / 基础排版。
+ * 组件内部只引用 CSS 变量，避免各页面各写一套色值。
+ */
+:root {
+  --ink-900: #0b1220;
+  --ink-700: #253049;
+  --ink-500: #64748b;
+  --ink-400: #94a3b8;
+  --ink-300: #cbd5e1;
+
+  --line: rgba(15, 23, 42, 0.08);
+  --line-strong: rgba(15, 23, 42, 0.14);
+  --surface: #ffffff;
+  --surface-muted: #f6f7fb;
+  --surface-soft: rgba(255, 255, 255, 0.72);
+
+  --brand: #4f46e5;
+  --brand-600: #4338ca;
+  --brand-2: #9333ea;
+  --brand-soft: rgba(79, 70, 229, 0.08);
+  --brand-ring: rgba(79, 70, 229, 0.22);
+
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 12px 32px -16px rgba(15, 23, 42, 0.24);
+  --shadow-lg: 0 32px 70px -32px rgba(15, 23, 42, 0.32);
+
+  --font-sans:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--ink-900);
+  background-color: var(--surface-muted);
+  background-image:
+    radial-gradient(1100px 520px at 8% -12%, rgba(99, 102, 241, 0.16), transparent 62%),
+    radial-gradient(900px 480px at 92% -6%, rgba(168, 85, 247, 0.12), transparent 58%);
+  background-repeat: no-repeat;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgba(79, 70, 229, 0.18);
+}
+
+/* 细滚动条，避免默认样式破坏整体质感 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.35) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.3);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.5);
+  background-clip: content-box;
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+
+a:hover {
+  color: var(--brand-600);
+}
+
+/* ---------- Ant Design 组件的统一改造 ---------- */
+
+.ant-btn {
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.ant-btn-primary {
+  border: none;
+  background-image: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+  box-shadow: 0 10px 24px -12px rgba(79, 70, 229, 0.75);
+}
+
+.ant-btn-primary:not(:disabled):hover {
+  filter: brightness(1.06);
+}
+
+.ant-card {
+  border-radius: var(--radius-lg);
+}
+
+.ant-tag {
+  border-radius: 999px;
+  padding-inline: 10px;
+}
+
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selector,
+.ant-input-number,
+.ant-picker {
+  border-radius: var(--radius-sm) !important;
+}
+
+.ant-modal-content,
+.ant-drawer-content {
+  border-radius: var(--radius-lg);
+}
+
+.ant-message-notice-content {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}

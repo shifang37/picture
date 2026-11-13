@@ -1,51 +1,52 @@
 <template>
-  <a-row :wrap="false">
-    <a-col flex="200px">
-      <RouterLink to="/">
-        <div class="title-bar">
-          <img class="logo" src="../assets/logo.svg" alt="logo" />
-          <div class="title">shifang37云图库</div>
-        </div>
-      </RouterLink>
-    </a-col>
-    <a-col flex="auto">
+  <div class="header-inner">
+    <RouterLink to="/" class="brand">
+      <span class="brand-mark">
+        <img class="logo" src="../assets/logo.svg" alt="shifang37 云图库" />
+      </span>
+      <span class="brand-text">
+        <span class="brand-name">shifang37</span>
+        <span class="brand-sub">云图库</span>
+      </span>
+    </RouterLink>
+    <nav class="nav">
       <a-menu
         v-model:selectedKeys="current"
+        class="nav-menu"
         mode="horizontal"
         :items="items"
         @click="doMenuClick"
       />
-    </a-col>
-    <a-col flex="220px">
-      <div class="user-login-status">
-        <NotificationBell v-if="loginUserStore.loginUser.id" class="notification-bell" />
-        <div v-if="loginUserStore.loginUser.id">
-          <a-dropdown>
-            <ASpace>
-              <a-avatar :src="loginUserStore.loginUser.userAvatar" />
-              {{
-                loginUserStore.loginUser.userName || loginUserStore.loginUser.userAccount || '无名'
-              }}
-            </ASpace>
-            <template #overlay>
-              <a-menu>
-                <a-menu-item @click="doProfile">
-                  <UserOutlined />
-                  个人中心
-                </a-menu-item>
-                <a-menu-item @click="doLogout">
-                  <LogoutOutlined />
-                  退出登录
-                </a-menu-item>
-              </a-menu>
-            </template>
-          </a-dropdown>
-        </div>
-        <a-button v-else type="primary" size="small" @click="doLogin">登录</a-button>
-      </div>
-    </a-col>
-  </a-row>
+    </nav>
+    <div class="actions">
+      <NotificationBell v-if="loginUserStore.loginUser.id" class="notification-bell" />
+      <a-dropdown v-if="loginUserStore.loginUser.id" placement="bottomRight">
+        <button class="user-chip" type="button" aria-label="账号菜单">
+          <a-avatar :src="loginUserStore.loginUser.userAvatar" :size="28" />
+          <span class="user-name">
+            {{
+              loginUserStore.loginUser.userName || loginUserStore.loginUser.userAccount || '无名'
+            }}
+          </span>
+        </button>
+        <template #overlay>
+          <a-menu>
+            <a-menu-item @click="doProfile">
+              <UserOutlined />
+              个人中心
+            </a-menu-item>
+            <a-menu-item @click="doLogout">
+              <LogoutOutlined />
+              退出登录
+            </a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
+      <a-button v-else type="primary" class="login-btn" @click="doLogin">登录</a-button>
+    </div>
+  </div>
 </template>
+
 <script lang="ts" setup>
 import { h, ref, computed, onUnmounted, watch } from 'vue'
 import { HomeOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons-vue'
@@ -214,30 +215,157 @@ const doLogout = async () => {
 </script>
 
 <style scoped>
-.title-bar {
+.header-inner {
   display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: 1240px;
+  height: 64px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.brand {
+  display: flex;
+  flex: none;
+  gap: 10px;
   align-items: center;
 }
 
-.title {
-  color: black;
-  font-size: 18px;
-  margin-left: 16px;
+.brand-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+  border-radius: 12px;
+  box-shadow: 0 10px 22px -10px rgba(79, 70, 229, 0.8);
+  place-items: center;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.brand:hover .brand-mark {
+  box-shadow: 0 14px 26px -10px rgba(79, 70, 229, 0.9);
+  transform: translateY(-1px) rotate(-4deg);
 }
 
 .logo {
-  height: 48px;
+  display: block;
+  width: 19px;
+  height: 19px;
+  filter: brightness(0) invert(1);
 }
 
-.user-login-status {
+.brand-text {
   display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+}
+
+.brand-name {
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 15.5px;
+  letter-spacing: -0.01em;
+}
+
+.brand-sub {
+  color: var(--ink-400);
+  font-size: 10.5px;
+  letter-spacing: 0.22em;
+}
+
+.nav {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-menu {
+  background: transparent;
+  border-bottom: none;
+  font-weight: 500;
+}
+
+.nav-menu :deep(.ant-menu-item) {
+  padding-inline: 12px;
+  border-radius: 10px;
+  transition:
+    color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.nav-menu :deep(.ant-menu-item:hover) {
+  background: var(--brand-soft);
+}
+
+.nav-menu :deep(.ant-menu-item::after) {
+  display: none !important;
+}
+
+.nav-menu :deep(.ant-menu-item-selected) {
+  color: var(--brand-600);
+  font-weight: 600;
+  background: var(--brand-soft);
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  gap: 12px;
   align-items: center;
-  justify-content: flex-end;
-  gap: 16px;
-  height: 100%;
 }
 
 .notification-bell {
   cursor: pointer;
+}
+
+.user-chip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: 180px;
+  padding: 4px 12px 4px 4px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.user-chip:hover {
+  border-color: var(--brand-ring);
+  box-shadow: var(--shadow-sm);
+}
+
+.user-name {
+  overflow: hidden;
+  color: var(--ink-700);
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.login-btn {
+  padding-inline: 20px;
+  border-radius: 999px;
+}
+
+@media (max-width: 720px) {
+  .header-inner {
+    gap: 12px;
+    padding: 0 14px;
+  }
+
+  .brand-sub {
+    display: none;
+  }
+
+  .nav-menu :deep(.ant-menu-item) {
+    padding-inline: 8px;
+  }
 }
 </style>

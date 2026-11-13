@@ -1,46 +1,55 @@
 <template>
   <div id="homePage">
-    <!-- 搜索框：联想 + 本地历史 + 热门搜索词 -->
-    <div class="search-bar">
-      <SearchBox
-        v-model="searchText"
-        :hot-tags="hotTagList"
-        :hot-categories="hotCategoryList"
-        @search="handleSearchBoxSearch"
-      />
-    </div>
+    <!-- 首屏：一句主张 + 搜索入口，搜索框沿用原有联想 / 历史 / 热词能力 -->
+    <section class="hero">
+      <p class="hero-eyebrow">SHIFANG37 · 图片素材库</p>
+      <h1 class="hero-title">收藏每一个<span class="hero-accent">值得被看见</span>的画面</h1>
+      <p class="hero-sub">上传、整理、检索与分享你的图片，标签和分类让素材随时可用</p>
+      <div class="search-bar">
+        <SearchBox
+          v-model="searchText"
+          :hot-tags="hotTagList"
+          :hot-categories="hotCategoryList"
+          @search="handleSearchBoxSearch"
+        />
+      </div>
+    </section>
 
-    <!-- 分类 + 标签 + 排序 -->
-    <a-tabs v-model:activeKey="selectedCategory" @change="doSearch">
-      <a-tab-pane key="all" tab="全部" />
-      <a-tab-pane v-for="category in categoryList" :key="category" :tab="category" />
-    </a-tabs>
-    <div class="sort-bar">
-      <span class="sort-bar-label">排序：</span>
-      <a-radio-group
-        v-model:value="sortField"
-        size="small"
-        button-style="solid"
-        @change="doSortChange"
-      >
-        <a-radio-button v-for="option in SORT_OPTIONS" :key="option.value" :value="option.value">
-          {{ option.label }}
-        </a-radio-button>
-      </a-radio-group>
-    </div>
-    <div class="tag-bar">
-      <span class="tag-bar-label">标签：</span>
-      <a-space :size="[0, 8]" wrap>
-        <a-checkable-tag
-          v-for="tag in tagList"
-          :key="tag"
-          :checked="selectedTags.includes(tag)"
-          @change="(checked: boolean) => handleTagChange(tag, checked)"
+    <!-- 分类 / 排序 / 标签：统一收进一张筛选面板 -->
+    <section class="filters">
+      <div class="filters-categories">
+        <a-tabs v-model:activeKey="selectedCategory" class="category-tabs" @change="doSearch">
+          <a-tab-pane key="all" tab="全部" />
+          <a-tab-pane v-for="category in categoryList" :key="category" :tab="category" />
+        </a-tabs>
+      </div>
+      <div class="sort-bar">
+        <span class="filter-label">排序</span>
+        <a-radio-group
+          v-model:value="sortField"
+          size="small"
+          button-style="solid"
+          @change="doSortChange"
         >
-          {{ tag }}
-        </a-checkable-tag>
-      </a-space>
-    </div>
+          <a-radio-button v-for="option in SORT_OPTIONS" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </a-radio-button>
+        </a-radio-group>
+      </div>
+      <div v-if="tagList.length" class="tag-bar">
+        <span class="filter-label">标签</span>
+        <a-space :size="[0, 8]" wrap>
+          <a-checkable-tag
+            v-for="tag in tagList"
+            :key="tag"
+            :checked="selectedTags.includes(tag)"
+            @change="(checked: boolean) => handleTagChange(tag, checked)"
+          >
+            {{ tag }}
+          </a-checkable-tag>
+        </a-space>
+      </div>
+    </section>
 
     <!-- 首屏加载 -->
     <div v-if="showInitialLoading" class="state-block" data-testid="home-loading">
@@ -428,39 +437,169 @@ onDeactivated(() => {
 </script>
 
 <style scoped>
-.search-bar {
-  margin-bottom: 24px;
+.hero {
+  padding: 36px 0 30px;
   text-align: center;
 }
 
-#homePage .search-bar {
-  max-width: 680px;
-  margin: 0 auto 16px;
-}
-
-.tag-bar {
-  margin-bottom: 16px;
-}
-
-.tag-bar-label {
-  margin-right: 8px;
-}
-
-.sort-bar {
-  display: flex;
+.hero-eyebrow {
+  display: inline-flex;
   align-items: center;
-  margin-bottom: 16px;
+  margin: 0 0 18px;
+  padding: 6px 14px;
+  color: var(--brand-600);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
 }
 
-.sort-bar-label {
-  margin-right: 8px;
-  color: #666;
+.hero-title {
+  margin: 0 0 14px;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.16;
+  letter-spacing: -0.03em;
+}
+
+.hero-accent {
+  padding: 0 2px;
+  background: linear-gradient(120deg, #4f46e5 0%, #9333ea 55%, #ec4899 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero-sub {
+  max-width: 560px;
+  margin: 0 auto 28px;
+  color: var(--ink-500);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.search-bar {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.filters {
+  margin: 4px 0 28px;
+  padding: 2px 22px 16px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
+}
+
+.filters-categories :deep(.ant-tabs-nav) {
+  margin-bottom: 8px;
+}
+
+.filters-categories :deep(.ant-tabs-nav::before) {
+  border-bottom: 1px solid var(--line);
+}
+
+.category-tabs :deep(.ant-tabs-tab) {
+  padding: 14px 2px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.category-tabs :deep(.ant-tabs-tab-active) {
+  font-weight: 600;
+}
+
+.sort-bar,
+.tag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.filter-label {
+  flex: none;
+  min-width: 32px;
+  color: var(--ink-400);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.sort-bar :deep(.ant-radio-group) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+}
+
+.sort-bar :deep(.ant-radio-button-wrapper) {
+  height: 32px;
+  padding-inline: 14px;
+  color: var(--ink-500);
+  line-height: 30px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.sort-bar :deep(.ant-radio-button-wrapper::before) {
+  display: none;
+}
+
+.sort-bar :deep(.ant-radio-button-wrapper:hover) {
+  color: var(--brand-600);
+  border-color: var(--brand-ring);
+}
+
+.sort-bar :deep(.ant-radio-button-wrapper-checked) {
+  color: #fff;
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+  border-color: transparent;
+  box-shadow: 0 8px 18px -10px rgba(79, 70, 229, 0.9);
+}
+
+.tag-bar :deep(.ant-tag-checkable) {
+  padding: 3px 12px;
+  color: var(--ink-500);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.tag-bar :deep(.ant-tag-checkable:hover) {
+  color: var(--brand-600);
+  border-color: var(--brand-ring);
+}
+
+.tag-bar :deep(.ant-tag-checkable-checked) {
+  color: var(--brand-600);
+  font-weight: 600;
+  background: var(--brand-soft);
+  border-color: var(--brand-ring);
 }
 
 .state-block {
   display: flex;
   justify-content: center;
-  padding: 64px 0;
+  padding: 72px 0;
 }
 
 .waterfall {
@@ -483,11 +622,32 @@ onDeactivated(() => {
   justify-content: center;
   gap: 12px;
   min-height: 48px;
-  padding: 16px 0;
-  color: rgba(0, 0, 0, 0.45);
+  margin-top: 8px;
+  padding: 24px 0;
+  color: var(--ink-400);
 }
 
 .load-more-error {
-  color: #ff4d4f;
+  color: #e11d48;
+}
+
+.load-more-end {
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 720px) {
+  .hero {
+    padding: 20px 0 24px;
+  }
+
+  .filters {
+    padding: 0 14px 12px;
+  }
+
+  .waterfall,
+  .waterfall-column {
+    gap: 14px;
+  }
 }
 </style>

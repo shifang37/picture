@@ -5,6 +5,7 @@ import '@/access'
 import App from './App.vue'
 import router from './router'
 import 'ant-design-vue/dist/reset.css'
+import '@/styles/theme.css'
 
 const app = createApp(App)
 // Ant Design Vue 组件由 unplugin-vue-components 按需引入，不再全量 app.use(Antd)

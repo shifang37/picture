@@ -20,6 +20,7 @@ declare module 'vue' {
     ACardMeta: typeof import('ant-design-vue/es')['CardMeta']
     ACheckableTag: typeof import('ant-design-vue/es')['CheckableTag']
     ACol: typeof import('ant-design-vue/es')['Col']
+    AConfigProvider: typeof import('ant-design-vue/es')['ConfigProvider']
     AddToAlbumModal: typeof import('./src/components/AddToAlbumModal.vue')['default']
     ADescriptions: typeof import('ant-design-vue/es')['Descriptions']
     ADescriptionsItem: typeof import('ant-design-vue/es')['DescriptionsItem']

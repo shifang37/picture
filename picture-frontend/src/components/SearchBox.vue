@@ -247,13 +247,26 @@ onMounted(() => {
 .search-box {
   max-width: 680px;
   margin: 0 auto;
-  text-align: center;
 }
 
+/* 搜索框做成悬浮胶囊：白底 + 柔和阴影，聚焦时出现品牌色描边 */
 .search-box-input {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.search-box-input:focus-within {
+  border-color: var(--brand-ring);
+  box-shadow: 0 20px 44px -22px rgba(79, 70, 229, 0.55);
 }
 
 .search-box-autocomplete {
@@ -261,22 +274,63 @@ onMounted(() => {
   min-width: 0;
 }
 
+.search-box-input :deep(.ant-select-selector) {
+  height: 44px !important;
+  padding-inline: 18px !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.search-box-input :deep(.ant-select-selection-search-input) {
+  height: 44px !important;
+}
+
+.search-box-input :deep(.ant-select-selection-placeholder) {
+  color: var(--ink-400);
+  line-height: 44px;
+}
+
+.search-box-input :deep(.ant-btn) {
+  height: 44px;
+  padding-inline: 28px;
+  border-radius: 999px;
+}
+
 .search-box-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px 8px;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
+  margin-top: 14px;
   font-size: 13px;
 }
 
 .search-box-label {
-  color: rgba(0, 0, 0, 0.45);
+  margin-right: 2px;
+  color: var(--ink-400);
 }
 
 .search-box-chip {
+  color: var(--ink-500);
+  background: rgba(255, 255, 255, 0.7);
+  border-color: transparent;
   cursor: pointer;
   user-select: none;
+  transition:
+    color 0.18s ease,
+    background 0.18s ease;
+}
+
+.search-box-chip:hover {
+  color: var(--brand-600);
+  background: #fff;
+}
+
+@media (max-width: 720px) {
+  .search-box-input :deep(.ant-btn) {
+    padding-inline: 18px;
+  }
 }
 </style>
