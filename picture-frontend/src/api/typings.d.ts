@@ -212,6 +212,10 @@ declare namespace API {
     machineReviewLabel?: string
     machineReviewScore?: number
     machineReviewTime?: string
+    textReviewStatus?: number
+    textReviewLabel?: string
+    textReviewScore?: number
+    textReviewTime?: string
   }
 
   type PictureEditRequest = {

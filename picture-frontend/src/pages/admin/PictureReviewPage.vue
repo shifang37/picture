@@ -85,6 +85,23 @@
             </a-tag>
           </a-tooltip>
         </template>
+        <template v-else-if="column.dataIndex === 'textReviewStatus'">
+          <a-tooltip>
+            <template #title>
+              <div>{{ textStatusText(record.textReviewStatus) }}</div>
+              <div v-if="record.textReviewLabel">标签：{{ record.textReviewLabel }}</div>
+              <div v-if="record.textReviewScore !== undefined && record.textReviewScore !== null">
+                置信度：{{ record.textReviewScore }}
+              </div>
+              <div v-if="record.textReviewTime">
+                文审时间：{{ formatTime(record.textReviewTime) }}
+              </div>
+            </template>
+            <a-tag :color="textStatusColor(record.textReviewStatus)">
+              {{ textStatusText(record.textReviewStatus) }}
+            </a-tag>
+          </a-tooltip>
+        </template>
         <template v-else-if="column.dataIndex === 'reviewTime'">
           {{ record.reviewTime ? dayjs(record.reviewTime).format('YYYY-MM-DD HH:mm:ss') : '-' }}
         </template>
@@ -171,6 +188,7 @@ const columns = [
   { title: '标签', dataIndex: 'tags' },
   { title: '状态', dataIndex: 'reviewStatus', width: 100 },
   { title: '机审', dataIndex: 'machineReviewStatus', width: 120 },
+  { title: '文审', dataIndex: 'textReviewStatus', width: 120 },
   { title: '审核时间', dataIndex: 'reviewTime', width: 180 },
   { title: '创建时间', dataIndex: 'createTime', width: 180 },
   { title: '操作', key: 'action', width: 140 },
@@ -270,6 +288,22 @@ const machineStatusText = (status?: number | null) => {
 }
 
 const machineStatusColor = (status?: number | null) => {
+  if (status === undefined || status === null) {
+    return 'default'
+  }
+  const map: Record<number, string> = { 0: 'green', 1: 'red', 2: 'orange' }
+  return map[status] ?? 'default'
+}
+
+const textStatusText = (status?: number | null) => {
+  if (status === undefined || status === null) {
+    return '未文审'
+  }
+  const map: Record<number, string> = { 0: '文审正常', 1: '文审违规', 2: '文审疑似' }
+  return map[status] ?? '文审未知'
+}
+
+const textStatusColor = (status?: number | null) => {
   if (status === undefined || status === null) {
     return 'default'
   }
