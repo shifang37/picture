@@ -267,3 +267,62 @@ test('首页卡片没有互动按钮时也能正常进入详情', async ({ page 
     .click({ position: { x: 10, y: 10 } })
   await expect(page).toHaveURL(/\/picture\/1$/)
 })
+
+test('系统公告：管理员能发送公告，普通用户看不到入口', async ({ page }) => {
+  // 角色在同一个 mock 里切换，避免重复写两套路由
+  const state: { role: 'user' | 'admin'; body: { title?: string; content?: string } | null } = {
+    role: 'user',
+    body: null,
+  }
+
+  await page.route(API_PATTERN, async (route) => {
+    const url = route.request().url()
+    if (url.includes('/user/get/login')) {
+      await route.fulfill({
+        json: {
+          code: 0,
+          data: {
+            id: '100',
+            userAccount: 'tester',
+            userName: '测试用户',
+            userRole: state.role,
+          },
+          message: 'ok',
+        },
+      })
+      return
+    }
+    if (url.includes('/notification/unread-count')) {
+      await route.fulfill({ json: { code: 0, data: { count: 0 }, message: 'ok' } })
+      return
+    }
+    if (url.includes('/notification/page')) {
+      await route.fulfill({ json: { code: 0, data: { records: [], total: 0 }, message: 'ok' } })
+      return
+    }
+    if (url.includes('/notification/broadcast')) {
+      state.body = route.request().postDataJSON()
+      await route.fulfill({ json: { code: 0, data: { sent: 3 }, message: 'ok' } })
+      return
+    }
+    await route.fulfill({ json: { code: 0, data: null, message: 'ok' } })
+  })
+
+  // 普通用户：入口不渲染
+  await page.goto('/notifications')
+  await expect(page.getByRole('heading', { name: '通知中心' })).toBeVisible()
+  await expect(page.getByTestId('broadcast-button')).toHaveCount(0)
+
+  // 管理员：发公告 → 二次确认弹窗 → 提交
+  state.role = 'admin'
+  await page.reload()
+  await page.getByTestId('broadcast-button').click()
+  await expect(page.getByText('公告会立即发送给全部用户，且发送后无法撤回')).toBeVisible()
+
+  await page.getByPlaceholder('例如：系统维护通知').fill('系统维护通知')
+  await page.getByPlaceholder(/例如：本站将于/).fill('今晚 02:00 维护')
+  await page.getByRole('button', { name: '确认发送' }).click()
+
+  await expect(page.getByText('公告已发送给 3 位用户')).toBeVisible()
+  expect(state.body).toEqual({ title: '系统维护通知', content: '今晚 02:00 维护' })
+})

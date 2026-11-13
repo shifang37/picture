@@ -355,9 +355,16 @@ class PictureInteractionNotificationIT {
         jdbcTemplate.update("UPDATE picture SET deletedAt = ? WHERE id = ?",
                 new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)), picture.getId());
 
-        int purged = pictureService.purgeExpiredPictures(new Date(), 100);
+        // 截止点取「保留期之前」，与 PictureRecyclePurgeTask 的实际调用口径一致。
+        // 不能用 now：同一个容器里其它用例也软删过图片，那些行的 deletedAt 就是刚刚，
+        // 用 now 会把它们一起清理掉，断言值就依赖用例执行顺序了。
+        Date before = new Date(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(7));
+        int purged = pictureService.purgeExpiredPictures(before, 100);
 
-        assertEquals(1, purged);
+        assertEquals(1, purged, "只清理超过保留期的图片");
+        assertEquals(0, jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM picture WHERE id = ?", Integer.class, picture.getId()),
+                "超过保留期的图片必须被物理删除");
         Integer relations = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM picture_interaction WHERE pictureId = ?
                 """, Integer.class, picture.getId());

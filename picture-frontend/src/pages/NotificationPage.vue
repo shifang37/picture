@@ -6,6 +6,9 @@
         <div class="desc">审核结果与账号安全提醒会在这里通知你</div>
       </div>
       <a-space>
+        <a-button v-if="isAdmin" data-testid="broadcast-button" @click="openBroadcast">
+          发公告
+        </a-button>
         <a-button :disabled="!unreadCount" @click="doMarkAllRead">全部已读</a-button>
         <a-button type="primary" ghost @click="fetchData">刷新</a-button>
       </a-space>
@@ -64,15 +67,58 @@
         @change="fetchData"
       />
     </div>
+
+    <!-- 系统公告：仅管理员可见。弹窗本身就是二次确认，正文会发给全部用户且不可撤回 -->
+    <a-modal
+      v-model:open="broadcastOpen"
+      title="发送系统公告"
+      ok-text="确认发送"
+      cancel-text="取消"
+      :confirm-loading="broadcastSubmitting"
+      :destroy-on-close="true"
+      @ok="submitBroadcast"
+    >
+      <a-alert
+        type="warning"
+        show-icon
+        message="公告会立即发送给全部用户，且发送后无法撤回"
+        style="margin-bottom: 16px"
+      />
+      <a-form
+        ref="broadcastFormRef"
+        :model="broadcastForm"
+        :rules="broadcastRules"
+        layout="vertical"
+      >
+        <a-form-item label="标题" name="title">
+          <a-input
+            v-model:value="broadcastForm.title"
+            :maxlength="128"
+            show-count
+            placeholder="例如：系统维护通知"
+          />
+        </a-form-item>
+        <a-form-item label="正文" name="content">
+          <a-textarea
+            v-model:value="broadcastForm.content"
+            :maxlength="1024"
+            :rows="4"
+            show-count
+            placeholder="例如：本站将于 11 月 20 日 02:00–04:00 维护，期间可能无法上传"
+          />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { message } from 'ant-design-vue'
+import { message, type FormInstance, type FormProps } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import {
+  broadcastNotification,
   deleteNotifications,
   listNotifications,
   markAllNotificationsRead,
@@ -80,10 +126,15 @@ import {
   type NotificationItem,
   type NotificationType,
 } from '@/api/notificationExtra'
+import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { useNotificationStore } from '@/stores/useNotificationStore'
 
 const router = useRouter()
 const notificationStore = useNotificationStore()
+const loginUserStore = useLoginUserStore()
+
+// 系统公告只有管理员能发，普通用户看不到入口
+const isAdmin = computed(() => loginUserStore.loginUser.userRole === 'admin')
 
 const activeTab = ref<'all' | 'unread'>('all')
 const dataList = ref<NotificationItem[]>([])
@@ -93,6 +144,51 @@ const pageSize = 10
 const loading = ref(false)
 
 const unreadCount = computed(() => notificationStore.unreadCount)
+
+// ===== 系统公告 =====
+const broadcastOpen = ref(false)
+const broadcastSubmitting = ref(false)
+const broadcastFormRef = ref<FormInstance>()
+const broadcastForm = reactive({ title: '', content: '' })
+const broadcastRules: FormProps['rules'] = {
+  title: [{ required: true, whitespace: true, message: '请填写公告标题', trigger: 'blur' }],
+  content: [{ required: true, whitespace: true, message: '请填写公告正文', trigger: 'blur' }],
+}
+
+const openBroadcast = () => {
+  broadcastForm.title = ''
+  broadcastForm.content = ''
+  broadcastOpen.value = true
+}
+
+const submitBroadcast = async () => {
+  try {
+    await broadcastFormRef.value?.validate()
+  } catch {
+    // 表单校验失败时保持弹窗打开，由表单项自己提示
+    return
+  }
+  broadcastSubmitting.value = true
+  try {
+    const res = await broadcastNotification({
+      title: broadcastForm.title.trim(),
+      content: broadcastForm.content.trim(),
+    })
+    if (res.data.code === 0) {
+      const sent = Number(res.data.data?.sent) || 0
+      message.success(`公告已发送给 ${sent} 位用户`)
+      broadcastOpen.value = false
+      current.value = 1
+      await fetchData()
+    } else {
+      message.error(res.data.message || '发送公告失败')
+    }
+  } catch (error: any) {
+    message.error(error?.message || '发送公告失败')
+  } finally {
+    broadcastSubmitting.value = false
+  }
+}
 
 const formatTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-')
 

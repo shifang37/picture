@@ -4,7 +4,7 @@
       <!-- 图片展示区 -->
       <a-col :sm="24" :md="16" :xl="18">
         <a-card title="图片预览" :loading="loading">
-          <a-image style="max-height: 600px; object-fit: contain" :src="picture.url" />
+          <a-image style="max-height: 600px; object-fit: contain" :src="previewImageUrl" />
         </a-card>
       </a-col>
       <!-- 图片信息区 -->
@@ -135,7 +135,7 @@ import {
 } from '@ant-design/icons-vue'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { getPictureVoById, deletePicture } from '@/api/pictureController'
-import { downloadPicture, formatSize, getShareImageUrl } from '@/utils'
+import { downloadPicture, formatSize, getShareImageUrl, getThumbnailUrl } from '@/utils'
 import { formatCount } from '@/utils/interaction'
 import { applySeoMeta, resetSeoMeta } from '@/utils/seo'
 import InteractionButtons from '@/components/InteractionButtons.vue'
@@ -159,6 +159,11 @@ const props = defineProps<{
 }>()
 const picture = ref<API.PictureVO>({})
 const loading = ref(true)
+
+// 详情页预览改用 1600px 缩略图：列表卡片只有 300~400px，详情页再拉原图会白白多传几 MB；
+// 下载仍然走 downloadPicture(id)，拿到的始终是原图，不受这里影响。
+const DETAIL_IMAGE_SIZE = 1600
+const previewImageUrl = computed(() => getThumbnailUrl(picture.value.url, DETAIL_IMAGE_SIZE))
 
 // 审核状态：0 待审核、1 已通过、2 已拒绝
 const reviewStatus = computed(() => picture.value.reviewStatus ?? 1)
