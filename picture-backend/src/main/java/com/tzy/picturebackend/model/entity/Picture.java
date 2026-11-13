@@ -167,6 +167,26 @@ public class Picture implements Serializable {
      */
     private Date machineReviewTime;
 
+    /**
+     * 文审状态：0-正常 1-违规 2-疑似；null 表示尚未文审
+     */
+    private Integer textReviewStatus;
+
+    /**
+     * 文审命中标签（主标签/子标签）
+     */
+    private String textReviewLabel;
+
+    /**
+     * 文审置信度 0-100
+     */
+    private Integer textReviewScore;
+
+    /**
+     * 文审时间
+     */
+    private Date textReviewTime;
+
 
 
 }

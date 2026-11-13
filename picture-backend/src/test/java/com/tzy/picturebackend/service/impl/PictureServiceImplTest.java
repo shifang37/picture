@@ -933,21 +933,26 @@ class PictureServiceImplTest {
     }
 
     @Test
-    @DisplayName("编辑：管理员修改他人图片内容不改变审核状态")
+    @DisplayName("编辑：管理员修改他人图片内容不改变审核状态，但会清空旧的文审结论")
     void editPicture_adminContentChangeKeepsReviewStatus() {
         User admin = admin();
         when(userService.isAdmin(admin)).thenReturn(true);
         when(pictureMapper.selectById(1L))
                 .thenReturn(editablePicture(PictureReviewStatusEnum.PASS.getValue()));
-        when(pictureMapper.updateById(any(Picture.class))).thenReturn(1);
+        when(pictureMapper.update(any(Picture.class), any(Wrapper.class))).thenReturn(1);
 
         PictureEditRequest request = editRequest("管理员改名");
         assertTrue(pictureService.editPicture(request, admin));
 
         ArgumentCaptor<Picture> entityCaptor = ArgumentCaptor.forClass(Picture.class);
-        verify(pictureMapper).updateById(entityCaptor.capture());
+        ArgumentCaptor<Wrapper<Picture>> wrapperCaptor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(pictureMapper).update(entityCaptor.capture(), wrapperCaptor.capture());
         assertNull(entityCaptor.getValue().getReviewStatus(), "管理员编辑不应改动审核状态");
-        verify(pictureMapper, never()).update(any(Picture.class), any(Wrapper.class));
+        UpdateWrapper<Picture> wrapper = (UpdateWrapper<Picture>) wrapperCaptor.getValue();
+        assertFalse(wrapper.getSqlSet().contains("reviewStatus"), "实际 SET: " + wrapper.getSqlSet());
+        assertTrue(wrapper.getSqlSet().contains("textReviewStatus"),
+                "名称变化应清空文件审核结论，实际 SET: " + wrapper.getSqlSet());
+        verify(pictureMapper, never()).updateById(any(Picture.class));
         verify(pictureEventPublisher).pictureChanged(1L);
     }
 

@@ -262,7 +262,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                         .set("machineReviewStatus", null)
                         .set("machineReviewLabel", null)
                         .set("machineReviewScore", null)
-                        .set("machineReviewTime", null);
+                        .set("machineReviewTime", null)
+                        // 名称可能随文件变化，上一次的文审结论同样清空
+                        .set("textReviewStatus", null)
+                        .set("textReviewLabel", null)
+                        .set("textReviewScore", null)
+                        .set("textReviewTime", null);
                 if (!this.update(picture, updateWrapper)) {
                     throw new BusinessException(ErrorCode.OPERATION_ERROR, "图片上传失败");
                 }
@@ -321,15 +326,26 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 普通用户改动已审核图片的内容后必须重新审核，否则过审后改文字就能绕过审核
         boolean contentChanged = hasContentChanged(pictureEditRequest, oldPicture);
         boolean needReviewAgain = !isAdmin && isReviewed(oldPicture) && contentChanged;
+        // 名称/简介变化后旧的文审结论不再可信，清空等待重新文审（无论是否重新审核都会触发事件）
+        boolean textChanged = hasTextChanged(pictureEditRequest.getName(),
+                pictureEditRequest.getIntroduction(), oldPicture);
         boolean result;
-        if (needReviewAgain) {
+        if (needReviewAgain || textChanged) {
             // updateById 会忽略 null，清空审核信息必须用 UpdateWrapper.set 显式置空
             UpdateWrapper<Picture> updateWrapper = new UpdateWrapper<Picture>()
-                    .eq("id", id)
-                    .set("reviewStatus", PictureReviewStatusEnum.REVIEWING.getValue())
-                    .set("reviewMessage", null)
-                    .set("reviewerId", null)
-                    .set("reviewTime", null);
+                    .eq("id", id);
+            if (needReviewAgain) {
+                updateWrapper.set("reviewStatus", PictureReviewStatusEnum.REVIEWING.getValue())
+                        .set("reviewMessage", null)
+                        .set("reviewerId", null)
+                        .set("reviewTime", null);
+            }
+            if (textChanged) {
+                updateWrapper.set("textReviewStatus", null)
+                        .set("textReviewLabel", null)
+                        .set("textReviewScore", null)
+                        .set("textReviewTime", null);
+            }
             result = this.update(picture, updateWrapper);
         } else {
             result = this.updateById(picture);
@@ -364,10 +380,28 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             picture.setTags(JSONUtil.toJsonStr(normalizedTags));
         }
         validPicture(picture);
-        boolean result = this.updateById(picture);
+        boolean textChanged = hasTextChanged(pictureUpdateRequest.getName(),
+                pictureUpdateRequest.getIntroduction(), oldPicture);
+        boolean result;
+        if (textChanged) {
+            // updateById 会忽略 null，清空文审信息必须用 UpdateWrapper.set 显式置空
+            result = this.update(picture, new UpdateWrapper<Picture>()
+                    .eq("id", id)
+                    .set("textReviewStatus", null)
+                    .set("textReviewLabel", null)
+                    .set("textReviewScore", null)
+                    .set("textReviewTime", null));
+        } else {
+            result = this.updateById(picture);
+        }
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "更新失败");
         if (normalizedTags != null) {
             replacePictureTags(id, normalizedTags);
+        }
+        if (textChanged) {
+            // 管理员改文字同样会影响公开列表、搜索索引与文审，需要发事件补审
+            pictureListCache.invalidate();
+            pictureEventPublisher.pictureChanged(id);
         }
         return true;
     }
@@ -431,6 +465,20 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         List<String> newTags = request.getTags() != null ? request.getTags() : parseTags(oldPicture.getTags());
         return !toTagSet(newTags).equals(toTagSet(parseTags(oldPicture.getTags())));
+    }
+
+    /**
+     * 名称或简介是否真的发生变化：未传的字段（null）表示保留原值，空串与 null 等价。
+     * <p>
+     * 文审只覆盖这两项，分类/标签变化不需要重新文审。
+     */
+    private static boolean hasTextChanged(String newName, String newIntroduction, Picture oldPicture) {
+        String effectiveName = newName != null ? newName : oldPicture.getName();
+        String effectiveIntroduction = newIntroduction != null
+                ? newIntroduction : oldPicture.getIntroduction();
+        return !Objects.equals(normalizeText(effectiveName), normalizeText(oldPicture.getName()))
+                || !Objects.equals(normalizeText(effectiveIntroduction),
+                normalizeText(oldPicture.getIntroduction()));
     }
 
     /**
@@ -1102,6 +1150,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             String tagsJson = updateTags ? JSONUtil.toJsonStr(normalizedTags) : null;
             List<Long> changedIds = new ArrayList<>(pictureIds.size());
             List<Long> reReviewIds = new ArrayList<>();
+            List<Long> textChangedIds = new ArrayList<>();
             for (Long id : pictureIds) {
                 Picture oldPicture = pictureMap.get(id);
                 // 只有值真的发生变化才更新：未变化的图片不刷新 editTime，也不重置审核状态
@@ -1115,6 +1164,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                     continue;
                 }
                 changedIds.add(id);
+                // 简介变化后旧的文审结论不再可信，需要清空并重新文审；只改分类/标签则不用
+                if (updateIntroduction
+                        && !Objects.equals(newIntroduction, normalizeText(oldPicture.getIntroduction()))) {
+                    textChangedIds.add(id);
+                }
                 // 普通用户改动已审核图片的内容后必须重新审核（与单张编辑规则一致）
                 if (!isAdmin && isReviewed(oldPicture)) {
                     reReviewIds.add(id);
@@ -1156,6 +1210,15 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                         .set("reviewMessage", null)
                         .set("reviewerId", null)
                         .set("reviewTime", null));
+            }
+            if (!textChangedIds.isEmpty()) {
+                // 简介变了：清空文审结论，等待批量事件触发的重新文审
+                this.update(new UpdateWrapper<Picture>()
+                        .in("id", textChangedIds)
+                        .set("textReviewStatus", null)
+                        .set("textReviewLabel", null)
+                        .set("textReviewScore", null)
+                        .set("textReviewTime", null));
             }
             // 整批只失效一次列表缓存、只发一条批量事件
             pictureListCache.invalidate();

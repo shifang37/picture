@@ -232,9 +232,50 @@ app:
 - COS 桶必须已绑定数据万象（上传取图片宽高也依赖该绑定）；
 - 子账号调用审核接口需要 `ci:CreateAuditingPictureJob` 权限，仅有 COS 权限会返回 `AccessDenied`；
 - 图片审核**按张、按审核场景计费**，开启前请先在控制台确认价格。默认关闭就是为了避免误产生费用；
-- 文字内容（名称、简介）的文本审核尚未接入，作为后续可选扩展。
+- 文字内容（名称、简介）由单独的文审链路处理，见下一节「文本审核（数据万象）」，默认关闭。
 
 审核页（`/admin/pictureReview`）新增「机审」列，标签悬浮可看命中标签、置信度与机审时间；默认按机审状态倒序（疑似 → 违规 → 正常 → 未机审），同状态内按创建时间倒序。
+
+## 文本审核（数据万象）
+
+图片的**名称与简介**会交给数据万象文字审核，结论写入 `picture` 表的四个 `textReview*` 字段。与图片机审一样默认关闭，默认 `assist` 只记录、不改变人工审核结论。
+
+### 开关与模式
+
+```yaml
+app:
+  review:
+    text:
+      enabled: ${TEXT_REVIEW_ENABLED:false}
+      mode: ${TEXT_REVIEW_MODE:assist}
+      biz-type: ${TEXT_REVIEW_BIZ_TYPE:}
+```
+
+| 模式 | 行为 |
+| --- | --- |
+| `assist`（默认） | 只记录文审结果，审核仍由人工完成 |
+| `auto-reject` | 文审违规自动拒绝；正常与疑似仍走人工 |
+
+文本没有「自动通过」的语义（图片本身仍需人工审核），因此不提供机审的 `auto` 模式。
+
+### 触发与执行
+
+- 消费 `picture.uploaded`、`picture.changed`、`picture.batch.changed`：按 id 回查，只处理 `textReviewStatus IS NULL` 的图片，已删除或已审的直接确认；
+- 审核文本 = 名称 + 简介（各去首尾空白、换行拼接，最长 2000 字符；两者都为空时不发请求，不产生费用）；
+- 数据万象文字审核是**异步任务**：消费者创建任务后每 500ms 查询一次，最多等 8 秒；超时、任务失败或响应无法识别都抛异常交给 RabbitMQ 重试，重试耗尽进 `picture.textreview.q.dlq`；
+- 重传文件、单张编辑（含管理员更新）改动名称或简介、批量编辑改动简介时，会先清空四个 `textReview*` 字段再触发重新文审；只改分类/标签不会重复审核。
+
+### 结果与处置
+
+- 写库使用 `WHERE id = ? AND textReviewStatus IS NULL`，重复投递只处理一次；
+- `auto-reject` 自动拒绝使用 `WHERE id = ? AND reviewStatus = 待审核`，管理员先审核的图片不会被覆盖；拒绝时写一条审核历史（`reviewerId = 0`，展示为「系统机审」）、给作者发审核通知、失效公开列表缓存并同步搜索索引；
+- 审核页在「机审」列后新增「文审」列，悬浮可看命中标签、置信度与文审时间。
+
+### 前置条件与费用
+
+- COS 桶必须绑定数据万象，密钥需要 `ci:CreateAuditingTextJob` 权限（只有 COS 权限会返回 `AccessDenied`）；
+- 文字审核按次计费，开启前请先确认价格；`biz-type` 留空时使用控制台默认策略；
+- 文审只覆盖名称与简介，分类、标签与审核意见不在审核范围内。
 
 ## AI 自动建议（DeepSeek）
 
@@ -651,10 +692,10 @@ cd picture-frontend; npm run test; npx playwright test e2e/m4.spec.ts
 
 | 路由键 | 触发时机 | 消费队列 |
 | --- | --- | --- |
-| `picture.uploaded` | 新上传或重传成功 | `picture.moderation.q`、`picture.search.q`、`picture.ai.q`（机审开启时 AI 消费者会跳过，等 `moderated`） |
+| `picture.uploaded` | 新上传或重传成功 | `picture.moderation.q`、`picture.textreview.q`、`picture.search.q`、`picture.ai.q`（机审开启时 AI 消费者会跳过，等 `moderated`） |
 | `picture.moderated` | 机审完成 | `picture.ai.q` |
-| `picture.changed` | 人工审核、编辑、删除、回收站恢复 | `picture.search.q` |
-| `picture.batch.changed` | 批量审核完成（一条事件带整批 id） | `picture.search.q` |
+| `picture.changed` | 人工审核、编辑、删除、回收站恢复 | `picture.textreview.q`（只有名称/简介变化时才会真正调用接口）、`picture.search.q` |
+| `picture.batch.changed` | 批量审核 / 批量编辑完成（一条事件带整批 id） | `picture.textreview.q`、`picture.search.q` |
 
 ### 事件模型
 

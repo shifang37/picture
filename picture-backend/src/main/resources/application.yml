@@ -118,6 +118,13 @@ app:
       enabled: ${MACHINE_REVIEW_ENABLED:false}
       # assist（只记录结果，默认）| auto-reject（违规自动拒绝）| auto（违规拒绝、正常通过）
       mode: ${MACHINE_REVIEW_MODE:assist}
+    text:
+      # 数据万象文本审核（图片名称、简介）：默认关闭，关闭时不发起任何外部调用
+      enabled: ${TEXT_REVIEW_ENABLED:false}
+      # assist（只记录结果，默认）| auto-reject（文审违规自动拒绝）
+      mode: ${TEXT_REVIEW_MODE:assist}
+      # 控制台配置的审核策略 ID，为空时使用默认策略
+      biz-type: ${TEXT_REVIEW_BIZ_TYPE:}
   ai:
     # 上传后生成名称、简介、分类与标签建议，默认关闭
     enabled: ${AI_TAG_ENABLED:false}

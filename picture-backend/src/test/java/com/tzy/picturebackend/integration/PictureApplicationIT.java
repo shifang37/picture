@@ -7,6 +7,7 @@ import com.tzy.picturebackend.event.PictureEventPublisher;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.RedisRateLimitCounter;
 import com.tzy.picturebackend.mapper.AnalyzeMapper;
+import com.tzy.picturebackend.model.dto.file.PreparedUpload;
 import com.tzy.picturebackend.model.dto.file.UploadPictureResult;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
@@ -83,7 +84,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Testcontainers(disabledWithoutDocker = true)
 class PictureApplicationIT {
 
-    private static final String PASSWORD = "Password123";
+    private static final String PASSWORD = "Picture123";
 
     private static final String NEW_PASSWORD = "NewPassword456";
 
@@ -138,6 +139,9 @@ class PictureApplicationIT {
     @BeforeEach
     void setUp() {
         when(fileManager.uploadPicture(any(), anyString())).thenReturn(uploadResult());
+        when(fileManager.uploadPrepared(any())).thenReturn(uploadResult());
+        when(fileManager.prepareUpload(any(), anyString()))
+                .thenAnswer(invocation -> preparedUpload());
     }
 
     // ==================== 上下文与迁移 ====================
@@ -148,7 +152,7 @@ class PictureApplicationIT {
         Integer applied = jdbcTemplate.queryForObject(
                 "select count(*) from flyway_schema_history where success = 1", Integer.class);
         assertNotNull(applied);
-        assertTrue(applied >= 9, "V1-V9 迁移应全部执行，实际 " + applied);
+        assertTrue(applied >= 14, "V1-V14 迁移应全部执行，实际 " + applied);
 
         List<String> columns = jdbcTemplate.queryForList(
                 "select column_name from information_schema.columns "
@@ -156,6 +160,8 @@ class PictureApplicationIT {
                 String.class);
         assertTrue(columns.stream().anyMatch("reviewStatus"::equalsIgnoreCase));
         assertTrue(columns.stream().anyMatch("machineReviewStatus"::equalsIgnoreCase));
+        assertTrue(columns.stream().anyMatch("textReviewStatus"::equalsIgnoreCase));
+        assertTrue(columns.stream().anyMatch("textReviewTime"::equalsIgnoreCase));
         assertTrue(columns.stream().anyMatch("deletedAt"::equalsIgnoreCase));
         assertTrue(columns.stream().anyMatch("deletedBy"::equalsIgnoreCase));
 
@@ -172,7 +178,7 @@ class PictureApplicationIT {
         assertEquals(1, pictureTagTable, "V8 应创建 picture_tag 关系表");
 
         Integer tagPictureIndex = jdbcTemplate.queryForObject(
-                "select count(*) from information_schema.statistics "
+                "select count(distinct index_name) from information_schema.statistics "
                         + "where table_schema = database() and table_name = 'picture_tag' "
                         + "and index_name = 'idx_tag_picture'",
                 Integer.class);
@@ -253,6 +259,10 @@ class PictureApplicationIT {
         old.setMachineReviewLabel("normal");
         old.setMachineReviewScore(99);
         old.setMachineReviewTime(new Date());
+        old.setTextReviewStatus(0);
+        old.setTextReviewLabel("normal");
+        old.setTextReviewScore(99);
+        old.setTextReviewTime(new Date());
         pictureService.updateById(old);
 
         PictureUploadRequest request = new PictureUploadRequest();
@@ -265,7 +275,11 @@ class PictureApplicationIT {
                         + "machineReviewStatus as machine_review_status, "
                         + "machineReviewLabel as machine_review_label, "
                         + "machineReviewScore as machine_review_score, "
-                        + "machineReviewTime as machine_review_time "
+                        + "machineReviewTime as machine_review_time, "
+                        + "textReviewStatus as text_review_status, "
+                        + "textReviewLabel as text_review_label, "
+                        + "textReviewScore as text_review_score, "
+                        + "textReviewTime as text_review_time "
                         + "from picture where id = ?", old.getId());
         assertEquals(PictureReviewStatusEnum.REVIEWING.getValue(),
                 ((Number) row.get("review_status")).intValue());
@@ -276,6 +290,10 @@ class PictureApplicationIT {
         assertNull(row.get("machine_review_label"));
         assertNull(row.get("machine_review_score"));
         assertNull(row.get("machine_review_time"));
+        assertNull(row.get("text_review_status"));
+        assertNull(row.get("text_review_label"));
+        assertNull(row.get("text_review_score"));
+        assertNull(row.get("text_review_time"));
     }
 
     @Test
@@ -692,6 +710,19 @@ class PictureApplicationIT {
         result.setPicScale(1.33);
         result.setPicFormat("jpg");
         return result;
+    }
+
+    /**
+     * 准备阶段结果：哈希每次不同，避免同一用户秒传命中已有图片
+     */
+    private PreparedUpload preparedUpload() {
+        PreparedUpload prepared = new PreparedUpload();
+        prepared.setUploadPath("public/1/it.jpg");
+        prepared.setPicName("new");
+        prepared.setPicSize(1024L);
+        prepared.setFileHash(UUID.randomUUID().toString().replace("-", ""));
+        prepared.setSuffix("jpg");
+        return prepared;
     }
 
     private MockMultipartFile jpegFile() {

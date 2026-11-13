@@ -9,6 +9,8 @@ import com.qcloud.cos.model.PutObjectRequest;
 import com.qcloud.cos.model.PutObjectResult;
 import com.qcloud.cos.model.ciModel.auditing.ImageAuditingRequest;
 import com.qcloud.cos.model.ciModel.auditing.ImageAuditingResponse;
+import com.qcloud.cos.model.ciModel.auditing.TextAuditingRequest;
+import com.qcloud.cos.model.ciModel.auditing.TextAuditingResponse;
 import com.qcloud.cos.model.ciModel.persistence.PicOperations;
 import com.tzy.picturebackend.config.CosClientConfig;
 import jakarta.annotation.Resource;
@@ -71,6 +73,38 @@ public class CosManager {
         request.setBucketName(cosClientConfig.getBucket());
         request.setObjectKey(key);
         return cosClient.imageAuditing(request);
+    }
+
+    /**
+     * 创建数据万象文字审核任务（异步）。
+     * <p>
+     * 返回的 JobsDetail 里带 JobId，调用方需要再调用 {@link #describeTextAuditingJob(String)} 轮询结果。
+     *
+     * @param content 已按接口要求做 Base64 编码的文本内容
+     * @param bizType 审核策略 ID，为空时使用控制台默认策略
+     * @return 创建任务响应
+     */
+    public TextAuditingResponse createTextAuditingJob(String content, String bizType) {
+        TextAuditingRequest request = new TextAuditingRequest();
+        request.setBucketName(cosClientConfig.getBucket());
+        request.getInput().setContent(content);
+        if (StrUtil.isNotBlank(bizType)) {
+            request.getConf().setBizType(bizType.trim());
+        }
+        return cosClient.createAuditingTextJobs(request);
+    }
+
+    /**
+     * 查询数据万象文字审核任务状态与结果。
+     *
+     * @param jobId 任务 ID
+     * @return 查询响应
+     */
+    public TextAuditingResponse describeTextAuditingJob(String jobId) {
+        TextAuditingRequest request = new TextAuditingRequest();
+        request.setBucketName(cosClientConfig.getBucket());
+        request.setJobId(jobId);
+        return cosClient.describeAuditingTextJob(request);
     }
 
     /**
