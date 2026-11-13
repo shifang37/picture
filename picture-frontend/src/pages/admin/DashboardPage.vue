@@ -15,6 +15,42 @@
       </a-button>
     </a-flex>
 
+    <!-- 运维操作：计数漂移修复与搜索索引维护。三个按钮都走二次确认，避免误触全量重算 -->
+    <a-card size="small" title="运维操作" class="ops-card">
+      <div class="ops-tip">
+        用于修复计数漂移、重建搜索索引；执行会直接写库或重建索引，请确认当前没有正在进行的批量操作。
+      </div>
+      <a-space wrap>
+        <a-popconfirm
+          title="重建搜索索引？"
+          description="按 MySQL 全量重建公开图片索引，未启用 Elasticsearch 时会直接失败"
+          ok-text="重建索引"
+          cancel-text="取消"
+          @confirm="handleReindex"
+        >
+          <a-button :loading="reindexing">重建搜索索引</a-button>
+        </a-popconfirm>
+        <a-popconfirm
+          title="重算全部互动计数？"
+          description="按关系表重算所有图片的收藏数与点赞数，不会改动用户数据"
+          ok-text="重算互动"
+          cancel-text="取消"
+          @confirm="handleRecountInteraction"
+        >
+          <a-button :loading="recountingInteraction">重算互动计数</a-button>
+        </a-popconfirm>
+        <a-popconfirm
+          title="重算全部专辑计数？"
+          description="按关系表重算所有专辑的图片数量，不会改动图片本身"
+          ok-text="重算专辑"
+          cancel-text="取消"
+          @confirm="handleRecountAlbum"
+        >
+          <a-button :loading="recountingAlbum">重算专辑计数</a-button>
+        </a-popconfirm>
+      </a-space>
+    </a-card>
+
     <a-alert v-if="errorMessage" type="error" show-icon :message="errorMessage" class="error-alert">
       <template #action>
         <a-button size="small" @click="fetchAll">重试</a-button>
@@ -140,6 +176,7 @@ import {
   type AnalyzeTopDownloadItem,
   type AnalyzeUploadTrendItem,
 } from '@/api/analyzeExtra'
+import { recountAlbums, recountInteractions, reindexSearch } from '@/api/adminOpsExtra'
 import { formatSize } from '@/utils'
 import { formatCount, formatDuration, toNumber } from '@/utils/analyze'
 
@@ -380,6 +417,56 @@ const goDetail = (id?: string) => {
   }
 }
 
+// ==================== 运维操作 ====================
+// 三个操作都可能耗时（全量分批），按钮各自 loading，避免重复触发
+const reindexing = ref(false)
+const recountingInteraction = ref(false)
+const recountingAlbum = ref(false)
+
+/** 统一处理「业务码 + 异常」两种失败，成功时返回处理条数 */
+const unwrapOpsResult = (res: { data: { code?: number; data?: number; message?: string } }) => {
+  if (res.data.code !== 0) {
+    throw new Error(res.data.message || '操作失败')
+  }
+  return Number(res.data.data ?? 0)
+}
+
+const handleReindex = async () => {
+  reindexing.value = true
+  try {
+    const indexed = unwrapOpsResult(await reindexSearch())
+    message.success(`索引已重建，共写入 ${indexed} 张图片`)
+  } catch (error: any) {
+    message.error('重建索引失败：' + (error?.message || '系统错误'))
+  } finally {
+    reindexing.value = false
+  }
+}
+
+const handleRecountInteraction = async () => {
+  recountingInteraction.value = true
+  try {
+    const updated = unwrapOpsResult(await recountInteractions())
+    message.success(`互动计数已重算，共更新 ${updated} 张图片`)
+  } catch (error: any) {
+    message.error('重算互动计数失败：' + (error?.message || '系统错误'))
+  } finally {
+    recountingInteraction.value = false
+  }
+}
+
+const handleRecountAlbum = async () => {
+  recountingAlbum.value = true
+  try {
+    const updated = unwrapOpsResult(await recountAlbums())
+    message.success(`专辑计数已重算，共更新 ${updated} 个专辑`)
+  } catch (error: any) {
+    message.error('重算专辑计数失败：' + (error?.message || '系统错误'))
+  } finally {
+    recountingAlbum.value = false
+  }
+}
+
 onMounted(() => {
   fetchAll()
 })
@@ -407,6 +494,16 @@ onMounted(() => {
 
 .error-alert {
   margin-bottom: 16px;
+}
+
+.ops-card {
+  margin-bottom: 16px;
+}
+
+.ops-tip {
+  margin-bottom: 12px;
+  color: #888;
+  font-size: 13px;
 }
 
 .metric-grid {
