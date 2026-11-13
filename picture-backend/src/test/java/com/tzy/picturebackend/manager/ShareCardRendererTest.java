@@ -30,7 +30,7 @@ class ShareCardRendererTest {
         String html = renderer.renderPicture(picture("日落海边", "夏天傍晚的海边"), "https://img.example.com/picture/1", 1200);
 
         assertTrue(html.contains("<meta property=\"og:type\" content=\"article\">"));
-        assertTrue(html.contains("<meta property=\"og:title\" content=\"日落海边 - 云图库\">"));
+        assertTrue(html.contains("<meta property=\"og:title\" content=\"日落海边 - shifang37云图库\">"));
         assertTrue(html.contains("<meta property=\"og:description\" content=\"夏天傍晚的海边\">"));
         assertTrue(html.contains("<meta property=\"og:url\" content=\"https://img.example.com/picture/1\">"));
         assertTrue(html.contains("<link rel=\"canonical\" href=\"https://img.example.com/picture/1\">"));
@@ -60,7 +60,7 @@ class ShareCardRendererTest {
     void renderPicture_fallsBackToDefaultDescription() {
         String blank = renderer.renderPicture(picture("星空", "  "), "https://img.example.com/picture/1", 1200);
         // HtmlUtils.htmlEscape 会把 Latin-1 标点转成实体（· → &middot;），浏览器与爬虫都会正确解码
-        assertTrue(blank.contains("「星空」&middot; 来自云图库的图片分享"));
+        assertTrue(blank.contains("「星空」&middot; 来自shifang37云图库的图片分享"));
 
         String multiline = renderer.renderPicture(
                 picture("星空", "第一行\n第二行\r\n第三行"), "https://img.example.com/picture/1", 1200);
@@ -71,7 +71,7 @@ class ShareCardRendererTest {
     @DisplayName("渲染：名称缺失时用「未命名图片」，超长名称被截断")
     void renderPicture_handlesMissingAndLongName() {
         String unnamed = renderer.renderPicture(picture("   ", null), "", 1200);
-        assertTrue(unnamed.contains("<title>未命名图片 - 云图库</title>"));
+        assertTrue(unnamed.contains("<title>未命名图片 - shifang37云图库</title>"));
         // 没有详情页地址时不输出 og:url / canonical，但其它标签仍然齐全
         assertFalse(unnamed.contains("og:url"));
         assertFalse(unnamed.contains("rel=\"canonical\""));

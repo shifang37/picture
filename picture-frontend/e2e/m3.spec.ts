@@ -256,10 +256,10 @@ test('详情页分享：弹窗展示链接与二维码，并写入 OG 元信息'
   await page.goto('/picture/1')
 
   // 人类访问时由前端动态写 title 与 og:*，规则与后端分享页一致
-  await expect(page).toHaveTitle('日落海边 - 云图库')
+  await expect(page).toHaveTitle('日落海边 - shifang37云图库')
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
     'content',
-    '日落海边 - 云图库',
+    '日落海边 - shifang37云图库',
   )
   const ogImage = await page.locator('meta[property="og:image"]').getAttribute('content')
   // 分享封面固定用 JPEG，微信等平台对 WebP 支持不稳定
@@ -284,6 +284,6 @@ test('详情页分享：弹窗展示链接与二维码，并写入 OG 元信息'
   await page.getByTestId('share-modal').press('Escape')
   await expect(page.getByTestId('share-modal')).toBeHidden()
   await page.locator('.logo').click()
-  await expect(page).toHaveTitle('云图库')
+  await expect(page).toHaveTitle('shifang37云图库')
   await expect(page.locator('meta[property="og:title"]')).toHaveCount(0)
 })

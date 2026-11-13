@@ -1,6 +1,6 @@
 # picture-frontend
 
-云图库前端，基于 Vue 3 + Vite + TypeScript + Ant Design Vue。
+shifang37云图库前端，基于 Vue 3 + Vite + TypeScript + Ant Design Vue。
 
 ## 环境要求
 

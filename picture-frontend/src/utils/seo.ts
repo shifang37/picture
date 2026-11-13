@@ -7,12 +7,12 @@
  * 两侧的标题 / 描述 / 封面规则保持一致，避免分享出去的内容与页面显示不一致。
  */
 
-export const DEFAULT_SITE_NAME = '云图库'
+export const DEFAULT_SITE_NAME = 'shifang37云图库'
 
 /** 简介最大长度，与后端 ShareCardRenderer 保持一致 */
 export const MAX_DESCRIPTION_LENGTH = 200
 
-/** 标题最大长度：调用方已拼好「名称 - 云图库」时不再二次截断名称 */
+/** 标题最大长度：调用方已拼好「名称 - shifang37云图库」时不再二次截断名称 */
 export const MAX_TITLE_LENGTH = 100
 
 export interface SeoMeta {
@@ -24,7 +24,7 @@ export interface SeoMeta {
   image?: string
   /** 页面规范地址（og:url） */
   url?: string
-  /** 站点名，默认「云图库」 */
+  /** 站点名，默认「shifang37云图库」 */
   siteName?: string
 }
 

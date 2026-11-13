@@ -1,7 +1,7 @@
 <template>
   <div id="userRegisterPage">
-    <h2 class="title">鱼皮云图库 - 用户注册</h2>
-    <div class="desc">企业级智能协同云图库</div>
+    <h2 class="title">shifang37云图库 - 用户注册</h2>
+    <div class="desc">shifang37 的图片素材管理与分享平台</div>
     <a-form
       :model="formState"
       name="basic"

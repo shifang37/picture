@@ -4,7 +4,7 @@
       <RouterLink to="/">
         <div class="title-bar">
           <img class="logo" src="../assets/logo.svg" alt="logo" />
-          <div class="title">鱼皮云图库</div>
+          <div class="title">shifang37云图库</div>
         </div>
       </RouterLink>
     </a-col>

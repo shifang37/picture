@@ -186,7 +186,7 @@ test('首页在接口 Mock 下正常渲染', async ({ page }) => {
 
   await page.goto('/')
 
-  await expect(page.getByText('鱼皮云图库').first()).toBeVisible()
+  await expect(page.getByText('shifang37云图库').first()).toBeVisible()
   await expect(page.getByText('标签：')).toBeVisible()
   await expect(page.getByText('暂无图片，换个搜索条件试试')).toBeVisible()
 })
@@ -294,7 +294,7 @@ test('首页不会请求管理端页面代码', async ({ page }) => {
   await mockHomeApi(page, () => ({ records: [], total: 0 }))
 
   await page.goto('/')
-  await expect(page.getByText('鱼皮云图库').first()).toBeVisible()
+  await expect(page.getByText('shifang37云图库').first()).toBeVisible()
 
   expect(scriptUrls.some((url) => url.includes('/pages/admin/'))).toBe(false)
   expect(scriptUrls.some((url) => url.toLowerCase().includes('echarts'))).toBe(false)

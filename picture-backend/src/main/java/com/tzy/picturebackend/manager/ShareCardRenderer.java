@@ -22,7 +22,7 @@ public class ShareCardRenderer {
     /**
      * 站点名，出现在 og:site_name 与页面标题后缀
      */
-    public static final String SITE_NAME = "云图库";
+    public static final String SITE_NAME = "shifang37云图库";
 
     /**
      * 标题最多保留的字符数：社交平台的卡片标题普遍会截断，提前裁掉避免出现半个字

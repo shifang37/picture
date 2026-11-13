@@ -13,7 +13,7 @@
           <component :is="Component" v-if="!$route.meta.keepAlive" />
         </router-view>
       </a-layout-content>
-      <a-layout-footer class="footer"> tzy </a-layout-footer>
+      <a-layout-footer class="footer"> shifang37 </a-layout-footer>
     </a-layout>
   </div>
 </template>

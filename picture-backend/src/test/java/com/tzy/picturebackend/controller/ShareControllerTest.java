@@ -81,7 +81,7 @@ class ShareControllerTest {
                 .andExpect(header().string("Cache-Control", containsString("max-age=300")))
                 .andExpect(header().string("Cache-Control", containsString("public")))
                 .andExpect(content().string(containsString(
-                        "<meta property=\"og:title\" content=\"日落海边 - 云图库\">")))
+                        "<meta property=\"og:title\" content=\"日落海边 - shifang37云图库\">")))
                 .andExpect(content().string(containsString(
                         "<meta property=\"og:url\" content=\"" + BASE_URL + "/picture/1\">")))
                 .andExpect(content().string(containsString("查看图片详情")));

@@ -36,7 +36,7 @@ describe('truncateText', () => {
 describe('buildSeoMetaTags', () => {
   it('完整信息生成 OG 与 Twitter 标签', () => {
     const tags = buildSeoMetaTags({
-      title: '日落海边 - 云图库',
+      title: '日落海边 - shifang37云图库',
       description: '夏天傍晚的海边',
       image: 'https://cos.example.com/1.jpg?imageMogr2/thumbnail/1200x',
       url: 'https://img.example.com/picture/1',
@@ -45,7 +45,7 @@ describe('buildSeoMetaTags', () => {
     expect(tags).toContainEqual({
       attribute: 'property',
       key: 'og:title',
-      content: '日落海边 - 云图库',
+      content: '日落海边 - shifang37云图库',
     })
     expect(tags).toContainEqual({
       attribute: 'property',
@@ -109,20 +109,20 @@ describe('applySeoMeta / resetSeoMeta', () => {
 
   it('写入标题与 meta，重复调用不会产生重复标签', () => {
     applySeoMeta({
-      title: '日落海边 - 云图库',
+      title: '日落海边 - shifang37云图库',
       description: '夏天傍晚的海边',
       image: 'https://cos.example.com/1.jpg',
       url: 'https://img.example.com/picture/1',
     })
     applySeoMeta({
-      title: '日落海边 - 云图库',
+      title: '日落海边 - shifang37云图库',
       description: '夏天傍晚的海边',
       image: 'https://cos.example.com/1.jpg',
       url: 'https://img.example.com/picture/1',
     })
 
-    expect(document.title).toBe('日落海边 - 云图库')
-    expect(metaContent('property', 'og:title')).toBe('日落海边 - 云图库')
+    expect(document.title).toBe('日落海边 - shifang37云图库')
+    expect(metaContent('property', 'og:title')).toBe('日落海边 - shifang37云图库')
     expect(metaContent('name', 'twitter:card')).toBe('summary_large_image')
     expect(document.head.querySelectorAll('meta[property="og:title"]')).toHaveLength(1)
   })

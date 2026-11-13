@@ -128,7 +128,7 @@ const copyLink = async () => {
 const nativeShare = async () => {
   try {
     await navigator.share({
-      title: props.picture.name || '云图库图片',
+      title: props.picture.name || 'shifang37云图库图片',
       text: props.picture.introduction || '',
       url: shareUrl.value,
     })

@@ -256,7 +256,7 @@ const updateSeoMeta = () => {
   const href = window.location.href
   const withoutHash = href.split('#')[0] ?? href
   applySeoMeta({
-    title: `${name} - 云图库`,
+    title: `${name} - shifang37云图库`,
     description: picture.value.introduction || '',
     image: getShareImageUrl(picture.value.url),
     url: withoutHash.split('?')[0] ?? withoutHash,
