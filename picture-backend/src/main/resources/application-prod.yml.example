@@ -78,6 +78,11 @@ app:
       # 默认关闭；开启后按张计费，需 COS 桶已绑定数据万象
       enabled: ${MACHINE_REVIEW_ENABLED:false}
       mode: ${MACHINE_REVIEW_MODE:assist}
+    text:
+      # 默认关闭；审核图片名称与简介，按次计费
+      enabled: ${TEXT_REVIEW_ENABLED:false}
+      mode: ${TEXT_REVIEW_MODE:assist}
+      biz-type: ${TEXT_REVIEW_BIZ_TYPE:}
   ai:
     # 默认关闭；开启后按 token 计费，使用 DeepSeek 的 OpenAI 兼容接口
     enabled: ${AI_TAG_ENABLED:false}
