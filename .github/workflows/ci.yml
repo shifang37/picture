@@ -87,7 +87,8 @@ jobs:
       - name: 构建后端镜像
         run: docker build -t picture-backend:ci ./picture-backend
 
-      # 高危/严重漏洞让流水线失败；未修复的漏洞只展示不阻塞
+      # 高危/严重漏洞让流水线失败；未修复的漏洞只展示不阻塞；
+      # 无法在当前依赖线修复、已评估并登记的条目写在根目录 .trivyignore
       - name: 扫描后端镜像
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -96,6 +97,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           severity: 'HIGH,CRITICAL'
+          trivyignores: .trivyignore
 
       - name: 构建前端镜像
         run: docker build -t picture-frontend:ci ./picture-frontend
@@ -108,3 +110,4 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           severity: 'HIGH,CRITICAL'
+          trivyignores: .trivyignore

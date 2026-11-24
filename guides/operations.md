@@ -32,6 +32,32 @@
 - **COS 防盗链**：生产 `.env` 填写 `COS_REFERER_DOMAINS=your-domain.com`（多个用逗号分隔，可写 `*.your-domain.com`），应用启动时会调用 COS API 写入 Referer 白名单；需给密钥补 `cos:PutBucketReferer` 权限，写入失败只记日志不影响启动。`COS_REFERER_ALLOW_EMPTY` 默认 `false`，即直接打开 COS 原图地址会被拒绝
 - 生产环境建议启用 HTTPS，并将 `SESSION_COOKIE_SECURE=true`
 
+## 依赖安全与漏洞门禁
+
+CI 的 `images` job 会构建后端 / 前端镜像，并用 Trivy 扫描 `HIGH,CRITICAL` 漏洞：存在**有修复版本**的漏洞时流水线直接失败，没有修复版本的只展示（`ignore-unfixed: true`）。
+
+处理顺序固定为：
+
+1. **先升级**——能在当前依赖线修好的一律升级，不用忽略清单；
+2. **再登记**——确实修不了的才写进根目录 `.trivyignore`，且必须写明原因与跟踪计划，修好即删。
+
+当前版本的修复方式：
+
+| 依赖 | 漏洞数 | 处理 |
+| --- | --- | --- |
+| `tomcat-embed-core` | 6（含 CVE-2026-53404） | pom 里 `<tomcat.version>10.1.59` |
+| `netty-handler` / `netty-codec` | 2（含 CVE-2026-75595 CRITICAL） | `<netty.version>4.1.137.Final` |
+| `jackson-core` / `jackson-databind` | 5 | `<jackson-bom.version>2.21.7`（仍在 2.21 线） |
+| `amqp-client` | 4 | `dependencyManagement` 提到 5.34.0 |
+| `okhttp` / `logging-interceptor` / `okio` | 1（CVE-2021-0341） | 提到 4.9.2 / 4.9.2 / 2.8.0 |
+| `spring-webmvc` | 2（CVE-2026-47884 CRITICAL 等） | **无法修**：只在 Spring Framework 7 修，登记在 `.trivyignore`，等 Boot 4 迁移 |
+
+注意点：
+
+- `amqp-client` 5.34 自身声明 netty 4.2.x，但默认阻塞式客户端不走 netty，这里统一按 4.1.137.Final 解析，避免 4.1/4.2 两套共存；
+- `okhttp` 升到 4.x 会引入 kotlin-stdlib，且 `okio` 必须显式提到 2.8.0，否则被 `cos_api` 声明的 1.15.0 覆盖、运行期缺类；
+- 本地复现：`docker build -t picture-backend:ci ./picture-backend` 后执行 `trivy image --severity HIGH,CRITICAL --ignore-unfixed --ignorefile .trivyignore picture-backend:ci`。
+
 ## 可观测性（Prometheus / Grafana）
 
 所有业务异常和限流响应都是 **HTTP 200 + 业务码**，`http_server_requests` 里几乎全是 200，

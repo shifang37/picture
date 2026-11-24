@@ -28,6 +28,17 @@
     </scm>
     <properties>
         <java.version>21</java.version>
+
+        <!--
+          依赖安全修复：Boot 3.5 线已停在 3.5.16，这里按 CI 镜像扫描（Trivy）给出的
+          修复版本覆盖 Boot 管理的版本。能留在同一 minor 线的优先留在原线
+          （jackson 仍是 2.21.x），减少升级面。
+          必须升到 Spring Framework 7（Boot 4）才能修的 2 个 spring-webmvc 漏洞
+          登记在根目录 .trivyignore，升级 Boot 4 时删除。
+        -->
+        <tomcat.version>10.1.59</tomcat.version>
+        <netty.version>4.1.137.Final</netty.version>
+        <jackson-bom.version>2.21.7</jackson-bom.version>
     </properties>
     <dependencies>
         <dependency>
@@ -210,6 +221,36 @@
                 <version>3.5.18.1</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- 安全修复：5.34.0 修掉 amqp-client 的 4 个 HIGH。该版本自身声明
+                 netty 4.2.x，但默认阻塞式客户端不走 netty，这里统一按上面的
+                 netty.version（4.1.137.Final）解析，避免 4.1/4.2 两套共存。 -->
+            <dependency>
+                <groupId>com.rabbitmq</groupId>
+                <artifactId>amqp-client</artifactId>
+                <version>5.34.0</version>
+            </dependency>
+
+            <!-- 安全修复：cos_api 传递引入 okhttp 3.12.13（CVE-2021-0341），4.9.2 起修复。
+                 logging-interceptor 与主包必须同版本，否则 3.x/4.x 混用会缺类。 -->
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>okhttp</artifactId>
+                <version>4.9.2</version>
+            </dependency>
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>logging-interceptor</artifactId>
+                <version>4.9.2</version>
+            </dependency>
+
+            <!-- okhttp 4.9.2 需要 okio 2.x，而 cos_api 直接声明的 okio 1.15.0 层级更浅、
+                 会在依赖调解中胜出；不显式提到 2.8.0 会运行期缺类（NoSuchMethodError）。 -->
+            <dependency>
+                <groupId>com.squareup.okio</groupId>
+                <artifactId>okio</artifactId>
+                <version>2.8.0</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
