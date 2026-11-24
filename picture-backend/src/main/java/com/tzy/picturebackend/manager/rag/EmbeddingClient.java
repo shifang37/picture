@@ -27,6 +27,22 @@ public interface EmbeddingClient {
     List<float[]> embedImages(List<String> imageInputs);
 
     /**
+     * 把一条查询文本转成向量（搜索链路专用）。
+     * <p>
+     * 默认复用 {@link #embedTexts(List)}，保证测试替身与自定义实现无需额外改动；
+     * 真实实现可以覆盖为「单次调用 + 更短超时 + 不重试」，
+     * 避免搜索请求在 embedding 故障时被重试退避拖到数秒。
+     */
+    default float[] embedQuery(String text) {
+        List<float[]> vectors = embedTexts(List.of(text));
+        if (vectors == null || vectors.size() != 1) {
+            throw EmbeddingException.permanent("查询向量返回条数不合法: "
+                    + (vectors == null ? "null" : vectors.size()));
+        }
+        return vectors.get(0);
+    }
+
+    /**
      * 主模型标识（文本模型），用于状态页与落表
      */
     String model();

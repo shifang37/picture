@@ -8,6 +8,7 @@ import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.ThrowUtils;
+import com.tzy.picturebackend.manager.RagSearchCache;
 import com.tzy.picturebackend.manager.rag.EmbeddingClient;
 import com.tzy.picturebackend.manager.rag.EmbeddingText;
 import com.tzy.picturebackend.model.vo.rag.RagReindexVO;
@@ -45,6 +46,9 @@ public class RagController {
 
     @Resource
     private RagEmbeddingStateService ragEmbeddingStateService;
+
+    @Resource
+    private RagSearchCache ragSearchCache;
 
     @Resource
     private ObjectProvider<RagIndexService> ragIndexServiceProvider;
@@ -88,6 +92,10 @@ public class RagController {
         RagIndexService ragIndexService = requireVectorIndex();
         try {
             RagReindexVO result = ragIndexService.reindexAll();
+            if (result.isSwitched()) {
+                // 别名已经切到新索引，旧的 hybrid 结果不再可信
+                ragSearchCache.clear();
+            }
             return ResultUtils.success(result);
         } catch (RuntimeException e) {
             log.error("重建向量索引失败", e);

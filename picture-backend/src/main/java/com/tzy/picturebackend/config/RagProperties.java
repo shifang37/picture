@@ -79,6 +79,11 @@ public class RagProperties {
         private Duration timeout = Duration.ofSeconds(30);
 
         /**
+         * 查询向量化超时：搜索请求的延迟敏感，超时后直接回落 BM25，不占用请求线程
+         */
+        private Duration queryTimeout = Duration.ofSeconds(3);
+
+        /**
          * 失败后的最大重试次数（不含首次调用）
          */
         private int maxRetries = 2;
@@ -135,6 +140,17 @@ public class RagProperties {
          * 查询向量缓存秒数
          */
         private int queryCacheSeconds = 600;
+
+        /**
+         * 混合检索结果缓存秒数（单独 key，与公开列表缓存隔离；重建索引时清空）
+         */
+        private int resultCacheSeconds = 300;
+
+        /**
+         * 融合检索最多覆盖的前 N 条：分页深度超过此值说明用户已翻过融合窗口，
+         * 此时回落到 BM25，避免为了深分页把 kNN 的 k 放大到不可控。
+         */
+        private int maxTop = 500;
     }
 
     /**

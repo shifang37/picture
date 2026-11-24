@@ -17,9 +17,11 @@ import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.manager.PictureSearchSortException;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.picture.*;
+import com.tzy.picturebackend.model.dto.rag.RagSearchResult;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
+import com.tzy.picturebackend.model.enums.PictureSearchModeEnum;
 import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
 import com.tzy.picturebackend.model.vo.PictureBatchResult;
 import com.tzy.picturebackend.model.vo.PictureDetailVO;
@@ -30,6 +32,7 @@ import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.AiSuggestionService;
 import com.tzy.picturebackend.service.PictureSearchService;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.RagSearchService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -68,6 +71,9 @@ public class PictureController {
 
     @Resource
     private PictureSearchService pictureSearchService;
+
+    @Resource
+    private RagSearchService ragSearchService;
 
     @Resource
     private PictureDownloadManager pictureDownloadManager;
@@ -237,16 +243,33 @@ public class PictureController {
         pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
         // 零结果率只统计真正发生检索的请求：带 searchText 且未命中列表缓存
         boolean searched = StrUtil.isNotBlank(pictureQueryRequest.getSearchText());
-        // 公开列表是唯一允许缓存的列表；我的图片、管理列表、详情页都不缓存
-        PictureListPage cached = pictureListCache.get(pictureQueryRequest);
-        if (cached != null) {
-            return ResultUtils.success(cached.toPage());
+        // 检索模式：默认 keyword，行为与接入 RAG 前完全一致
+        PictureSearchModeEnum requestedMode = resolveSearchMode(pictureQueryRequest);
+        boolean ragMode = requestedMode != PictureSearchModeEnum.KEYWORD;
+        // 公开列表缓存只服务 keyword：它的 key 没有检索模式维度，混用会把 hybrid 结果当成 keyword 返回
+        if (!ragMode) {
+            PictureListPage cached = pictureListCache.get(pictureQueryRequest);
+            if (cached != null) {
+                return ResultUtils.success(cached.toPage());
+            }
         }
         // 启用 Elasticsearch 时由索引召回 id，再回 MySQL 取数据；索引不可用时自动回落
         Page<PictureVO> pictureVOPage = null;
-        // 实际提供数据的路径：ES 成功为 es，未启用或异常回落为 mysql
+        // 实际提供数据的路径：es / hybrid / semantic / mysql
         String searchMode = "mysql";
-        if (pictureSearchService.enabled()) {
+        if (ragMode) {
+            try {
+                RagSearchResult result = requestedMode == PictureSearchModeEnum.HYBRID
+                        ? ragSearchService.hybrid(pictureQueryRequest)
+                        : ragSearchService.semantic(pictureQueryRequest);
+                pictureVOPage = toPictureVOPage(result.ids(), request, current, size);
+                searchMode = result.mode();
+            } catch (RuntimeException e) {
+                // 服务层已经把「向量化失败 / kNN 异常」降级为 BM25，能走到这里说明 BM25 也不可用
+                log.warn("RAG 检索失败，回落到 MySQL 查询, mode={}, searchText={}",
+                        requestedMode.getValue(), pictureQueryRequest.getSearchText(), e);
+            }
+        } else if (pictureSearchService.enabled()) {
             try {
                 pictureVOPage = searchPublicPictureVOPage(pictureQueryRequest, request, current, size);
                 searchMode = "es";
@@ -269,8 +292,33 @@ public class PictureController {
             // 按 total 判断命中：翻页超出末页不算零结果
             pictureMetrics.searchResult(pictureVOPage.getTotal() > 0, searchMode);
         }
-        pictureListCache.put(pictureQueryRequest, PictureListPage.of(pictureVOPage));
+        if (!ragMode) {
+            pictureListCache.put(pictureQueryRequest, PictureListPage.of(pictureVOPage));
+        }
         return ResultUtils.success(pictureVOPage);
+    }
+
+    /**
+     * 解析检索模式：非法值由 {@code @Valid} 拦截（40000），这里只处理「不可用」的降级。
+     * <p>
+     * hybrid / semantic 需要 RAG 与 ES 同时开启；没有搜索词时两者没有意义，
+     * 统一按 keyword 处理，保证关闭 RAG 后行为与改动前逐条一致。
+     */
+    private PictureSearchModeEnum resolveSearchMode(PictureQueryRequest request) {
+        PictureSearchModeEnum mode = PictureSearchModeEnum.fromValue(request.getSearchMode());
+        if (mode == PictureSearchModeEnum.KEYWORD) {
+            return mode;
+        }
+        if (StrUtil.isBlank(request.getSearchText())) {
+            log.debug("没有搜索词的 hybrid/semantic 请求按 keyword 处理, mode={}", mode.getValue());
+            return PictureSearchModeEnum.KEYWORD;
+        }
+        if (!ragSearchService.enabled()) {
+            log.warn("RAG 未启用或搜索后端不是 ES，searchMode={} 按 keyword 处理", mode.getValue());
+            pictureMetrics.ragDegraded("disabled");
+            return PictureSearchModeEnum.KEYWORD;
+        }
+        return mode;
     }
 
     /**
@@ -282,7 +330,17 @@ public class PictureController {
     private Page<PictureVO> searchPublicPictureVOPage(PictureQueryRequest pictureQueryRequest,
                                                       HttpServletRequest request,
                                                       long current, long size) {
-        Page<Long> idPage = pictureSearchService.searchPictureIds(pictureQueryRequest);
+        return toPictureVOPage(pictureSearchService.searchPictureIds(pictureQueryRequest), request, current, size);
+    }
+
+    /**
+     * 按索引返回的 id 顺序回表、过滤并转 VO。
+     * <p>
+     * keyword 与 hybrid / semantic 复用同一段逻辑，避免两套过滤规则产生权限差异：
+     * 索引只会「多召回」已删除或刚被下架的图片，这里统一按审核状态剔除。
+     */
+    private Page<PictureVO> toPictureVOPage(Page<Long> idPage, HttpServletRequest request,
+                                            long current, long size) {
         List<Long> ids = idPage.getRecords();
         if (CollUtil.isEmpty(ids)) {
             return new Page<>(current, size, idPage.getTotal());

@@ -249,6 +249,35 @@ class DashScopeEmbeddingClientTest {
     }
 
     @Test
+    @DisplayName("查询向量：5xx 不重试，快速失败交给 BM25 兜底")
+    void embedQuery_doesNotRetryOn5xx() {
+        scriptedResponses.add(new StubResponse(503, "{\"error\":\"busy\"}", null));
+
+        EmbeddingException exception = assertThrows(EmbeddingException.class,
+                () -> client.embedQuery("海边日落"));
+
+        assertTrue(exception.isRetryable());
+        assertEquals(1, requestCount.get(), "查询向量不允许重试");
+    }
+
+    @Test
+    @DisplayName("查询向量：使用 query-timeout，超时快速失败")
+    void embedQuery_usesQueryTimeout() {
+        properties.getEmbedding().setQueryTimeout(Duration.ofMillis(100));
+        client = newClient();
+        responseDelayMillis.set(500);
+        long start = System.nanoTime();
+
+        EmbeddingException exception = assertThrows(EmbeddingException.class,
+                () -> client.embedQuery("海边日落"));
+
+        long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
+        assertFalse(exception.isRetryable());
+        assertTrue(exception.getMessage().contains("超时"), exception.getMessage());
+        assertTrue(elapsedMillis < 450, "查询向量应在 ~100ms 内超时，实际 " + elapsedMillis + "ms");
+    }
+
+    @Test
     @DisplayName("图片：走多模态接口，一次只传一张（接口限制 batch size=[1,1]）")
     void embedImages_usesMultimodalEndpointOneByOne() {
         List<float[]> vectors = client.embedImages(List.of("https://example.com/a.jpg",

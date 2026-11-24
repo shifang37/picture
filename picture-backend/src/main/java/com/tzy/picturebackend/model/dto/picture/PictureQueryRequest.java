@@ -4,6 +4,7 @@ import com.tzy.picturebackend.common.PageRequest;
 import com.tzy.picturebackend.constant.PictureTagConstant;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -77,6 +78,16 @@ public class PictureQueryRequest extends PageRequest implements Serializable {
      */
     @Size(max = 256, message = "搜索词不能超过 256 个字符")
     private String searchText;
+
+    /**
+     * 检索模式：keyword（默认）/ hybrid / semantic。
+     * <p>
+     * 只有 RAG 与 ES 搜索同时开启时 hybrid / semantic 才生效，否则按 keyword 处理并 WARN；
+     * 非法值返回 40000（与其它参数校验一致）。
+     */
+    @Pattern(regexp = "keyword|hybrid|semantic",
+            message = "检索模式只能是 keyword、hybrid 或 semantic")
+    private String searchMode;
 
     /**
      * 用户 id

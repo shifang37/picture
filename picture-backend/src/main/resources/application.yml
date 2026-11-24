@@ -151,6 +151,8 @@ app:
       # 单次请求最多 10 条；批越大越省请求，但失败重试成本也越高
       batch-size: ${RAG_EMBED_BATCH:10}
       timeout: ${RAG_EMBED_TIMEOUT:30s}
+      # 查询向量化超时：搜索延迟敏感，超时直接回落 BM25
+      query-timeout: ${RAG_EMBED_QUERY_TIMEOUT:3s}
       max-retries: ${RAG_EMBED_RETRIES:2}
       # 图片向量输入：base64（默认，兼容私密图/防盗链）| url
       image-input: ${RAG_IMAGE_INPUT:base64}
@@ -161,12 +163,17 @@ app:
       # 全量重建时图片向量化并发度（图片接口一次只能传一张）
       reindex-threads: ${RAG_REINDEX_THREADS:3}
     search:
+      # 融合算法：当前只实现 rrf（Reciprocal Rank Fusion）
       fusion: rrf
       rrf-k: 60
       bm25-top: 50
       knn-top: 50
       num-candidates: 200
+      # 查询向量本地缓存（Caffeine）与混合检索结果缓存（Redis）的秒数
       query-cache-seconds: 600
+      result-cache-seconds: ${RAG_RESULT_CACHE_SECONDS:300}
+      # 融合窗口：分页深度超过该值说明已翻过 kNN 可覆盖的范围，回落 BM25
+      max-top: ${RAG_MAX_FUSION_TOP:500}
     ask:
       daily-limit: ${RAG_ASK_DAILY_LIMIT:10}
       top-k: 8

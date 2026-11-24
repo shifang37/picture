@@ -14,6 +14,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureListPage;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUpdateRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
+import com.tzy.picturebackend.model.dto.rag.RagSearchResult;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.PictureAiSuggestionVO;
@@ -26,6 +27,7 @@ import com.tzy.picturebackend.model.vo.PictureVO;
 import com.tzy.picturebackend.service.AiSuggestionService;
 import com.tzy.picturebackend.service.PictureSearchService;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.RagSearchService;
 import com.tzy.picturebackend.service.UserService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -78,6 +80,8 @@ class PictureControllerTest {
 
     private PictureSearchService pictureSearchService;
 
+    private RagSearchService ragSearchService;
+
     private PictureDownloadManager pictureDownloadManager;
 
     private SimpleMeterRegistry meterRegistry;
@@ -90,6 +94,7 @@ class PictureControllerTest {
         pictureEventPublisher = mock(PictureEventPublisher.class);
         aiSuggestionService = mock(AiSuggestionService.class);
         pictureSearchService = mock(PictureSearchService.class);
+        ragSearchService = mock(RagSearchService.class);
         pictureDownloadManager = mock(PictureDownloadManager.class);
         meterRegistry = new SimpleMeterRegistry();
         PictureController pictureController = new PictureController();
@@ -99,6 +104,7 @@ class PictureControllerTest {
         ReflectionTestUtils.setField(pictureController, "pictureEventPublisher", pictureEventPublisher);
         ReflectionTestUtils.setField(pictureController, "aiSuggestionService", aiSuggestionService);
         ReflectionTestUtils.setField(pictureController, "pictureSearchService", pictureSearchService);
+        ReflectionTestUtils.setField(pictureController, "ragSearchService", ragSearchService);
         ReflectionTestUtils.setField(pictureController, "pictureDownloadManager", pictureDownloadManager);
         ReflectionTestUtils.setField(pictureController, "pictureMetrics", new PictureMetrics(meterRegistry));
         mockMvc = MockMvcBuilders.standaloneSetup(pictureController)
@@ -614,6 +620,156 @@ class PictureControllerTest {
         verifyNoInteractions(pictureSearchService);
     }
 
+    // ==================== 混合检索（M3） ====================
+
+    @Test
+    @DisplayName("检索模式：非法值返回 40000，不触发任何检索")
+    void listPictureVOByPage_rejectsUnknownSearchMode() throws Exception {
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"日落\",\"searchMode\":\"magic\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verifyNoInteractions(ragSearchService);
+        verifyNoInteractions(pictureSearchService);
+        verify(pictureListCache, never()).get(any());
+    }
+
+    @Test
+    @DisplayName("混合检索：走 hybrid 分支，跳过公开列表缓存，按融合顺序回表")
+    @SuppressWarnings("unchecked")
+    void listPictureVOByPage_usesHybridWhenEnabled() throws Exception {
+        when(ragSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 2);
+        idPage.setRecords(List.of(2L, 1L));
+        when(ragSearchService.hybrid(any()))
+                .thenReturn(new RagSearchResult(idPage, "hybrid", null));
+        when(pictureService.listByIds(any()))
+                .thenReturn(List.of(picture(1L, "第一张", 1), picture(2L, "第二张", 1)));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10, 2));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"暖色调日落\",\"searchMode\":\"hybrid\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        ArgumentCaptor<Page<Picture>> pageCaptor = ArgumentCaptor.forClass(Page.class);
+        verify(pictureService).getPictureVOPage(pageCaptor.capture(), any());
+        assertEquals(List.of(2L, 1L), pageCaptor.getValue().getRecords().stream()
+                .map(Picture::getId).toList(), "必须保持 RRF 融合后的顺序");
+        // 混合结果不能进公开列表缓存，否则 keyword 会命中 hybrid 的顺序
+        verify(pictureListCache, never()).get(any());
+        verify(pictureListCache, never()).put(any(), any());
+        verifyNoInteractions(pictureSearchService);
+        assertEquals(1.0, searchCount(true, "hybrid"));
+        assertEquals(0.0, totalDegradedCount());
+    }
+
+    @Test
+    @DisplayName("混合检索：RAG 关闭时按 keyword 处理并记 degraded=disabled")
+    @SuppressWarnings("unchecked")
+    void listPictureVOByPage_fallsBackToKeywordWhenRagDisabled() throws Exception {
+        when(ragSearchService.enabled()).thenReturn(false);
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 1);
+        idPage.setRecords(List.of(1L));
+        when(pictureSearchService.searchPictureIds(any())).thenReturn(idPage);
+        when(pictureService.listByIds(any())).thenReturn(List.of(picture(1L, "海边日落", 1)));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10, 1));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"日落\",\"searchMode\":\"hybrid\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(ragSearchService, never()).hybrid(any());
+        assertEquals(1.0, searchCount(true, "es"));
+        assertEquals(1.0, ragDegradedCount("disabled"));
+    }
+
+    @Test
+    @DisplayName("混合检索：服务内部降级到 BM25 时按实际路径记 mode=es")
+    @SuppressWarnings("unchecked")
+    void listPictureVOByPage_recordsEsModeWhenHybridDegrades() throws Exception {
+        when(ragSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 1);
+        idPage.setRecords(List.of(1L));
+        when(ragSearchService.hybrid(any()))
+                .thenReturn(new RagSearchResult(idPage, "es", "embed_error"));
+        when(pictureService.listByIds(any())).thenReturn(List.of(picture(1L, "海边日落", 1)));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10, 1));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"日落\",\"searchMode\":\"hybrid\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        assertEquals(1.0, searchCount(true, "es"));
+        assertEquals(0.0, searchCount(true, "hybrid"));
+        verify(pictureListCache, never()).put(any(), any());
+    }
+
+    @Test
+    @DisplayName("混合检索：服务层异常时继续回落 MySQL，HTTP 仍 200")
+    void listPictureVOByPage_fallsBackToMysqlWhenHybridFails() throws Exception {
+        when(ragSearchService.enabled()).thenReturn(true);
+        when(ragSearchService.hybrid(any())).thenThrow(new IllegalStateException("bm25 down"));
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"日落\",\"searchMode\":\"hybrid\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verify(pictureService).pagePictures(any(Page.class), any());
+        assertEquals(1.0, searchCount(false, "mysql"));
+        verify(pictureListCache, never()).put(any(), any());
+    }
+
+    @Test
+    @DisplayName("混合检索：没有搜索词时按 keyword 处理，不调用 RAG")
+    void listPictureVOByPage_ignoresHybridWithoutSearchText() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchMode\":\"hybrid\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        verifyNoInteractions(ragSearchService);
+        verify(pictureListCache).put(any(), any());
+    }
+
+    @Test
+    @DisplayName("语义检索：searchMode=semantic 调用 semantic 分支")
+    void listPictureVOByPage_usesSemantic() throws Exception {
+        when(ragSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 0);
+        idPage.setRecords(List.of());
+        when(ragSearchService.semantic(any()))
+                .thenReturn(new RagSearchResult(idPage, "semantic", null));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"孤独的山\",\"searchMode\":\"semantic\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        verify(ragSearchService).semantic(any());
+        verify(ragSearchService, never()).hybrid(any());
+        assertEquals(1.0, searchCount(false, "semantic"));
+    }
+
     @Test
     @DisplayName("批量审核：返回成功与失败统计")
     void batchReview_returnsResult() throws Exception {
@@ -777,6 +933,22 @@ class PictureControllerTest {
      */
     private double totalSearchCount() {
         return meterRegistry.find(PictureMetrics.SEARCH_RESULT).counters().stream()
+                .mapToDouble(Counter::count)
+                .sum();
+    }
+
+    /**
+     * 指定降级原因的计数；指标未注册时视为 0
+     */
+    private double ragDegradedCount(String reason) {
+        Counter counter = meterRegistry.find(PictureMetrics.RAG_DEGRADED)
+                .tag("reason", reason)
+                .counter();
+        return counter == null ? 0.0 : counter.count();
+    }
+
+    private double totalDegradedCount() {
+        return meterRegistry.find(PictureMetrics.RAG_DEGRADED).counters().stream()
                 .mapToDouble(Counter::count)
                 .sum();
     }

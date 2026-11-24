@@ -26,6 +26,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code picture.search.result} → {@code picture_search_result_total{hit,mode}}</li>
  *   <li>{@code picture.rag.embed} → {@code picture_rag_embed_total{kind,result}} / {@code picture_rag_embed_seconds{kind}}</li>
  *   <li>{@code picture.rag.index} → {@code picture_rag_index_total{action,result}}</li>
+ *   <li>{@code picture.rag.search} → {@code picture_rag_search_seconds{mode}}</li>
+ *   <li>{@code picture.rag.degraded} → {@code picture_rag_degraded_total{reason}}</li>
  * </ul>
  * <p>
  * 为什么不统计 HTTP 5xx：{@code GlobalExceptionHandler} 与限流响应都返回 HTTP 200 + 业务码，
@@ -103,6 +105,16 @@ public class PictureMetrics {
      * 向量索引维护计数（action=write/delete/reindex/guard，result=ok/skip/fail/stale）
      */
     public static final String RAG_INDEX = "picture.rag.index";
+
+    /**
+     * 混合 / 语义检索耗时（mode=hybrid/semantic）
+     */
+    public static final String RAG_SEARCH = "picture.rag.search";
+
+    /**
+     * RAG 降级计数（reason=embed_timeout/embed_error/es_error/disabled/...）
+     */
+    public static final String RAG_DEGRADED = "picture.rag.degraded";
 
     /**
      * 分享卡片渲染计数（result=rendered/not_found）
@@ -337,6 +349,37 @@ public class PictureMetrics {
                 .description("RAG 向量索引维护次数")
                 .tag("action", action == null ? "unknown" : action)
                 .tag("result", result == null ? "unknown" : result)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次混合 / 语义检索的耗时。
+     *
+     * @param mode   请求的检索模式：hybrid / semantic
+     * @param nanos  耗时（纳秒）
+     */
+    public void ragSearch(String mode, long nanos) {
+        if (nanos < 0) {
+            return;
+        }
+        Timer.builder(RAG_SEARCH)
+                .description("RAG 混合/语义检索耗时")
+                .tag("mode", mode == null ? "unknown" : mode)
+                .publishPercentileHistogram()
+                .register(registry)
+                .record(nanos, TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * 记录一次 RAG 降级：结果实际来自 BM25，提示调用方与值班同学。
+     *
+     * @param reason embed_timeout / embed_error / es_error / disabled / unsupported_filter / deep_page
+     */
+    public void ragDegraded(String reason) {
+        Counter.builder(RAG_DEGRADED)
+                .description("RAG 检索降级次数")
+                .tag("reason", reason == null ? "unknown" : reason)
                 .register(registry)
                 .increment();
     }

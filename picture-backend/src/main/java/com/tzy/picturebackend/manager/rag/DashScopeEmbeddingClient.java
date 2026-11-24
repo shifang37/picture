@@ -68,6 +68,11 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
 
     private final HttpClient httpClient;
 
+    /**
+     * 查询向量专用客户端：更短的连接超时，避免搜索请求被网络问题拖住
+     */
+    private final HttpClient queryHttpClient;
+
     public DashScopeEmbeddingClient(RagProperties ragProperties, ObjectMapper objectMapper,
                                     PictureMetrics pictureMetrics) {
         this.embedding = ragProperties.getEmbedding();
@@ -83,9 +88,8 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
             throw new IllegalStateException("app.rag.embedding 的文本与图片向量维度必须一致: textDim="
                     + embedding.getTextDim() + ", imageDim=" + embedding.getImageDim());
         }
-        Duration timeout = embedding.getTimeout() == null
-                ? Duration.ofSeconds(30) : embedding.getTimeout();
-        this.httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(requestTimeout()).build();
+        this.queryHttpClient = HttpClient.newBuilder().connectTimeout(queryTimeout()).build();
     }
 
     @Override
@@ -95,7 +99,8 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
         }
         List<float[]> result = new ArrayList<>(texts.size());
         for (List<String> batch : batches(texts)) {
-            result.addAll(callBatch("text", TEXT_PATH, buildTextBody(batch), batch.size()));
+            result.addAll(callBatch(httpClient, "text", TEXT_PATH, buildTextBody(batch),
+                    batch.size(), requestTimeout(), embedding.getMaxRetries()));
         }
         return result;
     }
@@ -110,10 +115,26 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
         // InvalidParameter: image batch size can should be [1, 1]），因此逐张调用；
         // 全量重建时的并发由 RagIndexService 控制，不在这里偷用 batch。
         for (String imageInput : imageInputs) {
-            result.addAll(callBatch("image", MULTIMODAL_PATH,
-                    buildImageBody(List.of(imageInput)), 1));
+            result.addAll(callBatch(httpClient, "image", MULTIMODAL_PATH,
+                    buildImageBody(List.of(imageInput)), 1, requestTimeout(), embedding.getMaxRetries()));
         }
         return result;
+    }
+
+    /**
+     * 查询向量：单次调用、短超时、不重试。
+     * <p>
+     * 搜索对延迟敏感：重试退避会把一次不可用的 embedding 拖成数秒，
+     * 而混检本身有 BM25 兜底，快速失败比等待重试更划算。
+     */
+    @Override
+    public float[] embedQuery(String text) {
+        if (StrUtil.isBlank(text)) {
+            throw EmbeddingException.permanent("查询文本为空");
+        }
+        List<float[]> vectors = callBatch(queryHttpClient, "text", TEXT_PATH,
+                buildTextBody(List.of(text)), 1, queryTimeout(), 0);
+        return vectors.get(0);
     }
 
     @Override
@@ -167,19 +188,20 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
      * <p>
      * 每次尝试都记一次指标：重试前的失败也是一次真实的调用失败，便于告警。
      */
-    private List<float[]> callBatch(String kind, String path, ObjectNode body, int expectedCount) {
+    private List<float[]> callBatch(HttpClient client, String kind, String path, ObjectNode body,
+                                    int expectedCount, Duration timeout, int maxRetries) {
         int attempt = 0;
-        int maxRetries = Math.max(0, embedding.getMaxRetries());
+        int retries = Math.max(0, maxRetries);
         while (true) {
             long startNanos = System.nanoTime();
             try {
-                JsonNode response = doPost(path, body);
+                JsonNode response = doPost(client, path, body, timeout);
                 List<float[]> vectors = parseVectors(response, kind, expectedCount);
                 pictureMetrics.ragEmbed(kind, true, System.nanoTime() - startNanos);
                 return vectors;
             } catch (EmbeddingException e) {
                 pictureMetrics.ragEmbed(kind, false, System.nanoTime() - startNanos);
-                if (!e.isRetryable() || attempt >= maxRetries) {
+                if (!e.isRetryable() || attempt >= retries) {
                     throw e;
                 }
                 attempt++;
@@ -191,6 +213,14 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
         }
     }
 
+    private Duration requestTimeout() {
+        return embedding.getTimeout() == null ? Duration.ofSeconds(30) : embedding.getTimeout();
+    }
+
+    private Duration queryTimeout() {
+        return embedding.getQueryTimeout() == null ? Duration.ofSeconds(3) : embedding.getQueryTimeout();
+    }
+
     private long retryDelayMillis(EmbeddingException e, int attempt) {
         if (e.getRetryAfterMillis() > 0) {
             return Math.min(e.getRetryAfterMillis(), MAX_RETRY_AFTER_MILLIS);
@@ -198,7 +228,7 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
         return Math.max(0L, embedding.getRetryDelayMillis() * attempt);
     }
 
-    private JsonNode doPost(String path, ObjectNode body) {
+    private JsonNode doPost(HttpClient client, String path, ObjectNode body, Duration timeout) {
         if (StrUtil.isBlank(embedding.getApiKey())) {
             throw EmbeddingException.permanent("未配置 DASHSCOPE_API_KEY，无法调用百炼向量化");
         }
@@ -208,8 +238,6 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
         } catch (JsonProcessingException e) {
             throw EmbeddingException.permanent("构造向量化请求失败", e);
         }
-        Duration timeout = embedding.getTimeout() == null
-                ? Duration.ofSeconds(30) : embedding.getTimeout();
         HttpRequest request = HttpRequest.newBuilder(buildEndpoint(path))
                 .timeout(timeout)
                 .header("Content-Type", "application/json")
@@ -218,7 +246,7 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
                 .build();
         HttpResponse<String> response;
         try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (HttpTimeoutException e) {
             // 超时通常意味着服务端已经拥塞，重试只会放大压力
             throw EmbeddingException.permanent("向量化请求超时", e);

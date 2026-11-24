@@ -2,6 +2,7 @@ package com.tzy.picturebackend.controller;
 
 import com.tzy.picturebackend.config.RagProperties;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
+import com.tzy.picturebackend.manager.RagSearchCache;
 import com.tzy.picturebackend.manager.rag.EmbeddingText;
 import com.tzy.picturebackend.manager.rag.RecordingEmbeddingClient;
 import com.tzy.picturebackend.metrics.PictureMetrics;
@@ -19,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -38,12 +40,15 @@ class RagControllerTest {
 
     private RagEmbeddingStateService ragEmbeddingStateService;
 
+    private RagSearchCache ragSearchCache;
+
     @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
         ragProperties = new RagProperties();
         ragIndexService = mock(RagIndexService.class);
         ragEmbeddingStateService = mock(RagEmbeddingStateService.class);
+        ragSearchCache = mock(RagSearchCache.class);
         ObjectProvider<RagIndexService> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
         RagController controller = new RagController();
@@ -51,6 +56,7 @@ class RagControllerTest {
         ReflectionTestUtils.setField(controller, "embeddingClient", new RecordingEmbeddingClient());
         ReflectionTestUtils.setField(controller, "embeddingText", new EmbeddingText());
         ReflectionTestUtils.setField(controller, "ragEmbeddingStateService", ragEmbeddingStateService);
+        ReflectionTestUtils.setField(controller, "ragSearchCache", ragSearchCache);
         ReflectionTestUtils.setField(controller, "ragIndexServiceProvider", provider);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler(
@@ -95,6 +101,7 @@ class RagControllerTest {
         ReflectionTestUtils.setField(controller, "embeddingClient", new RecordingEmbeddingClient());
         ReflectionTestUtils.setField(controller, "embeddingText", new EmbeddingText());
         ReflectionTestUtils.setField(controller, "ragEmbeddingStateService", ragEmbeddingStateService);
+        ReflectionTestUtils.setField(controller, "ragSearchCache", ragSearchCache);
         ReflectionTestUtils.setField(controller, "ragIndexServiceProvider", provider);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler(
@@ -135,6 +142,7 @@ class RagControllerTest {
         ReflectionTestUtils.setField(controller, "embeddingClient", new RecordingEmbeddingClient());
         ReflectionTestUtils.setField(controller, "embeddingText", new EmbeddingText());
         ReflectionTestUtils.setField(controller, "ragEmbeddingStateService", ragEmbeddingStateService);
+        ReflectionTestUtils.setField(controller, "ragSearchCache", ragSearchCache);
         ReflectionTestUtils.setField(controller, "ragIndexServiceProvider", provider);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler(
@@ -147,5 +155,7 @@ class RagControllerTest {
                 .andExpect(jsonPath("$.data.indexed").value(108))
                 .andExpect(jsonPath("$.data.failed").value(0))
                 .andExpect(jsonPath("$.data.switched").value(true));
+
+        verify(ragSearchCache).clear();
     }
 }
