@@ -4,6 +4,7 @@ import com.tzy.picturebackend.annotation.AuthCheck;
 import com.tzy.picturebackend.common.BaseResponse;
 import com.tzy.picturebackend.common.ResultUtils;
 import com.tzy.picturebackend.config.RagProperties;
+import com.tzy.picturebackend.config.SearchProperties;
 import com.tzy.picturebackend.constant.UserConstant;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
@@ -14,6 +15,7 @@ import com.tzy.picturebackend.manager.rag.EmbeddingText;
 import com.tzy.picturebackend.model.dto.rag.RagAskRequest;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.vo.rag.RagAskResponse;
+import com.tzy.picturebackend.model.vo.rag.RagConfigVO;
 import com.tzy.picturebackend.model.vo.rag.RagReindexVO;
 import com.tzy.picturebackend.model.vo.rag.RagStatusVO;
 import com.tzy.picturebackend.service.RagAskService;
@@ -51,6 +53,9 @@ public class RagController {
     private RagProperties ragProperties;
 
     @Resource
+    private SearchProperties searchProperties;
+
+    @Resource
     private EmbeddingClient embeddingClient;
 
     @Resource
@@ -84,6 +89,25 @@ public class RagController {
                                             HttpServletRequest request) {
         User loginUser = userService.getLoginUser(request);
         return ResultUtils.success(ragAskService.ask(askRequest, loginUser.getId()));
+    }
+
+    /**
+     * RAG 前端开关配置（公开）。
+     * <p>
+     * 只返回能否使用 hybrid / ask 与公开的每日限额，供首页占位文案、问答入口和管理端状态卡
+     * 在运行时判断；不返回模型地址、Key 等敏感配置。RAG 关闭时同样返回 200，
+     * 前端据此保持改造前的行为。
+     */
+    @GetMapping("/config")
+    public BaseResponse<RagConfigVO> config() {
+        boolean vectorEnabled = ragProperties.isEnabled() && searchProperties.isElasticsearchEnabled();
+        RagConfigVO vo = new RagConfigVO();
+        vo.setEnabled(ragProperties.isEnabled());
+        vo.setHybridSearch(vectorEnabled);
+        vo.setAskEnabled(vectorEnabled);
+        vo.setAskDailyLimit(ragProperties.getAsk().getDailyLimit());
+        vo.setAskTopK(ragProperties.getAsk().getTopK());
+        return ResultUtils.success(vo);
     }
 
     /**

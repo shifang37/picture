@@ -55,11 +55,15 @@ import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { useNotificationStore } from '@/stores/useNotificationStore'
+import { useRagConfig } from '@/composables/useRagConfig'
 import { userLogout } from '@/api/userController'
 import NotificationBell from '@/components/NotificationBell.vue'
 
 const loginUserStore = useLoginUserStore()
 const notificationStore = useNotificationStore()
+// 顶栏「图库问答」入口只在 RAG 开启时出现；配置失败时按关闭处理
+const { ragConfig, loadRagConfig } = useRagConfig()
+loadRagConfig()
 
 // 登录后启动未读轮询、登出后停止：顶栏铃铛在任何页面都可用
 watch(
@@ -85,6 +89,11 @@ const originItems = [
     icon: () => h(HomeOutlined),
     label: '主页',
     title: '主页',
+  },
+  {
+    key: '/ask',
+    label: '图库问答',
+    title: '图库问答',
   },
   {
     key: '/add_picture',
@@ -164,6 +173,10 @@ const filterMenus = (menus = [] as MenuProps['items']) => {
         menuKey === '/my/albums') &&
       !loginUser?.id
     ) {
+      return false
+    }
+    // 图库问答：RAG 未开启时不展示入口；开启但未登录也不展示（路由本身仍会拦截）
+    if (menuKey === '/ask' && (!ragConfig.value.askEnabled || !loginUser?.id)) {
       return false
     }
     return true

@@ -20,6 +20,13 @@ const router = createRouter({
       meta: { keepAlive: true },
     },
     {
+      path: '/ask',
+      name: '图库问答',
+      component: () => import('@/pages/AskPage.vue'),
+      // 问答按用户每日限额计费，必须登录
+      meta: { requiresLogin: true },
+    },
+    {
       path: '/user/login',
       name: '用户登录',
       component: () => import('@/pages/user/UserLoginPage.vue'),

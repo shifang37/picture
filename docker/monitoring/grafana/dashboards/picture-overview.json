@@ -1043,6 +1043,137 @@
       ],
       "title": "EXIF 处理速率（方向纠正 / 元数据剥离）",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 76
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(picture_search_result_total{job=\"picture-backend\", hit=\"0\"}[5m])) / clamp_min(sum(rate(picture_search_result_total{job=\"picture-backend\"}[5m])), 0.000001)",
+          "legendFormat": "整体零结果率",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (mode) (rate(picture_search_result_total{job=\"picture-backend\", hit=\"0\"}[5m])) / clamp_min(sum by (mode) (rate(picture_search_result_total{job=\"picture-backend\"}[5m])), 0.000001)",
+          "legendFormat": "{{mode}} 零结果率",
+          "refId": "B"
+        }
+      ],
+      "title": "搜索零结果率（按检索路径）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "max": 1,
+          "min": 0,
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 76
+      },
+      "id": 26,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (mode) (rate(picture_search_result_total{job=\"picture-backend\", hit=\"1\"}[5m])) / clamp_min(sum by (mode) (rate(picture_search_result_total{job=\"picture-backend\"}[5m])), 0.000001)",
+          "legendFormat": "{{mode}} 召回命中率",
+          "refId": "A"
+        }
+      ],
+      "title": "hybrid vs keyword 召回命中率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 76
+      },
+      "id": 27,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(picture_rag_ask_total{job=\"picture-backend\", result=~\"error|limited|invalid_citation\"}[5m]))",
+          "legendFormat": "ask {{result}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (reason) (rate(picture_rag_degraded_total{job=\"picture-backend\"}[5m]))",
+          "legendFormat": "degraded {{reason}}",
+          "refId": "B"
+        }
+      ],
+      "title": "问答失败 / 降级",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

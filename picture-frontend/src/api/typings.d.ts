@@ -242,6 +242,8 @@ declare namespace API {
     picScale?: number
     picFormat?: string
     searchText?: string
+    /** 检索模式：keyword（默认）/ hybrid / semantic；仅公开列表使用 */
+    searchMode?: string
     userId?: string
     reviewStatus?: number
     reviewMessage?: string

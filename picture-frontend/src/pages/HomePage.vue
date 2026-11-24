@@ -8,10 +8,19 @@
       <div class="search-bar">
         <SearchBox
           v-model="searchText"
+          :placeholder="searchPlaceholder"
           :hot-tags="hotTagList"
           :hot-categories="hotCategoryList"
           @search="handleSearchBoxSearch"
         />
+        <!-- RAG 开启时才出现的语义检索提示；关闭时页面与改造前完全一致 -->
+        <div v-if="ragConfig.hybridSearch" class="search-mode-tip" data-testid="hybrid-tip">
+          <a-tag color="purple">语义检索已开启</a-tag>
+          <span>可以试试长句、同义词或风格描述</span>
+          <router-link v-if="ragConfig.askEnabled" to="/ask" data-testid="ask-entry">
+            用一句话问图库 →
+          </router-link>
+        </div>
       </div>
     </section>
 
@@ -102,6 +111,7 @@ import { message } from 'ant-design-vue'
 import { useDevicePixelRatio, useElementSize, useInfiniteScroll } from '@vueuse/core'
 import { listPictureTagCategory, listPictureVoByPage } from '@/api/pictureController'
 import { fetchSearchHot } from '@/api/searchExtra'
+import { useRagConfig } from '@/composables/useRagConfig'
 import PictureCard from '@/components/PictureCard.vue'
 import SearchBox from '@/components/SearchBox.vue'
 import { getColumnCount, getColumnWidth, getThumbnailSize } from '@/utils/waterfall'
@@ -135,6 +145,14 @@ const hotTagList = ref<string[]>([])
 const hotCategoryList = ref<string[]>([])
 // 当前列表实际使用的搜索词（用于卡片高亮），与用户正在输入的内容区分
 const appliedKeyword = ref('')
+
+// RAG 开关：开启混合检索时，带关键词的请求显式传 searchMode=hybrid
+const { ragConfig, loadRagConfig } = useRagConfig()
+const searchPlaceholder = computed(() =>
+  ragConfig.value.hybridSearch
+    ? '描述你想要的图，例如：暖色调日落海报'
+    : '从海量图片中搜索',
+)
 
 // 排序：最新（默认）/ 最多收藏 / 最多点赞 / 最多下载
 const SORT_OPTIONS = [
@@ -180,6 +198,9 @@ const buildQuery = (page: number): API.PictureQueryRequest => ({
   sortField: sortField.value,
   sortOrder: 'descend',
   searchText: searchText.value.trim() || undefined,
+  // 只有 RAG + ES 都开启且确实有关键词时才走 hybrid；否则保持后端默认 keyword
+  searchMode:
+    ragConfig.value.hybridSearch && searchText.value.trim() ? 'hybrid' : undefined,
   category: selectedCategory.value === 'all' ? undefined : selectedCategory.value,
   tags: selectedTags.value.length ? [...selectedTags.value] : [],
 })
@@ -379,8 +400,10 @@ const doClickPicture = (picture: API.PictureVO) => {
   router.push(`/picture/${picture.id}`)
 }
 
-onMounted(() => {
+onMounted(async () => {
   applyQueryToState()
+  // 先拿 RAG 开关：URL 里带 searchText 时，首屏查询也要按 hybrid 发起
+  await loadRagConfig()
   fetchPage(true)
   getTagCategoryOptions()
   getHotKeywords()
@@ -476,6 +499,21 @@ onDeactivated(() => {
   max-width: 720px;
   margin: 0 auto;
   text-align: left;
+}
+
+.search-mode-tip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+  color: var(--ink-400);
+  font-size: 13px;
+}
+
+.search-mode-tip a {
+  font-weight: 500;
 }
 
 .filters {

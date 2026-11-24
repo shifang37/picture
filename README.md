@@ -32,7 +32,7 @@ picture/
 │       └── exception/               # 统一异常与错误码
 ├── picture-frontend/                # Vue 前端
 │   └── src/
-│       ├── api/                     # OpenAPI 生成的前端请求客户端 + pictureExtra.ts / userExtra.ts 手工封装
+│       ├── api/                     # OpenAPI 生成的前端请求客户端 + pictureExtra.ts / userExtra.ts / ragExtra.ts 手工封装
 │       ├── pages/                   # 页面（含「我的图片」与 admin 下的管理页）
 │       ├── components/              # 公共组件（卡片、互动按钮、通知铃铛等）
 │       ├── composables/             # 组合式函数（收藏/点赞交互等）
@@ -755,9 +755,90 @@ $env:SEARCH_ENGINE = 'es'
 - **降级**：embedding 超时/失败或 kNN 异常时回落 BM25，BM25 也异常时继续回落 MySQL；查询向量单次调用、默认 3 秒超时、不重试，避免故障时把一次搜索拖到数秒；
 - **分页**：融合窗口默认覆盖前 500 条，超过后回落 BM25；`total` 取两路并集大小（仅用于展示）；
 - **指标**：`picture.search.result{hit,mode}` 区分 `hybrid` / `semantic` / `es`；新增 `picture.rag.search{mode}`、`picture.rag.degraded{reason}` 与查询向量缓存命中率；
-- **模式校验**：非法 `searchMode` 返回 40000；前端搜索入口默认开启 hybrid 留到 M6，目前需要请求显式传入。
+- **模式校验**：非法 `searchMode` 返回 40000；首页在 `GET /api/rag/config` 返回 `hybridSearch=true` 时自动带 `searchMode=hybrid`，RAG 关闭时不传，保持关键字搜索。
 
 本地评估与逐条对照见 `docs/rag/m3-report.md` 与 `docs/rag/tools/eval-hybrid.mjs`（`docs/` 不进 Git）。
+
+## RAG 检索与问答（M4–M6）
+
+在 BM25 之外增加一条**默认关闭**的向量链路：语料与图片双塔向量化、ES `dense_vector` + HNSW、RRF 融合、相似图、近似去重与带引用问答。关闭时不会注册任何向量 Bean、不产生外部调用，公开搜索仍走原来的 BM25 / MySQL，行为与接入前逐条一致。
+
+### 能力与入口
+
+| 能力 | 入口 | 说明 |
+| --- | --- | --- |
+| 混合检索 | 首页搜索框 | RAG + ES 开启时，带关键词的公开列表自动传 `searchMode=hybrid`；占位文案改为「描述你想要的图，例如：暖色调日落海报」 |
+| 图库问答 | `/ask` 页面 / 顶栏「图库问答」 | 登录后提问，回答带 1–4 张引用卡片，可点回详情；拒答与降级是独立状态 |
+| 相似图片 | 详情页底部 | 用源图 `imageVector` 做 kNN，最多 6 张；无数据时整个区块不渲染 |
+| 近似重复提示 | 审核通过后异步检测 | 余弦 ≥0.985 才发 `RAG_DUPLICATE` 站内通知，只提示不自动拒绝；0.97–0.985 只记指标 |
+| 运维状态 | 管理端数据看板 | 索引文档数、待处理/失败、文本/图片模型、语料版本、别名 `stale` 与「重建向量索引」按钮 |
+
+### 接口
+
+| 方法 | 路径 | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/api/rag/config` | 公开 | 前端开关：`enabled` / `hybridSearch` / `askEnabled` / 每日限额；只返回布尔值与公开限额 |
+| POST | `/api/rag/ask` | 登录 | 请求 `{question, topK?}`；返回 `answer`、`citations`、`refused`、`degraded` |
+| GET | `/api/picture/similar?id=&limit=6` | 公开 | 源图不可见返回 40400；RAG 关闭 / 无图片向量返回空数组 |
+| GET | `/api/rag/status` | 管理员 | 索引与向量化状态；RAG 关闭或搜索非 ES 时返回 50001 |
+| POST | `/api/rag/reindex` | 管理员 | 全量重建并原子切换别名；有失败时不切换，旧索引继续可用 |
+
+### 开关与配置
+
+```yaml
+app:
+  rag:
+    enabled: ${RAG_ENABLED:false}          # 总开关，关闭时不注册向量 Bean
+    embedding:
+      api-key: ${DASHSCOPE_API_KEY:}       # 只从环境变量读，不写仓库
+      text-model: ${RAG_TEXT_MODEL:text-embedding-v4}
+      text-dim: ${RAG_TEXT_DIM:1024}
+      image-model: ${RAG_IMAGE_MODEL:multimodal-embedding-v1}
+      image-input: ${RAG_IMAGE_INPUT:base64}  # 私密图/防盗链场景默认 base64
+    search:
+      fusion: rrf
+      rrf-k: 60
+      bm25-top: 50
+      knn-top: 50
+      num-candidates: 200
+    ask:
+      daily-limit: ${RAG_ASK_DAILY_LIMIT:10}
+      top-k: 8
+      max-answer-chars: 400
+      cache-seconds: 3600
+    duplicate:
+      suspect-threshold: 0.97              # 只记指标
+      duplicate-threshold: 0.985           # 才发站内通知
+```
+
+- 生效条件：`RAG_ENABLED=true` 且 `SEARCH_ENGINE=es`；问答另需 `DEEPSEEK_API_KEY`（复用 `app.ai` 的 DeepSeek 地址与模型）；
+- `RAG_ENABLED=true` 但 `SEARCH_ENGINE=mysql` 时只打 WARN，不装配向量实现，也不调用外部服务；
+- 配置优先级沿用「内置默认 < `application-local.yml` < 环境变量」。
+
+### 成本与限流
+
+- **向量化**：文本 `text-embedding-v4`（1024 维）；图片 `multimodal-embedding-v1`（1024 维，实测 `image_tokens=128/张`）。108 张图全量回填约 1.4 万图片 token + 文本 token，单次重建耗时 30–44s；
+- **问答**：真实回答平均约 1158 prompt + 47 completion tokens（M5 实测），无候选时不调用模型（0 token）；回答缓存 1 小时，同一问题第二次命中缓存约 15ms；
+- **限额**：每用户每日 10 次（Redis `picture:rag:ask:limit:<userId>:<yyyyMMdd>`），限额在缓存之前判断，缓存命中同样计数；超限返回 `42900`；
+- **缓存**：查询向量进程内 10 分钟，hybrid 结果 Redis 5 分钟，回答 Redis 1 小时；重建索引后清空 hybrid 缓存，回答缓存 key 含索引名，切别名后自然失效。
+
+### 降级与隐私
+
+| 场景 | 行为 | 指标 |
+| --- | --- | --- |
+| RAG / ES 未开启 | 搜索按 keyword，问答返回固定文案 `degraded=true` | `picture.rag.degraded{reason="disabled"}` |
+| 查询向量化超时 / 失败 | 搜索回落 BM25 当前页；问答 `degraded=true` | `degraded{reason=embed_timeout/embed_error}` |
+| kNN / ES 异常 | 搜索回落 BM25；相似图返回空；问答降级 | `degraded{reason=es_error}` |
+| 不支持的精确过滤 / 深分页 | 搜索整体回落 BM25 | `degraded{reason=unsupported_filter/deep_page}` |
+| 模型输出非法 / 引用越界 | 整条回答替换为拒答，不返回任何模型文本 | `picture.rag.ask{result="invalid_citation"}` |
+
+隐私边界由代码保证，而不是靠提示词：ES kNN 只召回 `reviewStatus=1` → MySQL 回表再次过滤 → 只把公开字段拼进 prompt → 引用 id 必须 ⊆ 本次候选集 → 引用再回表过滤。未过审 / 私密图片的名称、简介和 id 不会出现在回答或引用中。
+
+### 可观测
+
+三个 Grafana 面板（`云图库 · 服务概览` 看板底部）：**搜索零结果率（按检索路径）**、**hybrid vs keyword 召回命中率**、**问答失败 / 降级**。新增 RAG 告警见下方「告警规则」；`picture_rag_index_stale` 由 `RagIndexHealthTask` 每 5 分钟把 `RagStatusVO.stale` 同步成 Gauge，别名被外部改坏时可直接告警。
+
+> 评估与验收记录：`docs/rag/baseline.md`、`m2-report.md` ~ `m6-report.md`、`final-report.md`（`docs/` 不进 Git）。
 
 ## 首页瀑布流与无限滚动
 
@@ -788,6 +869,7 @@ $env:SEARCH_ENGINE = 'es'
 - 前端按需注册 ECharts，`echarts` 与 `vue-echarts` 只打进看板页面的懒加载分包，首页不会加载；
 - 图表：上传趋势折线图、审核结果环形图、分类柱状图、标签横向条形图，另有下载排行表格；指标卡片显示用户数、图片数、待审核、存储体积和下载次数。
 - 看板顶部新增「运维操作」：**重建搜索索引**（`POST /api/search/reindex`）、**重算互动计数**（`POST /api/interaction/recount`）、**重算专辑计数**（`POST /api/album/recount`），三个按钮都需二次确认，成功后提示实际处理条数；搜索未启用时重建索引会直接给出后端的「未启用 Elasticsearch 搜索」提示，不会静默失败。
+- 「RAG 检索与问答」状态卡：展示索引文档数、待处理 / 失败数量、文本 / 图片模型、维度、语料与模型版本、索引名与别名；`stale=true` 时显示红色告警并提供「重建向量索引」（`POST /api/rag/reindex`，二次确认）；RAG 关闭时只显示「未启用」说明，不请求管理员状态接口。
 
 ## 前端构建与代码检查
 
@@ -796,7 +878,7 @@ $env:SEARCH_ENGINE = 'es'
 - **路由元信息**：权限写在路由 `meta.requiresLogin` / `meta.requiresAdmin`，`access.ts` 只读 `to.meta`，新增页面不用再改权限判断；
 - **ESLint**：扁平配置 `eslint.config.js`，`npm run lint` 检查，CI 在格式检查之后执行；
 - **构建体积**：入口 chunk 从改造前的 1,664 kB（gzip 518 kB）降到约 643 kB（gzip 212 kB），管理端页面均为独立 chunk；数据看板的 ECharts 分包约 578 kB（gzip 199 kB），只在进入看板时加载；
-- 前端测试：129 个 Vitest 用例 + 32 个 Playwright 用例。
+- 前端测试：133 个 Vitest 用例 + 41 个 Playwright 用例。
 
 ## 并发模型（虚拟线程评估）
 
@@ -873,7 +955,7 @@ cd picture-backend
 
 - Prometheus：<http://127.0.0.1:9090>，Targets 页面应看到 `picture-backend` 与 `rabbitmq` 为 UP；
   告警状态在 <http://127.0.0.1:9090/alerts>。
-- Grafana：<http://127.0.0.1:3000>，默认数据源与「云图库 · 服务概览」看板已预置；看板包含收藏/点赞速率、互动接口 p95、通知发送（按类型）与通知已读速率等 M1 面板。
+- Grafana：<http://127.0.0.1:3000>，默认数据源与「云图库 · 服务概览」看板已预置；看板除收藏/点赞、互动接口 p95、通知等面板外，底部新增 **搜索零结果率**、**hybrid vs keyword 召回命中率**、**问答失败 / 降级** 三个 RAG 面板。
 - 后端启动参数等价于 `--management.server.port=8124 --management.endpoints.web.exposure.include=health,info,prometheus`。
 
 生产 Compose 启动后 Grafana 同样只监听宿主机回环地址 `127.0.0.1:3000`；
@@ -889,6 +971,15 @@ Prometheus、8124 管理端口、RabbitMQ 15692 都只在 Compose 内网可达�
 | `picture_compress_seconds` | Timer | `FileManager#compressIfNeeded` | 开启直方图桶，可算 p95 |
 | `picture_review_pending` | Gauge | `PictureReviewPendingMetrics` | 每 60 秒查一次待审核数量，抓取时不打库 |
 | `picture_ai_tokens_total{direction}` | Counter | `DeepSeekPictureAiTagger` | 按 `prompt/completion` 累计 token，用于估算成本 |
+| `picture_search_result_total{hit,mode}` | Counter | `PictureController` | 公开搜索召回结果；`hit=0` 算零结果率，`mode=hybrid/semantic/es/mysql` 区分路径 |
+| `picture_rag_embed_total{kind,result}` / `picture_rag_embed_seconds{kind}` | Counter / Timer | `DashScopeEmbeddingClient` | 文本 / 图片向量化成功率与耗时，Timer 带直方图 |
+| `picture_rag_index_total{action,result}` | Counter | `ElasticsearchRagIndexService` | 写入 / 删除 / 重建 / 守卫结果，`result=stale` 表示别名不兼容 |
+| `picture_rag_index_stale` | Gauge | `RagIndexHealthTask` | 1 = 别名指向不兼容索引，需要 reindex；RAG 关闭时不注册 |
+| `picture_rag_search_seconds{mode}` | Timer | `ElasticsearchRagSearchService` | 混合 / 语义检索耗时 |
+| `picture_rag_degraded_total{reason}` | Counter | 检索 / 问答降级点 | `disabled` / `embed_timeout` / `embed_error` / `es_error` / `unsupported_filter` / `deep_page` 等 |
+| `picture_rag_ask_total{result}` / `picture_rag_ask_duration_seconds{result}` | Counter / Timer | `RagAskServiceImpl` | `answered` / `refused` / `limited` / `invalid_citation` / `error` |
+| `picture_rag_tokens_total{direction}` | Counter | `DeepSeekRagAnswerGenerator` | 问答 token 成本，与 AI 标注分开核算 |
+| `picture_rag_duplicate_total{result}` | Counter | `RagDuplicateServiceImpl` | 近重复 `hit` / `suspect` / `miss` / `error` |
 | `picture_interaction_total{action,type}` | Counter | `PictureInteractionServiceImpl` | 收藏/点赞的 add/remove 量，可用于排查异常刷量 |
 | `notification_sent_total{type}` | Counter | `NotificationServiceImpl` | 按通知类型统计发送量，`REVIEW_REJECT` 突增通常意味着审核或机审策略异常 |
 | `notification_read_total` | Counter | `NotificationServiceImpl` | 已读条数，粗略反映通知触达效果 |
@@ -927,6 +1018,11 @@ Prometheus 的 `/alerts` 页面会显示 pending/firing，可再按需接钉钉�
 | `PictureReviewBacklog` | 待审核图片 > 100 张 | 10 分钟 |
 | `PictureReviewRejectNotificationSpike` | `notification_sent_total{type="REVIEW_REJECT"}` 5 分钟速率 > 1/s | 10 分钟 |
 | `PictureInteractionLatencyHigh` | 收藏/点赞接口 p95 > 200ms | 5 分钟 |
+| `PictureRagEmbeddingFailures` | `picture_rag_embed_total{result="fail"}` 5 分钟速率 > 0.2/s | 5 分钟 |
+| `PictureRagDegraded` | `picture_rag_degraded_total` 5 分钟速率 > 0 | 5 分钟 |
+| `PictureRagInvalidCitation` | `picture_rag_ask_total{result="invalid_citation"}` 1 小时速率 > 0 | 5 分钟 |
+| `PictureRagIndexStale` | `picture_rag_index_stale` > 0 | 5 分钟 |
+| `PictureRagAskFailureRateHigh` | `picture_rag_ask_total{result=~"error|limited|invalid_citation"}` 5 分钟速率 > 0.1/s | 10 分钟 |
 
 > 8124、9090、15692 都不要映射到公网；Grafana 只绑定回环地址，并务必修改 `.env` 中的默认密码。
 
@@ -956,11 +1052,11 @@ npm run openapi                # 依据后端 OpenAPI 重新生成 api/ 客户�
 ```
 
 > `npm run openapi` 需要后端已启动，它从 `http://localhost:8123/api/v3/api-docs` 拉取接口定义。
-> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传、「我的图片」与批量编辑/删除封装，`src/api/userExtra.ts` 中的个人中心/修改密码/作者主页封装，以及 `src/api/albumExtra.ts`、`src/api/interactionExtra.ts`、`src/api/notificationExtra.ts`、`src/api/searchExtra.ts` 不会被覆盖。
+> 它只会覆盖 OpenAPI 派生的客户端；`src/api/pictureExtra.ts` 中手工维护的 multipart 上传、「我的图片」与批量编辑/删除封装，`src/api/userExtra.ts` 中的个人中心/修改密码/作者主页封装，以及 `src/api/albumExtra.ts`、`src/api/interactionExtra.ts`、`src/api/notificationExtra.ts`、`src/api/searchExtra.ts`、`src/api/ragExtra.ts` 不会被覆盖。
 
 ## 测试
 
-后端目前包含 **779 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、收藏点赞写接口的按用户限流与用户隔离、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、混合检索的 RRF 融合/同分稳定/降级与缓存隔离/模式校验、相似图的 imageVector 检索/自身排除/权限与降级、近重复的双阈值/同作者 top-1/ES 分数还原/Redis 与通知表双层去重/检测失败隔离、搜索联想的参数校验/条数收敛/同名去重与热词聚合、分享卡片的 OG 标签/HTML 转义/截断/缩略图规则与未过审 404、Prometheus 指标名与标签/待审核 Gauge 刷新，M2 的作者主页统计口径与缓存失效、批量编辑的整批原子/只改变化项/重新审核规则、批量删除的归属过滤与并发失败明细、专辑的可见性/权限/幂等加图/计数与封面回退，文审的任务轮询/超时/结果归一化与 assist 只记录、auto-reject 自动拒绝、重复投递幂等与人工结论优先、MQ 拓扑新增文审队列与死信，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
+后端目前包含 **824 个单元测试**，覆盖用户注册/登录/改密、会话失效、管理员重置密码、图片上传权限与审核状态、原图压缩（尺寸/体积/PNG 透明通道/像素上限/降采样解码/并发解码限流/回退）、审核历史与审核人补全、批量审核的单条条件更新/批量日志/单次缓存失效/单条事件、收藏与点赞的幂等/计数不为负/可见性限制/计数重算、收藏点赞写接口的按用户限流与用户隔离、热度排序的字段白名单与 `id` 次级排序、审核结论通知的幂等键与「自己审核自己不通知」、站内通知的去重/未读上限/分页映射/公告/清理、回收站的删除级联/列表过滤/恢复重建标签/到期物理清理与 COS 失败重试、标签分类字典增删与同步、标签关系表同步与 JOIN 查询、下载统计、文件类型与大小校验、「我的图片」归属校验、图片审核可见性与排序字段白名单逻辑、图片事件发布与 RabbitMQ 拓扑、消费者幂等判断、机审结果解析与三种处置模式、并发保护与兜底扫描、DeepSeek 请求体与错误分类、AI 建议输出校验/每日上限/重试与查询权限、搜索条件翻译/索引文档映射/搜索降级与索引一致性巡检、混合检索的 RRF 融合/同分稳定/降级与缓存隔离/模式校验、相似图的 imageVector 检索/自身排除/权限与降级、近重复的双阈值/同作者 top-1/ES 分数还原/Redis 与通知表双层去重/检测失败隔离、搜索联想的参数校验/条数收敛/同名去重与热词聚合、分享卡片的 OG 标签/HTML 转义/截断/缩略图规则与未过审 404、Prometheus 指标名与标签/待审核 Gauge 刷新、RAG 前端开关接口与向量索引 stale Gauge 巡检，M2 的作者主页统计口径与缓存失效、批量编辑的整批原子/只改变化项/重新审核规则、批量删除的归属过滤与并发失败明细、专辑的可见性/权限/幂等加图/计数与封面回退，文审的任务轮询/超时/结果归一化与 assist 只记录、auto-reject 自动拒绝、重复投递幂等与人工结论优先、MQ 拓扑新增文审队列与死信，以及 Redis 限流降级、会话失效版本、过滤器顺序、列表两级缓存与缓存失效，全部基于 Mockito、临时 HTTP Server 或临时文件，不依赖数据库与外部服务：
 
 ```bash
 cd picture-backend
@@ -970,7 +1066,7 @@ cd picture-backend
 
 集成测试（`*IT.java`，`mvnw verify` 阶段由 failsafe 执行）覆盖单元测试覆盖不到的部分：应用上下文装配、Flyway 在空库上执行全部迁移（V1–V14）、`picture_tag` 回填与多标签 JOIN 查询、重传后审核/机审字段确实被置空、逻辑删除与回收站恢复（含 AI 建议级联清理与审核日志保留）、账号唯一索引、改密后旧会话失效（真实 Redis + Spring Session）、Redis Lua 限流的计数与过期、上传限流按 Session 用户 id 而不是 IP，M1 的互动/通知（10 线程并发收藏只落 1 行关系且计数为 1、通知唯一键去重、只能读自己的通知、物理清理级联删除互动关系），以及 M2 的作者主页统计与缓存失效、V12 专辑表创建、专辑「创建 → 加图 → 公开统计 → 移图」的计数与封面回退。Docker 不可用时由 `@Testcontainers(disabledWithoutDocker = true)` 自动跳过，不会让本地测试失败。
 
-前端测试：Vitest 129 个用例（含计数格式化、乐观更新与回滚、`useInteraction` 的连点保护/回滚/登录拦截、通知轮询在页面隐藏时暂停、批量编辑字段转换、批量上传的图片 id 收集、搜索历史去重与上限、高亮片段切分与 XSS 输入、SEO 标签生成与清理、分享封面 JPEG 规则），Playwright 35 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：M1 覆盖「收藏 → 我的收藏」「审核通知 → 图片详情」「首页卡片悬浮收藏」「卡片点击进入详情」「系统公告发送」五条主链路，M2 覆盖「详情页作者入口 → 作者主页统计与作品」「作者不存在 404」「作者主页空状态」「批量编辑」「批量删除」「创建专辑」「专辑管理模式移除作品」「我的图片加入专辑」八条主链路，M3 覆盖「联想建议 → 搜索并高亮」「空输入不请求联想 + 热词引导」「搜索历史持久化与清空」「分享弹窗的链接、二维码与 OG 元信息清理」四条主链路，M4 覆盖「配额超限拦截」「秒传复用」两条上传链路，RAG M4 覆盖「相似图 6 宫格 → 点击切换并重新拉取」「无相似图不渲染」「接口失败静默降级」三条主链路，管理端另有「看板运维入口二次确认」「搜索未启用时的重建失败提示」「审核页文审状态与命中详情」三条用例，以及 10 条首页与路由级用例。
+前端测试：Vitest 133 个用例（含计数格式化、乐观更新与回滚、`useInteraction` 的连点保护/回滚/登录拦截、通知轮询在页面隐藏时暂停、批量编辑字段转换、批量上传的图片 id 收集、搜索历史去重与上限、高亮片段切分与 XSS 输入、SEO 标签生成与清理、分享封面 JPEG 规则、RAG 开关单例的缓存/失败回退/并发去重），Playwright 41 条端到端用例全部用 `page.route` Mock 接口，不依赖后端：M1 覆盖「收藏 → 我的收藏」「审核通知 → 图片详情」「首页卡片悬浮收藏」「卡片点击进入详情」「系统公告发送」五条主链路，M2 覆盖「详情页作者入口 → 作者主页统计与作品」「作者不存在 404」「作者主页空状态」「批量编辑」「批量删除」「创建专辑」「专辑管理模式移除作品」「我的图片加入专辑」八条主链路，M3 覆盖「联想建议 → 搜索并高亮」「空输入不请求联想 + 热词引导」「搜索历史持久化与清空」「分享弹窗的链接、二维码与 OG 元信息清理」四条主链路，M4 覆盖「配额超限拦截」「秒传复用」两条上传链路，RAG M4 覆盖「相似图 6 宫格 → 点击切换并重新拉取」「无相似图不渲染」「接口失败静默降级」三条主链路，RAG M6 覆盖「首页 RAG 开启时传 hybrid 并展示问答入口」「RAG 关闭时不传 hybrid、页面与改造前一致」「问答回答与引用卡片」「拒答态」「42900 限额提示」「看板 RAG 状态卡」六条主链路，管理端另有「看板运维入口二次确认」「搜索未启用时的重建失败提示」「审核页文审状态与命中详情」三条用例，以及 10 条首页与路由级用例。
 
 ## 持续集成与依赖更新
 

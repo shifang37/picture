@@ -51,6 +51,80 @@
       </a-space>
     </a-card>
 
+    <!-- RAG 状态：索引数量、向量化待处理/失败、模型版本与别名健康度；关闭时明确提示 -->
+    <a-card size="small" title="RAG 检索与问答" class="rag-card" data-testid="rag-status-card">
+      <template #extra>
+        <a-tag :color="ragConfig.enabled ? 'green' : 'default'">
+          {{ ragConfig.enabled ? '已开启' : '未开启' }}
+        </a-tag>
+      </template>
+      <a-spin :spinning="ragLoading">
+        <template v-if="ragConfig.enabled">
+          <a-alert
+            v-if="ragStatusError"
+            type="warning"
+            show-icon
+            :message="ragStatusError"
+            data-testid="rag-status-error"
+          />
+          <template v-else-if="ragStatus">
+            <a-descriptions :column="{ xs: 1, sm: 2, md: 3 }" size="small" bordered>
+              <a-descriptions-item label="索引文档">
+                {{ formatCount(ragStatus.docCount) }}
+              </a-descriptions-item>
+              <a-descriptions-item label="待处理">
+                {{ formatCount(ragStatus.pendingCount) }}
+              </a-descriptions-item>
+              <a-descriptions-item label="失败">
+                {{ formatCount(ragStatus.failedCount) }}
+              </a-descriptions-item>
+              <a-descriptions-item label="文本模型">
+                {{ ragStatus.textModel || '-' }}
+              </a-descriptions-item>
+              <a-descriptions-item label="图片模型">
+                {{ ragStatus.imageModel || '-' }}
+              </a-descriptions-item>
+              <a-descriptions-item label="索引 / 别名">
+                {{ ragStatus.indexName || '-' }} / {{ ragStatus.alias || '-' }}
+              </a-descriptions-item>
+              <a-descriptions-item label="维度">
+                {{ ragStatus.dims ?? '-' }}
+              </a-descriptions-item>
+              <a-descriptions-item label="模型 / 语料版本">
+                {{ ragStatus.version || '-' }} / {{ ragStatus.textVersion || '-' }}
+              </a-descriptions-item>
+            </a-descriptions>
+            <a-alert
+              v-if="ragStatus.stale"
+              class="rag-stale"
+              type="error"
+              show-icon
+              message="向量索引别名不兼容，增量写入已被守卫拒绝"
+              description="请点击下方「重建向量索引」，重建成功后会原子切换别名。"
+              data-testid="rag-status-stale"
+            />
+            <div class="rag-actions">
+              <a-popconfirm
+                title="重建向量索引？"
+                description="按公开图片全量重新向量化并原子切换别名，图片较多时会持续一段时间"
+                ok-text="重建"
+                cancel-text="取消"
+                @confirm="handleRagReindex"
+              >
+                <a-button :loading="reindexingRag" data-testid="rag-reindex">重建向量索引</a-button>
+              </a-popconfirm>
+              <a-button :loading="ragLoading" @click="fetchRagStatus">刷新状态</a-button>
+            </div>
+          </template>
+          <a-empty v-else description="暂无 RAG 状态数据" />
+        </template>
+        <a-empty
+          v-else
+          description="RAG 未启用（RAG_ENABLED=false），当前搜索只走 BM25 / MySQL"
+        />
+      </a-spin>
+    </a-card>
+
     <a-alert v-if="errorMessage" type="error" show-icon :message="errorMessage" class="error-alert">
       <template #action>
         <a-button size="small" @click="fetchAll">重试</a-button>
@@ -177,6 +251,8 @@ import {
   type AnalyzeUploadTrendItem,
 } from '@/api/analyzeExtra'
 import { recountAlbums, recountInteractions, reindexSearch } from '@/api/adminOpsExtra'
+import { fetchRagStatus as fetchRagStatusApi, reindexRag, type RagStatus } from '@/api/ragExtra'
+import { useRagConfig } from '@/composables/useRagConfig'
 import { formatSize } from '@/utils'
 import { formatCount, formatDuration, toNumber } from '@/utils/analyze'
 
@@ -201,6 +277,13 @@ const categories = ref<AnalyzeCategoryItem[]>([])
 const tags = ref<AnalyzeTagItem[]>([])
 const review = ref<AnalyzeReview>()
 const topDownload = ref<AnalyzeTopDownloadItem[]>([])
+
+// RAG 状态卡：开关来自公开配置，索引数据来自管理员接口（仅开启时请求）
+const { ragConfig, loadRagConfig } = useRagConfig()
+const ragStatus = ref<RagStatus>()
+const ragStatusError = ref('')
+const ragLoading = ref(false)
+const reindexingRag = ref(false)
 
 const overviewCards = computed(() => [
   {
@@ -467,8 +550,59 @@ const handleRecountAlbum = async () => {
   }
 }
 
-onMounted(() => {
+// ==================== RAG 状态 ====================
+
+/** 读取向量索引状态；RAG 关闭或搜索非 ES 时后端会返回明确的业务错误 */
+const fetchRagStatus = async () => {
+  if (!ragConfig.value.enabled) {
+    return
+  }
+  ragLoading.value = true
+  ragStatusError.value = ''
+  try {
+    const res = await fetchRagStatusApi()
+    if (res.data.code === 0 && res.data.data) {
+      ragStatus.value = res.data.data
+    } else {
+      ragStatusError.value = res.data.message || '读取 RAG 状态失败'
+    }
+  } catch (error: any) {
+    ragStatusError.value = '读取 RAG 状态失败：' + (error?.message || '系统错误')
+  } finally {
+    ragLoading.value = false
+  }
+}
+
+const handleRagReindex = async () => {
+  reindexingRag.value = true
+  try {
+    const res = await reindexRag()
+    if (res.data.code !== 0) {
+      throw new Error(res.data.message || '重建向量索引失败')
+    }
+    const data = res.data.data ?? {}
+    if (data.switched) {
+      message.success(
+        `向量索引已重建并切换：写入 ${data.indexed ?? 0} 张，跳过 ${data.skipped ?? 0} 张`,
+      )
+    } else {
+      message.warning(
+        `重建未切换别名：写入 ${data.indexed ?? 0} 张，失败 ${data.failed ?? 0} 张，旧索引继续可用`,
+      )
+    }
+    await fetchRagStatus()
+  } catch (error: any) {
+    message.error('重建向量索引失败：' + (error?.message || '系统错误'))
+  } finally {
+    reindexingRag.value = false
+  }
+}
+
+onMounted(async () => {
   fetchAll()
+  // 先确认 RAG 总开关，再决定是否请求管理员状态接口（关闭时该接口会返回业务错误）
+  await loadRagConfig()
+  fetchRagStatus()
 })
 </script>
 
@@ -504,6 +638,21 @@ onMounted(() => {
   margin-bottom: 12px;
   color: #888;
   font-size: 13px;
+}
+
+.rag-card {
+  margin-bottom: 16px;
+}
+
+.rag-stale {
+  margin-top: 12px;
+}
+
+.rag-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
 }
 
 .metric-grid {

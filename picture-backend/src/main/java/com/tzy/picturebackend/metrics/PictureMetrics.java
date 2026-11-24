@@ -126,6 +126,11 @@ public class PictureMetrics {
     public static final String RAG_DUPLICATE = "picture.rag.duplicate";
 
     /**
+     * 向量索引别名健康度（1=别名指向不兼容索引，需要 reindex）
+     */
+    public static final String RAG_INDEX_STALE = "picture.rag.index.stale";
+
+    /**
      * 图库问答计数（result=answered/refused/limited/error/invalid_citation）
      */
     public static final String RAG_ASK = "picture.rag.ask";
@@ -169,6 +174,11 @@ public class PictureMetrics {
      * 待审核数量由定时任务刷新，Gauge 只读取这个值，避免抓取时打数据库
      */
     private final AtomicLong reviewPending = new AtomicLong();
+
+    /**
+     * 向量索引别名是否不兼容，同上由定时任务刷新
+     */
+    private final AtomicLong ragIndexStale = new AtomicLong();
 
     public PictureMetrics(MeterRegistry registry) {
         this.registry = registry;
@@ -230,6 +240,28 @@ public class PictureMetrics {
      */
     public void setReviewPending(long count) {
         reviewPending.set(Math.max(0, count));
+    }
+
+    /**
+     * 注册向量索引别名健康度 Gauge。
+     * <p>
+     * 只在 RAG 真正启用（{@code RagIndexHealthTask} 被创建）时调用，确保关闭 RAG 后
+     * 不会多出一个永远为 0 的新指标；重复调用不会重复注册。
+     */
+    public void registerRagIndexStaleGauge() {
+        if (registry.find(RAG_INDEX_STALE).gauge() != null) {
+            return;
+        }
+        Gauge.builder(RAG_INDEX_STALE, ragIndexStale, AtomicLong::doubleValue)
+                .description("向量索引别名是否指向不兼容索引（1=需要 reindex）")
+                .register(registry);
+    }
+
+    /**
+     * 更新向量索引别名健康度：1 表示不兼容，需要调用 {@code POST /api/rag/reindex}。
+     */
+    public void setRagIndexStale(boolean stale) {
+        ragIndexStale.set(stale ? 1 : 0);
     }
 
     /**

@@ -145,6 +145,23 @@ class PictureMetricsTest {
     }
 
     @Test
+    @DisplayName("RAG 索引健康度：Gauge 为 1 表示别名不兼容，重复注册不报错")
+    void ragIndexStaleGauge_reflectsSnapshot() {
+        pictureMetrics.registerRagIndexStaleGauge();
+        pictureMetrics.setRagIndexStale(true);
+
+        assertEquals(1.0, registry.get(PictureMetrics.RAG_INDEX_STALE).gauge().value());
+        assertTrue(registry.scrape().contains("picture_rag_index_stale"));
+
+        pictureMetrics.setRagIndexStale(false);
+        assertEquals(0.0, registry.get(PictureMetrics.RAG_INDEX_STALE).gauge().value());
+
+        // 定时任务每次启动只应注册一次；重复调用必须复用已有 Gauge
+        pictureMetrics.registerRagIndexStaleGauge();
+        assertEquals(1, registry.find(PictureMetrics.RAG_INDEX_STALE).gauges().size());
+    }
+
+    @Test
     @DisplayName("压缩计时器：导出 picture_compress_seconds")
     void compressTimer_records() {
         pictureMetrics.compressTimer().record(Duration.ofMillis(20));

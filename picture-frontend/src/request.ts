@@ -19,9 +19,13 @@ myAxios.interceptors.response.use(
     const { data } = response
     // 未登录
     if (data.code === 40100) {
-      // 不是获取用户信息的请求，并且用户目前不是已经在用户登录页面，则跳转到登录页面
+      // 不是获取用户信息的请求，并且用户目前不是已经在用户登录页面，则跳转到登录页面。
+      // /rag/config 是公开开关接口，即使被网关误拦成 40100 也不应把公共页面（如 404）带去登录页。
+      const isLoginRequest = response.request.responseURL.includes('user/get/login')
+      const isPublicRagConfig = response.request.responseURL.includes('/rag/config')
       if (
-        !response.request.responseURL.includes('user/get/login') &&
+        !isLoginRequest &&
+        !isPublicRagConfig &&
         !window.location.pathname.includes('/user/login')
       ) {
         message.warning('请先登录')

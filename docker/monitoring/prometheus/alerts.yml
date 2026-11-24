@@ -69,3 +69,56 @@ groups:
         annotations:
           summary: '收藏/点赞接口 p95 超过 200ms'
           description: '当前 p95 为 {{ $value | humanizeDuration }}，检查 picture_interaction 唯一键与 picture 计数列更新是否走索引。'
+
+      # ==================== RAG（M2–M6） ====================
+
+      # Embedding 服务异常：失败速率持续超过 0.2 次/秒。失败会触发 BM25 降级与向量化重试，
+      # 先看百炼控制台是否限流/欠费，再看后端日志里的 DashScopeEmbeddingClient 错误分类。
+      - alert: PictureRagEmbeddingFailures
+        expr: sum(rate(picture_rag_embed_total{job="picture-backend", result="fail"}[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'RAG embedding 失败速率过高'
+          description: '过去 5 分钟失败 {{ $value | humanize }} 次/秒，混合检索会持续回落 BM25；检查百炼额度、网络与 RAG_EMBED_TIMEOUT。'
+
+      # 任意降级都值得看一眼：偶发一次可以忽略，持续发生说明查询向量化或 kNN 已经不可用。
+      - alert: PictureRagDegraded
+        expr: sum(rate(picture_rag_degraded_total{job="picture-backend"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'RAG 检索持续降级'
+          description: '降级原因分布：{{ $labels.reason }}。结果仍由 BM25 兜底，但语义召回已失效，检查 embedding 与 ES。'
+
+      # 引用失守是硬约束：引用 id 必须 ⊆ 召回集。出现一次就应立刻排查，避免把模型幻觉暴露给用户。
+      - alert: PictureRagInvalidCitation
+        expr: sum(rate(picture_rag_ask_total{job="picture-backend", result="invalid_citation"}[1h])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: '图库问答引用校验失败'
+          description: '过去 1 小时出现引用 id 不在召回集的回答，已整条替换为拒答；检查 RagAskServiceImpl 的引用校验与提示词版本。'
+
+      # 别名被外部改坏 / 维度不一致时，增量写入会被守卫拒绝；需要重新 reindex 才能恢复。
+      - alert: PictureRagIndexStale
+        expr: max(picture_rag_index_stale{job="picture-backend"}) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'RAG 向量索引别名不兼容'
+          description: '别名 {{ $labels.alias }} 不是 picture_vec_v* 或维度与配置不一致；调用 POST /api/rag/reindex 重建并切换别名。'
+
+      # 问答失败/超限持续出现：失败看 DeepSeek/Redis，超限说明单用户日限额或产品定价需要调整。
+      - alert: PictureRagAskFailureRateHigh
+        expr: sum(rate(picture_rag_ask_total{job="picture-backend", result=~"error|limited|invalid_citation"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: '图库问答失败或超限偏多'
+          description: '过去 10 分钟失败/超限 {{ $value | humanize }} 次/秒；按 result 标签区分 error、limited 与 invalid_citation。'

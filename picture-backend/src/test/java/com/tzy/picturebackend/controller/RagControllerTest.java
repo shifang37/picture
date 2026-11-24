@@ -1,6 +1,7 @@
 package com.tzy.picturebackend.controller;
 
 import com.tzy.picturebackend.config.RagProperties;
+import com.tzy.picturebackend.config.SearchProperties;
 import com.tzy.picturebackend.exception.BusinessException;
 import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
@@ -50,6 +51,8 @@ class RagControllerTest {
 
     private RagProperties ragProperties;
 
+    private SearchProperties searchProperties;
+
     private RagIndexService ragIndexService;
 
     private RagEmbeddingStateService ragEmbeddingStateService;
@@ -64,6 +67,7 @@ class RagControllerTest {
     @BeforeEach
     void setUp() {
         ragProperties = new RagProperties();
+        searchProperties = new SearchProperties();
         ragIndexService = mock(RagIndexService.class);
         ragEmbeddingStateService = mock(RagEmbeddingStateService.class);
         ragSearchCache = mock(RagSearchCache.class);
@@ -73,6 +77,7 @@ class RagControllerTest {
         when(provider.getIfAvailable()).thenReturn(null);
         RagController controller = new RagController();
         ReflectionTestUtils.setField(controller, "ragProperties", ragProperties);
+        ReflectionTestUtils.setField(controller, "searchProperties", searchProperties);
         ReflectionTestUtils.setField(controller, "embeddingClient", new RecordingEmbeddingClient());
         ReflectionTestUtils.setField(controller, "embeddingText", new EmbeddingText());
         ReflectionTestUtils.setField(controller, "ragEmbeddingStateService", ragEmbeddingStateService);
@@ -123,6 +128,7 @@ class RagControllerTest {
         when(ragEmbeddingStateService.countFailed()).thenReturn(1L);
         RagController controller = new RagController();
         ReflectionTestUtils.setField(controller, "ragProperties", ragProperties);
+        ReflectionTestUtils.setField(controller, "searchProperties", searchProperties);
         ReflectionTestUtils.setField(controller, "embeddingClient", new RecordingEmbeddingClient());
         ReflectionTestUtils.setField(controller, "embeddingText", new EmbeddingText());
         ReflectionTestUtils.setField(controller, "ragEmbeddingStateService", ragEmbeddingStateService);
@@ -164,6 +170,7 @@ class RagControllerTest {
         when(ragIndexService.reindexAll()).thenReturn(reindex);
         RagController controller = new RagController();
         ReflectionTestUtils.setField(controller, "ragProperties", ragProperties);
+        ReflectionTestUtils.setField(controller, "searchProperties", searchProperties);
         ReflectionTestUtils.setField(controller, "embeddingClient", new RecordingEmbeddingClient());
         ReflectionTestUtils.setField(controller, "embeddingText", new EmbeddingText());
         ReflectionTestUtils.setField(controller, "ragEmbeddingStateService", ragEmbeddingStateService);
@@ -182,6 +189,51 @@ class RagControllerTest {
                 .andExpect(jsonPath("$.data.switched").value(true));
 
         verify(ragSearchCache).clear();
+    }
+
+    @Test
+    @DisplayName("前端配置：关闭时 hybrid / ask 都为 false，仍返回公开限额")
+    void config_disabledReturnsAllOff() throws Exception {
+        mockMvc.perform(get("/rag/config").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.enabled").value(false))
+                .andExpect(jsonPath("$.data.hybridSearch").value(false))
+                .andExpect(jsonPath("$.data.askEnabled").value(false))
+                .andExpect(jsonPath("$.data.askDailyLimit").value(10))
+                .andExpect(jsonPath("$.data.askTopK").value(8));
+    }
+
+    @Test
+    @DisplayName("前端配置：RAG + ES 同时开启时 hybrid / ask 可用")
+    void config_enabledWithElasticsearchReturnsHybridAndAsk() throws Exception {
+        ragProperties.setEnabled(true);
+        ragProperties.getAsk().setDailyLimit(5);
+        ragProperties.getAsk().setTopK(6);
+        searchProperties.setEngine("es");
+
+        mockMvc.perform(get("/rag/config").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.hybridSearch").value(true))
+                .andExpect(jsonPath("$.data.askEnabled").value(true))
+                .andExpect(jsonPath("$.data.askDailyLimit").value(5))
+                .andExpect(jsonPath("$.data.askTopK").value(6));
+    }
+
+    @Test
+    @DisplayName("前端配置：RAG 开启但搜索仍是 MySQL 时不能 hybrid / ask")
+    void config_enabledWithoutElasticsearchKeepsFeaturesOff() throws Exception {
+        ragProperties.setEnabled(true);
+        searchProperties.setEngine("mysql");
+
+        mockMvc.perform(get("/rag/config").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.enabled").value(true))
+                .andExpect(jsonPath("$.data.hybridSearch").value(false))
+                .andExpect(jsonPath("$.data.askEnabled").value(false));
     }
 
     @Test
