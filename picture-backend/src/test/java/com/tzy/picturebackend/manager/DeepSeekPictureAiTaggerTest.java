@@ -98,6 +98,7 @@ class DeepSeekPictureAiTaggerTest {
                 List.of("海边", "日落", "人像"));
 
         assertEquals("海边日落", payload.name());
+        assertEquals("夕阳下的海面", payload.introduction());
         assertEquals("风景", payload.category());
         assertEquals(List.of("海边", "日落"), payload.tags());
 
@@ -115,6 +116,21 @@ class DeepSeekPictureAiTaggerTest {
                 .tag("direction", "prompt").counter().count());
         assertEquals(20.0, meterRegistry.get(PictureMetrics.AI_TOKENS)
                 .tag("direction", "completion").counter().count());
+    }
+
+    @Test
+    @DisplayName("提示词：要求 40-80 字画面描述，覆盖颜色/构图/用途并禁止版权声明")
+    void suggest_promptRequiresDescriptiveIntroduction() {
+        respond(200, suggestionJson("海边日落", "风景", List.of("海边")), null);
+
+        tagger.suggest(IMAGE_URL, List.of("风景"), List.of("海边"));
+
+        String systemPrompt = capturedRequest.get().path("messages").get(0).path("content").asText();
+        assertTrue(systemPrompt.contains("40-80"));
+        assertTrue(systemPrompt.contains("颜色与光线"));
+        assertTrue(systemPrompt.contains("构图"));
+        assertTrue(systemPrompt.contains("用途"));
+        assertTrue(systemPrompt.contains("版权"), "提示词必须显式禁止版权声明，避免语料退化为来源说明");
     }
 
     @Test
