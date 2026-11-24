@@ -187,11 +187,12 @@ test('首页在接口 Mock 下正常渲染', async ({ page }) => {
   await page.goto('/')
 
   await expect(page.getByText('shifang37云图库').first()).toBeVisible()
-  await expect(page.getByText('标签：')).toBeVisible()
+  // 首页改版后标签筛选收进筛选面板，标签标题不再带全角冒号
+  await expect(page.locator('.tag-bar .filter-label')).toHaveText('标签')
   await expect(page.getByText('暂无图片，换个搜索条件试试')).toBeVisible()
 })
 
-test('首页按图片宽高比渲染瀑布流卡片', async ({ page }) => {
+test('首页卡片使用统一比例封面并保持网格齐平', async ({ page }) => {
   await mockHomeApi(page, () => ({
     records: [
       makePicture('1', { name: '横图', picWidth: 1200, picHeight: 800 }),
@@ -205,16 +206,14 @@ test('首页按图片宽高比渲染瀑布流卡片', async ({ page }) => {
   await expect(page.getByText('横图')).toBeVisible()
   await expect(page.getByText('竖图')).toBeVisible()
 
-  // 封面用 aspect-ratio 提前占位，横图和竖图的比例都来自接口返回的宽高
+  // 首页在 f20aa4b 改为等比例网格：封面统一 4:3，横图/竖图不再按原始宽高拉伸
   const ratios = await page
     .locator('.picture-cover')
-    .evaluateAll((elements) =>
-      elements.map((element) => (element as HTMLElement).style.aspectRatio),
-    )
+    .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).aspectRatio))
   expect(ratios).toHaveLength(2)
-  // 浏览器会把 CSS 比例序列化成 6 位小数
-  expect(ratios[0]).toMatch(/^1 \/ 0\.66666/)
-  expect(ratios[1]).toBe('1 / 1.5')
+  for (const ratio of ratios) {
+    expect(ratio).toBe('4 / 3')
+  }
 })
 
 test('首页滚动到底部自动加载下一页并按 id 去重', async ({ page }) => {
