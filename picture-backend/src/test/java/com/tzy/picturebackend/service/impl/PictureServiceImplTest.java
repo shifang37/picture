@@ -10,6 +10,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
+import com.tzy.picturebackend.mapper.PictureEmbeddingMapper;
 import com.tzy.picturebackend.mapper.PictureInteractionMapper;
 import com.tzy.picturebackend.mapper.PictureMapper;
 import com.tzy.picturebackend.mapper.PictureTagMapper;
@@ -93,6 +94,8 @@ class PictureServiceImplTest {
 
     private PictureAiSuggestionMapper pictureAiSuggestionMapper;
 
+    private PictureEmbeddingMapper pictureEmbeddingMapper;
+
     private PictureInteractionMapper pictureInteractionMapper;
 
     private FileManager fileManager;
@@ -117,6 +120,7 @@ class PictureServiceImplTest {
         pictureMapper = mock(PictureMapper.class);
         pictureTagMapper = mock(PictureTagMapper.class);
         pictureAiSuggestionMapper = mock(PictureAiSuggestionMapper.class);
+        pictureEmbeddingMapper = mock(PictureEmbeddingMapper.class);
         pictureInteractionMapper = mock(PictureInteractionMapper.class);
         fileManager = mock(FileManager.class);
         pictureReviewLogService = mock(PictureReviewLogService.class);
@@ -133,6 +137,7 @@ class PictureServiceImplTest {
         ReflectionTestUtils.setField(pictureService, "baseMapper", pictureMapper);
         ReflectionTestUtils.setField(pictureService, "pictureTagMapper", pictureTagMapper);
         ReflectionTestUtils.setField(pictureService, "pictureAiSuggestionMapper", pictureAiSuggestionMapper);
+        ReflectionTestUtils.setField(pictureService, "pictureEmbeddingMapper", pictureEmbeddingMapper);
         ReflectionTestUtils.setField(pictureService, "pictureInteractionMapper", pictureInteractionMapper);
         ReflectionTestUtils.setField(pictureService, "fileManager", fileManager);
         ReflectionTestUtils.setField(pictureService, "pictureReviewLogService", pictureReviewLogService);

@@ -105,6 +105,11 @@ public class RagProperties {
         private String name = "picture_vec_v1";
 
         private int dims = 1024;
+
+        /**
+         * 全量重建时图片向量化的并发度；图片接口一次只能传一张，并发能显著缩短重建时间
+         */
+        private int reindexThreads = 3;
     }
 
     /**

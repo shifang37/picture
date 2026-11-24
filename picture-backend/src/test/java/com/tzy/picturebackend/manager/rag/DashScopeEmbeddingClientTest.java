@@ -249,21 +249,24 @@ class DashScopeEmbeddingClientTest {
     }
 
     @Test
-    @DisplayName("图片：走多模态接口，请求体是 contents[].image")
-    void embedImages_usesMultimodalEndpoint() {
+    @DisplayName("图片：走多模态接口，一次只传一张（接口限制 batch size=[1,1]）")
+    void embedImages_usesMultimodalEndpointOneByOne() {
         List<float[]> vectors = client.embedImages(List.of("https://example.com/a.jpg",
                 "data:image/jpeg;base64,AAAA"));
 
         assertEquals(2, vectors.size());
+        assertEquals(2, requestBodies.size(), "两张图片必须拆成两次请求");
         assertEquals("/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding",
                 lastPath.get());
-        JsonNode body = requestBodies.get(0);
-        assertEquals("multimodal-embedding-v1", body.path("model").asText());
-        assertEquals(2, body.path("input").path("contents").size());
+        for (int i = 0; i < 2; i++) {
+            JsonNode body = requestBodies.get(i);
+            assertEquals("multimodal-embedding-v1", body.path("model").asText());
+            assertEquals(1, body.path("input").path("contents").size());
+        }
         assertEquals("https://example.com/a.jpg",
-                body.path("input").path("contents").get(0).path("image").asText());
+                requestBodies.get(0).path("input").path("contents").get(0).path("image").asText());
         assertEquals("data:image/jpeg;base64,AAAA",
-                body.path("input").path("contents").get(1).path("image").asText());
+                requestBodies.get(1).path("input").path("contents").get(0).path("image").asText());
     }
 
     @Test

@@ -37,6 +37,7 @@ class RagPropertiesTest {
             assertEquals(2, properties.getEmbedding().getMaxRetries());
             assertEquals("picture_vec", properties.getIndex().getAlias());
             assertEquals("picture_vec_v1", properties.getIndex().getName());
+            assertEquals(3, properties.getIndex().getReindexThreads());
             assertEquals(60, properties.getSearch().getRrfK());
             assertEquals(10, properties.getAsk().getDailyLimit());
             assertEquals(0.97, properties.getAsk().getSuspectThreshold(), 1e-9);

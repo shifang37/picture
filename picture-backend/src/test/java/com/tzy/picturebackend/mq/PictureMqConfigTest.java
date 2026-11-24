@@ -25,15 +25,15 @@ class PictureMqConfigTest {
     private final Declarables declarables = new PictureMqConfig().pictureEventDeclarables();
 
     @Test
-    @DisplayName("拓扑：四个业务队列 + 四个死信队列，业务队列都配置了死信交换机")
+    @DisplayName("拓扑：五个业务队列 + 五个死信队列，业务队列都配置了死信交换机")
     void declaresWorkQueuesAndDeadLetterQueues() {
         Map<String, Queue> queues = declarables.getDeclarablesByType(Queue.class).stream()
                 .collect(Collectors.toMap(Queue::getName, Function.identity()));
 
-        assertEquals(8, queues.size());
+        assertEquals(10, queues.size());
         for (String queueName : List.of(PictureMqConfig.MODERATION_QUEUE,
                 PictureMqConfig.AI_QUEUE, PictureMqConfig.SEARCH_QUEUE,
-                PictureMqConfig.TEXT_REVIEW_QUEUE)) {
+                PictureMqConfig.RAG_QUEUE, PictureMqConfig.TEXT_REVIEW_QUEUE)) {
             Queue workQueue = queues.get(queueName);
             assertTrue(workQueue != null, "缺少业务队列: " + queueName);
             assertTrue(workQueue.isDurable(), "业务队列应持久化: " + queueName);
@@ -51,7 +51,7 @@ class PictureMqConfigTest {
     }
 
     @Test
-    @DisplayName("绑定：上传进机审 / 文审 / 搜索 / AI，变更与批量变更进文审与搜索")
+    @DisplayName("绑定：上传进机审 / 文审 / 搜索 / RAG / AI，变更与批量变更进文审 / 搜索 / RAG")
     void bindsRoutingKeysToExpectedQueues() {
         Set<String> bindings = declarables.getDeclarablesByType(Binding.class).stream()
                 .map(binding -> binding.getExchange() + " " + binding.getRoutingKey()
@@ -62,15 +62,19 @@ class PictureMqConfigTest {
                 "picture.event picture.uploaded -> picture.moderation.q",
                 "picture.event picture.uploaded -> picture.textreview.q",
                 "picture.event picture.uploaded -> picture.search.q",
+                "picture.event picture.uploaded -> picture.rag.q",
                 "picture.event picture.uploaded -> picture.ai.q",
                 "picture.event picture.moderated -> picture.ai.q",
                 "picture.event picture.changed -> picture.textreview.q",
                 "picture.event picture.changed -> picture.search.q",
+                "picture.event picture.changed -> picture.rag.q",
                 "picture.event picture.batch.changed -> picture.textreview.q",
                 "picture.event picture.batch.changed -> picture.search.q",
+                "picture.event picture.batch.changed -> picture.rag.q",
                 "picture.dlx picture.moderation.q.dlq -> picture.moderation.q.dlq",
                 "picture.dlx picture.ai.q.dlq -> picture.ai.q.dlq",
                 "picture.dlx picture.search.q.dlq -> picture.search.q.dlq",
+                "picture.dlx picture.rag.q.dlq -> picture.rag.q.dlq",
                 "picture.dlx picture.textreview.q.dlq -> picture.textreview.q.dlq"), bindings);
     }
 

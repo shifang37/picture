@@ -121,6 +121,21 @@ class PictureMetricsTest {
     }
 
     @Test
+    @DisplayName("向量索引维护：按动作与结果打标签")
+    void ragIndex_tagsActionAndResult() {
+        pictureMetrics.ragIndex("write", "ok");
+        pictureMetrics.ragIndex("delete", "ok");
+        pictureMetrics.ragIndex("reindex", "fail");
+        pictureMetrics.ragIndex("guard", "stale");
+
+        assertEquals(1.0, registry.get(PictureMetrics.RAG_INDEX)
+                .tag("action", "write").tag("result", "ok").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.RAG_INDEX)
+                .tag("action", "guard").tag("result", "stale").counter().count());
+        assertTrue(registry.scrape().contains("picture_rag_index_total"));
+    }
+
+    @Test
     @DisplayName("待审核数量：Gauge 读的是定时任务写入的快照")
     void reviewPending_readsSnapshot() {
         pictureMetrics.setReviewPending(7);

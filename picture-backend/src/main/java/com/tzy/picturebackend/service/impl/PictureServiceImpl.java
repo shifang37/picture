@@ -17,6 +17,7 @@ import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.FileManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.mapper.PictureAiSuggestionMapper;
+import com.tzy.picturebackend.mapper.PictureEmbeddingMapper;
 import com.tzy.picturebackend.mapper.PictureInteractionMapper;
 import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.file.PreparedUpload;
@@ -119,6 +120,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private PictureAiSuggestionMapper pictureAiSuggestionMapper;
+
+    @Resource
+    private PictureEmbeddingMapper pictureEmbeddingMapper;
 
     @Resource
     private PictureInteractionMapper pictureInteractionMapper;
@@ -530,6 +534,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 级联清理 AI 建议：它只对正常图片有意义，且模型输出可能包含敏感内容，不保留在回收站
         pictureAiSuggestionMapper.delete(new QueryWrapper<PictureAiSuggestion>()
                 .eq("pictureId", id));
+        // 向量化状态同样不保留；向量文档由 picture.changed 事件异步删除，重复删除是幂等的
+        pictureEmbeddingMapper.deleteById(id);
         // 标签关系不随回收站保留；恢复时会按 picture.tags JSON 重建
         pictureTagMapper.deleteByPictureId(id);
         // 软删除立即释放配额，用户可以继续上传；回收站保留期内的 COS 占用不在配额口径内
@@ -645,6 +651,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             pictureInteractionMapper.deleteByPictureIds(purgeableIds);
             pictureAiSuggestionMapper.delete(new QueryWrapper<PictureAiSuggestion>()
                     .in("pictureId", purgeableIds));
+            // 正常删除流程已经清过；这里覆盖 RAG 关闭期间删除、历史数据与上次清理失败的记录
+            pictureEmbeddingMapper.deleteByIds(purgeableIds);
             int deleted = baseMapper.deletePhysicallyByIds(purgeableIds);
             log.info("回收站物理清理完成, candidates = {}, deleted = {}", candidates.size(), deleted);
             // 审核日志按合规要求保留，物理删除图片后也不清理 picture_review_log

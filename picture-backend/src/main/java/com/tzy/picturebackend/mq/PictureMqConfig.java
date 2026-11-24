@@ -21,10 +21,10 @@ import org.springframework.context.annotation.Configuration;
  * 拓扑（声明为 Declarable，应用启动时由 RabbitAdmin 自动创建，重复启动是幂等的）：
  * <pre>
  * picture.event (topic)
- *   ├─ picture.uploaded      → picture.moderation.q、picture.textreview.q、picture.search.q、picture.ai.q
+ *   ├─ picture.uploaded      → picture.moderation.q、picture.textreview.q、picture.search.q、picture.ai.q、picture.rag.q
  *   ├─ picture.moderated     → picture.ai.q
- *   ├─ picture.changed       → picture.textreview.q、picture.search.q
- *   └─ picture.batch.changed → picture.textreview.q、picture.search.q
+ *   ├─ picture.changed       → picture.textreview.q、picture.search.q、picture.rag.q
+ *   └─ picture.batch.changed → picture.textreview.q、picture.search.q、picture.rag.q
  *
  * 每个业务队列都绑定自己的死信队列 picture.*.q.dlq，交换机为 picture.dlx。
  * </pre>
@@ -64,6 +64,11 @@ public class PictureMqConfig {
     public static final String SEARCH_QUEUE = "picture.search.q";
 
     /**
+     * RAG 向量索引同步队列
+     */
+    public static final String RAG_QUEUE = "picture.rag.q";
+
+    /**
      * 死信队列后缀
      */
     public static final String DEAD_LETTER_QUEUE_SUFFIX = ".dlq";
@@ -83,21 +88,26 @@ public class PictureMqConfig {
         Queue moderationQueue = workQueue(MODERATION_QUEUE);
         Queue aiQueue = workQueue(AI_QUEUE);
         Queue searchQueue = workQueue(SEARCH_QUEUE);
+        Queue ragQueue = workQueue(RAG_QUEUE);
         Queue textReviewQueue = workQueue(TEXT_REVIEW_QUEUE);
         Queue moderationDeadLetterQueue = deadLetterQueue(MODERATION_QUEUE);
         Queue aiDeadLetterQueue = deadLetterQueue(AI_QUEUE);
         Queue searchDeadLetterQueue = deadLetterQueue(SEARCH_QUEUE);
+        Queue ragDeadLetterQueue = deadLetterQueue(RAG_QUEUE);
         Queue textReviewDeadLetterQueue = deadLetterQueue(TEXT_REVIEW_QUEUE);
 
         return new Declarables(
                 eventExchange, deadLetterExchange,
-                moderationQueue, aiQueue, searchQueue, textReviewQueue,
+                moderationQueue, aiQueue, searchQueue, ragQueue, textReviewQueue,
                 moderationDeadLetterQueue, aiDeadLetterQueue, searchDeadLetterQueue,
-                textReviewDeadLetterQueue,
+                ragDeadLetterQueue, textReviewDeadLetterQueue,
                 // 上传：机审与搜索都要处理
                 BindingBuilder.bind(moderationQueue).to(eventExchange)
                         .with(PictureEventType.UPLOADED.getRoutingKey()),
                 BindingBuilder.bind(searchQueue).to(eventExchange)
+                        .with(PictureEventType.UPLOADED.getRoutingKey()),
+                // 上传：向量索引与 BM25 索引并行维护
+                BindingBuilder.bind(ragQueue).to(eventExchange)
                         .with(PictureEventType.UPLOADED.getRoutingKey()),
                 // 上传：名称与简介需要文审
                 BindingBuilder.bind(textReviewQueue).to(eventExchange)
@@ -111,10 +121,14 @@ public class PictureMqConfig {
                 // 人工审核、编辑、删除：更新搜索索引；编辑改动了名称/简介时还需要文审
                 BindingBuilder.bind(searchQueue).to(eventExchange)
                         .with(PictureEventType.CHANGED.getRoutingKey()),
+                BindingBuilder.bind(ragQueue).to(eventExchange)
+                        .with(PictureEventType.CHANGED.getRoutingKey()),
                 BindingBuilder.bind(textReviewQueue).to(eventExchange)
                         .with(PictureEventType.CHANGED.getRoutingKey()),
                 // 批量审核 / 批量编辑：一条消息带整批 id，同样只更新搜索索引，文本有变化时补文审
                 BindingBuilder.bind(searchQueue).to(eventExchange)
+                        .with(PictureEventType.BATCH_CHANGED.getRoutingKey()),
+                BindingBuilder.bind(ragQueue).to(eventExchange)
                         .with(PictureEventType.BATCH_CHANGED.getRoutingKey()),
                 BindingBuilder.bind(textReviewQueue).to(eventExchange)
                         .with(PictureEventType.BATCH_CHANGED.getRoutingKey()),
@@ -125,6 +139,8 @@ public class PictureMqConfig {
                         .with(deadLetterRoutingKey(AI_QUEUE)),
                 BindingBuilder.bind(searchDeadLetterQueue).to(deadLetterExchange)
                         .with(deadLetterRoutingKey(SEARCH_QUEUE)),
+                BindingBuilder.bind(ragDeadLetterQueue).to(deadLetterExchange)
+                        .with(deadLetterRoutingKey(RAG_QUEUE)),
                 BindingBuilder.bind(textReviewDeadLetterQueue).to(deadLetterExchange)
                         .with(deadLetterRoutingKey(TEXT_REVIEW_QUEUE)));
     }

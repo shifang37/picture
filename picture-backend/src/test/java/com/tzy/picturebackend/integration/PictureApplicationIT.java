@@ -14,6 +14,7 @@ import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureReviewBatchRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureUploadRequest;
 import com.tzy.picturebackend.model.entity.Picture;
+import com.tzy.picturebackend.model.entity.PictureEmbedding;
 import com.tzy.picturebackend.model.entity.User;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.vo.AnalyzeCategoryVO;
@@ -24,6 +25,7 @@ import com.tzy.picturebackend.model.vo.AnalyzeTopDownloadVO;
 import com.tzy.picturebackend.model.vo.AnalyzeUploadTrendVO;
 import com.tzy.picturebackend.model.vo.PictureReviewBatchResult;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.RagEmbeddingStateService;
 import com.tzy.picturebackend.service.UserService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -116,6 +118,9 @@ class PictureApplicationIT {
     private PictureService pictureService;
 
     @Autowired
+    private RagEmbeddingStateService ragEmbeddingStateService;
+
+    @Autowired
     private StringRedisTemplate redisTemplate;
 
     @Autowired
@@ -152,7 +157,7 @@ class PictureApplicationIT {
         Integer applied = jdbcTemplate.queryForObject(
                 "select count(*) from flyway_schema_history where success = 1", Integer.class);
         assertNotNull(applied);
-        assertTrue(applied >= 14, "V1-V14 迁移应全部执行，实际 " + applied);
+        assertTrue(applied >= 15, "V1-V15 迁移应全部执行，实际 " + applied);
 
         List<String> columns = jdbcTemplate.queryForList(
                 "select column_name from information_schema.columns "
@@ -177,12 +182,54 @@ class PictureApplicationIT {
                 Integer.class);
         assertEquals(1, pictureTagTable, "V8 应创建 picture_tag 关系表");
 
+        Integer pictureEmbeddingTable = jdbcTemplate.queryForObject(
+                "select count(*) from information_schema.tables "
+                        + "where table_schema = database() and table_name = 'picture_embedding'",
+                Integer.class);
+        assertEquals(1, pictureEmbeddingTable, "V15 应创建 picture_embedding 状态表");
+
         Integer tagPictureIndex = jdbcTemplate.queryForObject(
                 "select count(distinct index_name) from information_schema.statistics "
                         + "where table_schema = database() and table_name = 'picture_tag' "
                         + "and index_name = 'idx_tag_picture'",
                 Integer.class);
         assertEquals(1, tagPictureIndex, "picture_tag 应有 (tag, pictureId) 索引");
+    }
+
+    // ==================== 批量审核 ====================
+
+    @Test
+    @DisplayName("向量化状态：失败 UPSERT 记录两侧状态与错误，成功后清空错误")
+    void ragEmbeddingStateUpsertsFailures() {
+        long pictureId = 9_000_000_000_000_001L;
+        try {
+            ragEmbeddingStateService.markFailure(pictureId, true, false, "text boom");
+            PictureEmbedding row = ragEmbeddingStateService.get(pictureId);
+            assertNotNull(row);
+            assertEquals(2, row.getTextStatus(), "文本侧应记为失败");
+            assertEquals(0, row.getImageStatus(), "未尝试的图片侧保持待处理");
+            assertEquals(1, row.getAttemptCount());
+            assertEquals("text boom", row.getLastError());
+
+            ragEmbeddingStateService.markFailure(pictureId, false, true, "image boom");
+            row = ragEmbeddingStateService.get(pictureId);
+            assertEquals(2, row.getTextStatus(), "上一次的文本失败不能被覆盖");
+            assertEquals(2, row.getImageStatus());
+            assertEquals(2, row.getAttemptCount());
+            assertEquals("image boom", row.getLastError());
+
+            ragEmbeddingStateService.markTextSuccess(pictureId, "text-hash", "text-model", "v1");
+            ragEmbeddingStateService.markImageSuccess(pictureId, "image-hash", "image-model", "v1");
+            row = ragEmbeddingStateService.get(pictureId);
+            assertEquals(1, row.getTextStatus());
+            assertEquals(1, row.getImageStatus());
+            assertEquals("text-hash", row.getTextHash());
+            assertEquals("image-hash", row.getImageHash());
+            assertNull(row.getLastError(), "成功后应清空 lastError");
+        } finally {
+            ragEmbeddingStateService.delete(pictureId);
+        }
+        assertNull(ragEmbeddingStateService.get(pictureId));
     }
 
     // ==================== 批量审核 ====================

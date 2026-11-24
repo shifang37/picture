@@ -158,6 +158,8 @@ app:
       alias: picture_vec
       name: picture_vec_v1
       dims: ${RAG_VECTOR_DIMS:1024}
+      # 全量重建时图片向量化并发度（图片接口一次只能传一张）
+      reindex-threads: ${RAG_REINDEX_THREADS:3}
     search:
       fusion: rrf
       rrf-k: 60

@@ -17,6 +17,8 @@ import jakarta.annotation.Resource;
 import org.springframework.stereotype.Component;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 
 @Component
 public class CosManager {
@@ -39,6 +41,23 @@ public class CosManager {
     public COSObject getObject(String key) {
         GetObjectRequest getObjectRequest = new GetObjectRequest(cosClientConfig.getBucket(), key);
         return cosClient.getObject(getObjectRequest);
+    }
+
+    /**
+     * 读取对象全部字节。
+     * <p>
+     * 供向量化读取原图使用：走服务端 SDK 而不是公网 URL，私密图、防盗链与未过审图片都不受影响。
+     *
+     * @param key 唯一键
+     * @return 对象内容
+     */
+    public byte[] getObjectBytes(String key) {
+        try (COSObject object = getObject(key);
+             InputStream input = object.getObjectContent()) {
+            return input.readAllBytes();
+        } catch (IOException e) {
+            throw new IllegalStateException("读取 COS 对象失败, key=" + key, e);
+        }
     }
 
     /**

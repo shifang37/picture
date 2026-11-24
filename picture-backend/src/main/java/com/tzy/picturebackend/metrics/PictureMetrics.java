@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code picture.ai.tokens} → {@code picture_ai_tokens_total{direction}}</li>
  *   <li>{@code picture.search.result} → {@code picture_search_result_total{hit,mode}}</li>
  *   <li>{@code picture.rag.embed} → {@code picture_rag_embed_total{kind,result}} / {@code picture_rag_embed_seconds{kind}}</li>
+ *   <li>{@code picture.rag.index} → {@code picture_rag_index_total{action,result}}</li>
  * </ul>
  * <p>
  * 为什么不统计 HTTP 5xx：{@code GlobalExceptionHandler} 与限流响应都返回 HTTP 200 + 业务码，
@@ -97,6 +98,11 @@ public class PictureMetrics {
      * RAG 向量化调用计数与耗时（kind=text/image，result=ok/fail）
      */
     public static final String RAG_EMBED = "picture.rag.embed";
+
+    /**
+     * 向量索引维护计数（action=write/delete/reindex/guard，result=ok/skip/fail/stale）
+     */
+    public static final String RAG_INDEX = "picture.rag.index";
 
     /**
      * 分享卡片渲染计数（result=rendered/not_found）
@@ -318,6 +324,21 @@ public class PictureMetrics {
                     .register(registry)
                     .record(nanos, TimeUnit.NANOSECONDS);
         }
+    }
+
+    /**
+     * 记录一次向量索引维护动作。
+     *
+     * @param action write / delete / reindex / guard
+     * @param result ok / skip / fail / stale
+     */
+    public void ragIndex(String action, String result) {
+        Counter.builder(RAG_INDEX)
+                .description("RAG 向量索引维护次数")
+                .tag("action", action == null ? "unknown" : action)
+                .tag("result", result == null ? "unknown" : result)
+                .register(registry)
+                .increment();
     }
 
     /**

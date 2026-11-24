@@ -106,8 +106,12 @@ public class DashScopeEmbeddingClient implements EmbeddingClient {
             return List.of();
         }
         List<float[]> result = new ArrayList<>(imageInputs.size());
-        for (List<String> batch : batches(imageInputs)) {
-            result.addAll(callBatch("image", MULTIMODAL_PATH, buildImageBody(batch), batch.size()));
+        // 多模态接口限制 image batch size 必须是 [1, 1]（实测 2 张会返回
+        // InvalidParameter: image batch size can should be [1, 1]），因此逐张调用；
+        // 全量重建时的并发由 RagIndexService 控制，不在这里偷用 batch。
+        for (String imageInput : imageInputs) {
+            result.addAll(callBatch("image", MULTIMODAL_PATH,
+                    buildImageBody(List.of(imageInput)), 1));
         }
         return result;
     }
