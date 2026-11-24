@@ -18,10 +18,10 @@ jobs:
       run:
         working-directory: picture-backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: '21'
           distribution: temurin
@@ -32,7 +32,7 @@ jobs:
         run: ./mvnw -B --no-transfer-progress verify
 
       - name: 上传覆盖率报告
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: backend-jacoco
           path: picture-backend/target/site/jacoco
@@ -45,10 +45,10 @@ jobs:
       run:
         working-directory: picture-frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           # 与本地开发环境保持一致（npm 11）。用 Node 22（npm 10）时
           # npm ci 会把 vite/rollup 的可选依赖 chokidar 误判为缺少。
@@ -82,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 构建后端镜像
         run: docker build -t picture-backend:ci ./picture-backend
