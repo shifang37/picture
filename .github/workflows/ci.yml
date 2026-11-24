@@ -89,7 +89,7 @@ jobs:
 
       # 高危/严重漏洞让流水线失败；未修复的漏洞只展示不阻塞
       - name: 扫描后端镜像
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: picture-backend:ci
           format: table
@@ -101,7 +101,7 @@ jobs:
         run: docker build -t picture-frontend:ci ./picture-frontend
 
       - name: 扫描前端镜像
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: picture-frontend:ci
           format: table
