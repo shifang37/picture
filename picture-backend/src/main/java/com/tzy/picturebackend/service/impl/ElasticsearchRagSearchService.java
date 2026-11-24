@@ -126,6 +126,24 @@ public class ElasticsearchRagSearchService implements RagSearchService {
     }
 
     @Override
+    public List<Long> askCandidates(String question, int limit) {
+        String queryText = normalizeQuery(question);
+        if (queryText.isEmpty() || limit <= 0) {
+            return List.of();
+        }
+        long started = System.nanoTime();
+        try {
+            float[] vector = queryVector(queryText);
+            List<Query> filters = List.of(termQuery("reviewStatus", PictureReviewStatusEnum.PASS.getValue()));
+            int numCandidates = Math.max(ragProperties.getSearch().getNumCandidates(), limit);
+            return idsOf(searchKnn(CAPTION_VECTOR_FIELD, vector, filters, List.of(),
+                    limit, numCandidates));
+        } finally {
+            pictureMetrics.ragSearch("ask", System.nanoTime() - started);
+        }
+    }
+
+    @Override
     public List<Long> similarIds(Long sourcePictureId, int limit) {
         if (sourcePictureId == null || limit <= 0) {
             return List.of();

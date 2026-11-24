@@ -45,6 +45,17 @@ public interface RagSearchService {
     List<Long> similarIds(Long sourcePictureId, int limit);
 
     /**
+     * 图库问答召回：把问题向量化后查 {@code captionVector}，只返回已过审图片的 id。
+     * <p>
+     * 与 hybrid 一样复用查询向量缓存；返回的是候选 id，调用方必须回表再做一次
+     * {@code reviewStatus=1} 过滤，索引延迟或脏文档不会导致未过审内容泄露。
+     *
+     * @param question 用户问题
+     * @param limit    最多返回条数
+     */
+    List<Long> askCandidates(String question, int limit);
+
+    /**
      * 近重复：在同一作者的公开图片里找与指定图片最相似的一张（top-1，排除自身）。
      * <p>
      * 返回的余弦已从 Elasticsearch 归一化分数还原，可直接与配置阈值比较；

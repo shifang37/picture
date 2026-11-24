@@ -1,14 +1,22 @@
 package com.tzy.picturebackend.controller;
 
 import com.tzy.picturebackend.config.RagProperties;
+import com.tzy.picturebackend.exception.BusinessException;
+import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.manager.RagSearchCache;
 import com.tzy.picturebackend.manager.rag.EmbeddingText;
 import com.tzy.picturebackend.manager.rag.RecordingEmbeddingClient;
 import com.tzy.picturebackend.metrics.PictureMetrics;
+import com.tzy.picturebackend.model.dto.rag.RagAskRequest;
+import com.tzy.picturebackend.model.entity.User;
+import com.tzy.picturebackend.model.vo.rag.RagAskResponse;
+import com.tzy.picturebackend.model.vo.rag.RagCitationVO;
 import com.tzy.picturebackend.model.vo.rag.RagReindexVO;
+import com.tzy.picturebackend.service.RagAskService;
 import com.tzy.picturebackend.service.RagEmbeddingStateService;
 import com.tzy.picturebackend.service.RagIndexService;
+import com.tzy.picturebackend.service.UserService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,8 +26,14 @@ import org.springframework.http.MediaType;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean;
 
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -42,6 +56,10 @@ class RagControllerTest {
 
     private RagSearchCache ragSearchCache;
 
+    private RagAskService ragAskService;
+
+    private UserService userService;
+
     @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
@@ -49,6 +67,8 @@ class RagControllerTest {
         ragIndexService = mock(RagIndexService.class);
         ragEmbeddingStateService = mock(RagEmbeddingStateService.class);
         ragSearchCache = mock(RagSearchCache.class);
+        ragAskService = mock(RagAskService.class);
+        userService = mock(UserService.class);
         ObjectProvider<RagIndexService> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(null);
         RagController controller = new RagController();
@@ -58,9 +78,14 @@ class RagControllerTest {
         ReflectionTestUtils.setField(controller, "ragEmbeddingStateService", ragEmbeddingStateService);
         ReflectionTestUtils.setField(controller, "ragSearchCache", ragSearchCache);
         ReflectionTestUtils.setField(controller, "ragIndexServiceProvider", provider);
+        ReflectionTestUtils.setField(controller, "ragAskService", ragAskService);
+        ReflectionTestUtils.setField(controller, "userService", userService);
+        LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
+        validator.afterPropertiesSet();
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler(
                         new PictureMetrics(new SimpleMeterRegistry())))
+                .setValidator(validator)
                 .build();
     }
 
@@ -157,5 +182,64 @@ class RagControllerTest {
                 .andExpect(jsonPath("$.data.switched").value(true));
 
         verify(ragSearchCache).clear();
+    }
+
+    @Test
+    @DisplayName("问答：登录用户 id 传给服务，返回回答与引用")
+    void ask_returnsAnswerWithCitations() throws Exception {
+        User loginUser = new User();
+        loginUser.setId(7L);
+        when(userService.getLoginUser(any())).thenReturn(loginUser);
+        RagCitationVO citation = new RagCitationVO();
+        citation.setId(12L);
+        citation.setName("海边日落");
+        citation.setThumbnailUrl("https://cos.example.com/12.jpg?imageMogr2/thumbnail/400x");
+        citation.setReason("分类：风景；标签：海边、日落");
+        when(ragAskService.ask(any(RagAskRequest.class), eq(7L)))
+                .thenReturn(RagAskResponse.answered("推荐《海边日落》。", List.of(citation)));
+
+        mockMvc.perform(post("/rag/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"哪些图适合做竖版海报？\"}")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.answer").value("推荐《海边日落》。"))
+                .andExpect(jsonPath("$.data.refused").value(false))
+                .andExpect(jsonPath("$.data.degraded").value(false))
+                .andExpect(jsonPath("$.data.citations[0].id").value(12))
+                .andExpect(jsonPath("$.data.citations[0].name").value("海边日落"));
+
+        verify(ragAskService).ask(any(RagAskRequest.class), eq(7L));
+    }
+
+    @Test
+    @DisplayName("问答：空问题返回 40000，不调用服务")
+    void ask_blankQuestionReturnsParamsError() throws Exception {
+        mockMvc.perform(post("/rag/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"   \"}")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verify(ragAskService, never()).ask(any(), any());
+    }
+
+    @Test
+    @DisplayName("问答：超限返回 42900")
+    void ask_limitedReturnsTooManyRequests() throws Exception {
+        User loginUser = new User();
+        loginUser.setId(7L);
+        when(userService.getLoginUser(any())).thenReturn(loginUser);
+        when(ragAskService.ask(any(RagAskRequest.class), eq(7L)))
+                .thenThrow(new BusinessException(ErrorCode.TOO_MANY_REQUESTS, "今日次数已用完"));
+
+        mockMvc.perform(post("/rag/ask")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"question\":\"还有哪些图？\"}")
+                        .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(42900));
     }
 }

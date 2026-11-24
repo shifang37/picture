@@ -29,6 +29,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code picture.rag.search} → {@code picture_rag_search_seconds{mode}}</li>
  *   <li>{@code picture.rag.degraded} → {@code picture_rag_degraded_total{reason}}</li>
  *   <li>{@code picture.rag.duplicate} → {@code picture_rag_duplicate_total{result}}</li>
+ *   <li>{@code picture.rag.ask} → {@code picture_rag_ask_total{result}}</li>
+ *   <li>{@code picture.rag.ask.duration} → {@code picture_rag_ask_duration_seconds{result}}</li>
+ *   <li>{@code picture.rag.tokens} → {@code picture_rag_tokens_total{direction}}</li>
  * </ul>
  * <p>
  * 为什么不统计 HTTP 5xx：{@code GlobalExceptionHandler} 与限流响应都返回 HTTP 200 + 业务码，
@@ -121,6 +124,24 @@ public class PictureMetrics {
      * 近重复检测计数（result=hit/suspect/miss/error）
      */
     public static final String RAG_DUPLICATE = "picture.rag.duplicate";
+
+    /**
+     * 图库问答计数（result=answered/refused/limited/error/invalid_citation）
+     */
+    public static final String RAG_ASK = "picture.rag.ask";
+
+    /**
+     * 图库问答耗时。
+     * <p>
+     * 不能与计数器同名：Micrometer 同一名字只允许一种计量器类型，
+     * 计数器 + 计时器同名会抛 {@code IllegalArgumentException}。
+     */
+    public static final String RAG_ASK_TIME = "picture.rag.ask.duration";
+
+    /**
+     * 图库问答 token 计数（direction=prompt/completion）
+     */
+    public static final String RAG_TOKENS = "picture.rag.tokens";
 
     /**
      * 分享卡片渲染计数（result=rendered/not_found）
@@ -404,6 +425,50 @@ public class PictureMetrics {
                 .tag("result", result == null ? "unknown" : result)
                 .register(registry)
                 .increment();
+    }
+
+    /**
+     * 记录一次图库问答及其耗时。
+     * <p>
+     * 每次调用只记一个结果：{@code answered}（正常返回引用）、{@code refused}（无候选或模型拒答）、
+     * {@code limited}（超每日限额）、{@code invalid_citation}（引用校验失败）、{@code error}（降级）。
+     * 超限请求也会被计时，便于区分「限额打满」与「正常耗时」。
+     *
+     * @param result answered / refused / limited / invalid_citation / error
+     * @param nanos  本次问答耗时（纳秒）
+     */
+    public void ragAsk(String result, long nanos) {
+        String normalized = result == null ? "unknown" : result;
+        Counter.builder(RAG_ASK)
+                .description("图库问答次数")
+                .tag("result", normalized)
+                .register(registry)
+                .increment();
+        if (nanos >= 0) {
+            Timer.builder(RAG_ASK_TIME)
+                    .description("图库问答耗时")
+                    .tag("result", normalized)
+                    .publishPercentileHistogram()
+                    .register(registry)
+                    .record(nanos, TimeUnit.NANOSECONDS);
+        }
+    }
+
+    /**
+     * 记录图库问答消耗的 token，用于和 {@code picture.ai.tokens} 分开核算成本。
+     *
+     * @param direction prompt / completion
+     * @param tokens    本次消耗的 token 数
+     */
+    public void ragTokens(String direction, long tokens) {
+        if (tokens <= 0) {
+            return;
+        }
+        Counter.builder(RAG_TOKENS)
+                .description("图库问答消耗的 token 数")
+                .tag("direction", direction == null ? "unknown" : direction)
+                .register(registry)
+                .increment(tokens);
     }
 
     /**

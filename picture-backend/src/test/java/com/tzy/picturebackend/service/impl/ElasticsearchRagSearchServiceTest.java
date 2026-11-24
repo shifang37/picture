@@ -357,6 +357,40 @@ class ElasticsearchRagSearchServiceTest {
     }
 
     @Test
+    @DisplayName("问答召回：captionVector kNN，filter 只过审，k 等于 topK")
+    void askCandidates_usesCaptionVectorAndReviewFilter() throws Exception {
+        respondWith(List.of(12L, 35L));
+
+        List<Long> ids = service.askCandidates("哪些图适合做竖版海报？", 8);
+
+        assertEquals(List.of(12L, 35L), ids);
+        ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
+        verify(elasticsearchClient).search(captor.capture(), eq(Void.class));
+        var knn = captor.getValue().knn().get(0);
+        assertEquals("captionVector", knn.field());
+        assertEquals(8, knn.k());
+        assertEquals(200, knn.numCandidates());
+        List<String> filterFields = knn.filter().stream()
+                .flatMap(query -> query.bool().filter().stream())
+                .map(query -> query.term().field())
+                .toList();
+        assertEquals(List.of("reviewStatus"), filterFields);
+        assertEquals(1L, knn.filter().stream()
+                .flatMap(query -> query.bool().filter().stream())
+                .findFirst().orElseThrow().term().value().longValue());
+        assertEquals(1, embeddingClient.textBatches().size());
+    }
+
+    @Test
+    @DisplayName("问答召回：空问题不向量化、不查 ES")
+    void askCandidates_blankQuestionSkipsSearch() throws Exception {
+        assertTrue(service.askCandidates("   ", 8).isEmpty());
+        assertTrue(service.askCandidates(null, 8).isEmpty());
+        assertTrue(embeddingClient.textBatches().isEmpty());
+        verify(elasticsearchClient, never()).search(any(SearchRequest.class), any(Class.class));
+    }
+
+    @Test
     @DisplayName("ES 余弦换算：score = (1 + cosine) / 2")
     void cosineFromScore_mapsNormalizedScore() {
         assertEquals(1.0, ElasticsearchRagSearchService.cosineFromScore(1.0), 1e-9);

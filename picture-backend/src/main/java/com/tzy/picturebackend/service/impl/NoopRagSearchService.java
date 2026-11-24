@@ -32,6 +32,11 @@ public class NoopRagSearchService implements RagSearchService {
     }
 
     @Override
+    public List<Long> askCandidates(String question, int limit) {
+        return List.of();
+    }
+
+    @Override
     public List<Long> similarIds(Long sourcePictureId, int limit) {
         return List.of();
     }
