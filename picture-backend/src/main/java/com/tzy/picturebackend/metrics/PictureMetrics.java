@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code picture.review.pending} → {@code picture_review_pending}</li>
  *   <li>{@code picture.ai.tokens} → {@code picture_ai_tokens_total{direction}}</li>
  *   <li>{@code picture.search.result} → {@code picture_search_result_total{hit,mode}}</li>
+ *   <li>{@code picture.rag.embed} → {@code picture_rag_embed_total{kind,result}} / {@code picture_rag_embed_seconds{kind}}</li>
  * </ul>
  * <p>
  * 为什么不统计 HTTP 5xx：{@code GlobalExceptionHandler} 与限流响应都返回 HTTP 200 + 业务码，
@@ -91,6 +92,11 @@ public class PictureMetrics {
      * 公开搜索召回结果计数（hit=0/1，mode=mysql/es）
      */
     public static final String SEARCH_RESULT = "picture.search.result";
+
+    /**
+     * RAG 向量化调用计数与耗时（kind=text/image，result=ok/fail）
+     */
+    public static final String RAG_EMBED = "picture.rag.embed";
 
     /**
      * 分享卡片渲染计数（result=rendered/not_found）
@@ -285,6 +291,33 @@ public class PictureMetrics {
                 .tag("mode", mode == null ? "unknown" : mode)
                 .register(registry)
                 .increment();
+    }
+
+    /**
+     * 记录一次向量化调用及其耗时。
+     * <p>
+     * 每次尝试都记一次：重试前的失败也是一次真实的调用失败，便于按 kind 观察重试与降级。
+     *
+     * @param kind    text / image
+     * @param success 本次尝试是否成功
+     * @param nanos   本次尝试耗时（纳秒）
+     */
+    public void ragEmbed(String kind, boolean success, long nanos) {
+        String normalizedKind = kind == null ? "unknown" : kind;
+        Counter.builder(RAG_EMBED)
+                .description("RAG 向量化调用次数")
+                .tag("kind", normalizedKind)
+                .tag("result", success ? "ok" : "fail")
+                .register(registry)
+                .increment();
+        if (nanos >= 0) {
+            Timer.builder(RAG_EMBED)
+                    .description("RAG 向量化耗时")
+                    .tag("kind", normalizedKind)
+                    .publishPercentileHistogram()
+                    .register(registry)
+                    .record(nanos, TimeUnit.NANOSECONDS);
+        }
     }
 
     /**

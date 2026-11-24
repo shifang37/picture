@@ -138,6 +138,41 @@ app:
     retry-delay-millis: ${AI_RETRY_DELAY_MS:1000}
     max-tokens: ${AI_MAX_TOKENS:800}
     timeout: ${AI_TIMEOUT:60s}
+  rag:
+    # RAG 总开关：false 时只装配空实现，不产生任何外部调用
+    enabled: ${RAG_ENABLED:false}
+    embedding:
+      base-url: ${RAG_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com}
+      api-key: ${DASHSCOPE_API_KEY:}
+      text-model: ${RAG_TEXT_MODEL:text-embedding-v4}
+      text-dim: ${RAG_TEXT_DIM:1024}
+      image-model: ${RAG_IMAGE_MODEL:multimodal-embedding-v1}
+      image-dim: ${RAG_IMAGE_DIM:1024}
+      # 单次请求最多 10 条；批越大越省请求，但失败重试成本也越高
+      batch-size: ${RAG_EMBED_BATCH:10}
+      timeout: ${RAG_EMBED_TIMEOUT:30s}
+      max-retries: ${RAG_EMBED_RETRIES:2}
+      # 图片向量输入：base64（默认，兼容私密图/防盗链）| url
+      image-input: ${RAG_IMAGE_INPUT:base64}
+    index:
+      alias: picture_vec
+      name: picture_vec_v1
+      dims: ${RAG_VECTOR_DIMS:1024}
+    search:
+      fusion: rrf
+      rrf-k: 60
+      bm25-top: 50
+      knn-top: 50
+      num-candidates: 200
+      query-cache-seconds: 600
+    ask:
+      daily-limit: ${RAG_ASK_DAILY_LIMIT:10}
+      top-k: 8
+      max-answer-chars: 400
+      cache-seconds: 3600
+      timeout: 25s
+      suspect-threshold: 0.97
+      duplicate-threshold: 0.985
   search:
     # 搜索后端：mysql（默认，沿用原有模糊查询）| es（Elasticsearch 全文检索）
     # 设为 es 后公开列表由索引召回 id，Elasticsearch 异常时自动回落到 MySQL

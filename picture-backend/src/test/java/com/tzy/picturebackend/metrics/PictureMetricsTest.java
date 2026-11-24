@@ -102,6 +102,25 @@ class PictureMetricsTest {
     }
 
     @Test
+    @DisplayName("RAG 向量化：同名 Counter 与 Timer 导出为 _total 与 _seconds")
+    void ragEmbed_exportsCounterAndTimer() {
+        pictureMetrics.ragEmbed("text", true, 12_000_000L);
+        pictureMetrics.ragEmbed("text", false, 3_000_000L);
+
+        assertEquals(1.0, registry.get(PictureMetrics.RAG_EMBED)
+                .tag("kind", "text").tag("result", "ok").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.RAG_EMBED)
+                .tag("kind", "text").tag("result", "fail").counter().count());
+        assertEquals(2L, registry.get(PictureMetrics.RAG_EMBED)
+                .tag("kind", "text").timer().count());
+
+        String scrape = registry.scrape();
+        assertTrue(scrape.contains("picture_rag_embed_total"));
+        assertTrue(scrape.contains("picture_rag_embed_seconds_count"));
+        assertTrue(scrape.contains("picture_rag_embed_seconds_bucket"), "向量化耗时需要直方图算 p95");
+    }
+
+    @Test
     @DisplayName("待审核数量：Gauge 读的是定时任务写入的快照")
     void reviewPending_readsSnapshot() {
         pictureMetrics.setReviewPending(7);
