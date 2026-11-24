@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code picture.rag.index} → {@code picture_rag_index_total{action,result}}</li>
  *   <li>{@code picture.rag.search} → {@code picture_rag_search_seconds{mode}}</li>
  *   <li>{@code picture.rag.degraded} → {@code picture_rag_degraded_total{reason}}</li>
+ *   <li>{@code picture.rag.duplicate} → {@code picture_rag_duplicate_total{result}}</li>
  * </ul>
  * <p>
  * 为什么不统计 HTTP 5xx：{@code GlobalExceptionHandler} 与限流响应都返回 HTTP 200 + 业务码，
@@ -115,6 +116,11 @@ public class PictureMetrics {
      * RAG 降级计数（reason=embed_timeout/embed_error/es_error/disabled/...）
      */
     public static final String RAG_DEGRADED = "picture.rag.degraded";
+
+    /**
+     * 近重复检测计数（result=hit/suspect/miss/error）
+     */
+    public static final String RAG_DUPLICATE = "picture.rag.duplicate";
 
     /**
      * 分享卡片渲染计数（result=rendered/not_found）
@@ -380,6 +386,22 @@ public class PictureMetrics {
         Counter.builder(RAG_DEGRADED)
                 .description("RAG 检索降级次数")
                 .tag("reason", reason == null ? "unknown" : reason)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次近重复检测结果。
+     * <p>
+     * {@code hit} = 超过判重阈值并已通知作者；{@code suspect} = 只超过疑似阈值、不打扰用户；
+     * {@code miss} = 未命中；{@code error} = 向量查询失败（不影响图片本身）。
+     *
+     * @param result hit / suspect / miss / error
+     */
+    public void ragDuplicate(String result) {
+        Counter.builder(RAG_DUPLICATE)
+                .description("RAG 近重复检测次数")
+                .tag("result", result == null ? "unknown" : result)
                 .register(registry)
                 .increment();
     }

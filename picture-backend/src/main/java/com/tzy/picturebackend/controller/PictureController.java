@@ -54,6 +54,11 @@ import java.util.stream.Collectors;
 @Slf4j
 public class PictureController {
 
+    /**
+     * 相似图片接口单次最多返回条数：详情页只展示 6 格，上限放开到 20 便于联调
+     */
+    private static final int MAX_SIMILAR_LIMIT = 20;
+
     @Resource
     private PictureService pictureService;
 
@@ -197,6 +202,61 @@ public class PictureController {
         pictureService.checkPictureVisible(picture, request);
         // 获取封装类
         return ResultUtils.success(pictureService.getPictureVO(picture, request));
+    }
+
+    /**
+     * 相似图片（公开）
+     * <p>
+     * 用源图自己的图片向量做 kNN，只返回已过审的其他图片；源图对当前访问者不可见时返回 40400，
+     * 源图没有图片向量（未过审、向量化失败）或 RAG 未启用时返回空数组，不报错。
+     * <p>
+     * 向量索引只是「候选来源」：回表后仍按 {@code reviewStatus=1} 过滤并排除源图，
+     * 索引延迟最多导致少返回，不会泄露未过审内容。
+     */
+    @GetMapping("/similar")
+    public BaseResponse<List<PictureVO>> listSimilarPictures(@RequestParam Long id,
+                                                             @RequestParam(required = false, defaultValue = "6") Integer limit,
+                                                             HttpServletRequest request) {
+        ThrowUtils.throwIf(id == null || id <= 0, ErrorCode.PARAMS_ERROR);
+        ThrowUtils.throwIf(limit == null || limit <= 0 || limit > MAX_SIMILAR_LIMIT,
+                ErrorCode.PARAMS_ERROR, "limit 只能是 1-" + MAX_SIMILAR_LIMIT);
+        Picture picture = pictureService.getById(id);
+        // 待审核 / 已拒绝的图片仅作者和管理员可见；其余访客一律按不存在处理
+        pictureService.checkPictureVisible(picture, request);
+        if (!ragSearchService.enabled()) {
+            // 关闭 RAG 时功能整体不可用，返回空列表让详情页不渲染区块，而不是 5xx
+            return ResultUtils.success(List.of());
+        }
+        List<Long> similarIds;
+        try {
+            similarIds = ragSearchService.similarIds(id, limit);
+        } catch (RuntimeException e) {
+            // 详情页是主流程，相似图只是增强：失败时降级为空区块
+            log.warn("相似图片检索失败，返回空列表, pictureId={}", id, e);
+            pictureMetrics.ragDegraded("es_error");
+            return ResultUtils.success(List.of());
+        }
+        if (CollUtil.isEmpty(similarIds)) {
+            return ResultUtils.success(List.of());
+        }
+        List<Picture> found = pictureService.listByIds(similarIds);
+        Map<Long, Picture> pictureMap = (found == null ? List.<Picture>of() : found).stream()
+                .filter(item -> item.getReviewStatus() != null
+                        && item.getReviewStatus() == PictureReviewStatusEnum.PASS.getValue())
+                .collect(Collectors.toMap(Picture::getId, item -> item, (left, right) -> left));
+        // 按 kNN 返回的顺序还原，剔除源图与已失效的文档
+        List<Picture> pictures = similarIds.stream()
+                .filter(similarId -> !Objects.equals(similarId, id))
+                .map(pictureMap::get)
+                .filter(Objects::nonNull)
+                .limit(limit)
+                .toList();
+        if (pictures.isEmpty()) {
+            return ResultUtils.success(List.of());
+        }
+        Page<Picture> picturePage = new Page<>(1, pictures.size(), pictures.size());
+        picturePage.setRecords(pictures);
+        return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request).getRecords());
     }
 
     /**

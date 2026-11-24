@@ -113,6 +113,20 @@ export interface PictureAiSuggestion {
 }
 
 /**
+ * 查询相似图片（公开）
+ * <p>
+ * 源图对当前访问者不可见时后端返回 40400；RAG 关闭或源图还没有图片向量时返回空数组，
+ * 前端据此不渲染「相似图片」区块。
+ */
+export async function listSimilarPictures(id: string, limit = 6, options?: { [key: string]: any }) {
+  return request<{ code?: number; data?: API.PictureVO[]; message?: string }>('/picture/similar', {
+    method: 'GET',
+    params: { id, limit },
+    ...(options || {}),
+  })
+}
+
+/**
  * 查询图片的 AI 建议（仅作者和管理员）
  */
 export async function getPictureAiSuggestion(id: string, options?: { [key: string]: any }) {

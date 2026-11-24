@@ -5,7 +5,7 @@ import lombok.Getter;
 /**
  * 站内通知类型。
  * <p>
- * 只覆盖「用户确实需要知道」的事件：审核结论、账号安全、系统公告。
+ * 只覆盖「用户确实需要知道」的事件：审核结论、近重复提示、账号安全、系统公告。
  * 收藏 / 点赞默认不通知，避免热门图片的作者被刷屏。
  */
 @Getter
@@ -14,6 +14,11 @@ public enum NotificationTypeEnum {
     REVIEW_PASS("REVIEW_PASS", "图片审核通过"),
 
     REVIEW_REJECT("REVIEW_REJECT", "图片审核未通过"),
+
+    /**
+     * 审核通过时发现与作者已发布的图片高度相似；只提示，不自动拒绝或删除
+     */
+    RAG_DUPLICATE("RAG_DUPLICATE", "发现相似图片"),
 
     PASSWORD_RESET("PASSWORD_RESET", "密码已被重置"),
 

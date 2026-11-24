@@ -118,13 +118,34 @@
         </a-card>
       </a-col>
     </a-row>
+    <!-- 相似图片：后端用 imageVector 做 kNN，无数据时不渲染整个区块 -->
+    <a-card v-if="similarPictures.length" class="similar-card" data-testid="similar-section">
+      <template #title>相似图片</template>
+      <a-row :gutter="[12, 12]">
+        <a-col v-for="item in similarPictures" :key="item.id" :xs="12" :sm="8" :md="4">
+          <router-link
+            :to="`/picture/${item.id}`"
+            class="similar-item"
+            :data-testid="`similar-item-${item.id}`"
+          >
+            <img
+              :src="getThumbnailUrl(item.url, 320)"
+              :alt="item.name || '相似图片'"
+              class="similar-cover"
+              loading="lazy"
+            />
+            <div class="similar-name">{{ item.name ?? '未命名' }}</div>
+          </router-link>
+        </a-col>
+      </a-row>
+    </a-card>
     <!-- 分享弹窗：复制链接 / 二维码 / 系统分享 / 下载 -->
     <ShareModal v-model:open="shareOpen" :picture="picture" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
@@ -135,6 +156,7 @@ import {
 } from '@ant-design/icons-vue'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
 import { getPictureVoById, deletePicture } from '@/api/pictureController'
+import { listSimilarPictures } from '@/api/pictureExtra'
 import { downloadPicture, formatSize, getShareImageUrl, getThumbnailUrl } from '@/utils'
 import { formatCount } from '@/utils/interaction'
 import { applySeoMeta, resetSeoMeta } from '@/utils/seo'
@@ -189,9 +211,34 @@ const reviewDescription = computed(() => {
 // 分享弹窗开关
 const shareOpen = ref(false)
 
+// 相似图片：没有数据时整个区块不渲染（RAG 关闭、源图无向量、召回为空都走这里）
+const SIMILAR_LIMIT = 6
+const similarPictures = ref<API.PictureVO[]>([])
+// 快速切换详情页时，用自增 id 丢弃迟到的旧响应，避免把上一张图的相似结果渲染到新图
+let similarRequestId = 0
+
+const fetchSimilarPictures = async () => {
+  const requestId = ++similarRequestId
+  try {
+    const res = await listSimilarPictures(props.id, SIMILAR_LIMIT)
+    if (requestId !== similarRequestId) {
+      return
+    }
+    const records = res.data.code === 0 && Array.isArray(res.data.data) ? res.data.data : []
+    // 后端已排除源图，这里再兜一层，防止索引延迟返回自身
+    similarPictures.value = records.filter((item) => String(item.id) !== String(props.id))
+  } catch {
+    if (requestId === similarRequestId) {
+      similarPictures.value = []
+    }
+  }
+}
+
 // 获取图片详情
 const fetchPictureDetail = async () => {
   loading.value = true
+  // 切换图片时先清空旧数据，避免短暂显示上一张图的相似图
+  similarPictures.value = []
   try {
     const res = await getPictureVoById({
       id: props.id,
@@ -270,7 +317,17 @@ const doDownload = () => {
 
 onMounted(() => {
   fetchPictureDetail()
+  fetchSimilarPictures()
 })
+
+// 同一路由只切换 id 时组件会被复用：必须手动重新拉详情与相似图
+watch(
+  () => props.id,
+  () => {
+    fetchPictureDetail()
+    fetchSimilarPictures()
+  },
+)
 
 // 离开详情页时清掉动态 meta，避免标题/封面残留到下一个页面
 onUnmounted(() => {
@@ -287,6 +344,36 @@ onUnmounted(() => {
 }
 
 .author-link:hover {
+  color: #1677ff;
+}
+
+.similar-card {
+  margin-top: 16px;
+}
+
+.similar-item {
+  display: block;
+  color: inherit;
+}
+
+.similar-cover {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #f5f5f5;
+}
+
+.similar-name {
+  margin-top: 6px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.similar-item:hover .similar-name {
   color: #1677ff;
 }
 </style>

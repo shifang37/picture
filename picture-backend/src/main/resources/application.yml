@@ -174,14 +174,19 @@ app:
       result-cache-seconds: ${RAG_RESULT_CACHE_SECONDS:300}
       # 融合窗口：分页深度超过该值说明已翻过 kNN 可覆盖的范围，回落 BM25
       max-top: ${RAG_MAX_FUSION_TOP:500}
+    duplicate:
+      # 双阈值：0.97 只记指标，0.985 才发站内通知（实测校准见 docs/rag/m4-calibration.md）
+      suspect-threshold: ${RAG_DUP_SUSPECT_THRESHOLD:0.97}
+      duplicate-threshold: ${RAG_DUP_THRESHOLD:0.985}
+      num-candidates: ${RAG_DUP_CANDIDATES:100}
+      # 同一对图片只通知一次，键保留 30 天
+      notify-ttl-days: ${RAG_DUP_NOTIFY_TTL_DAYS:30}
     ask:
       daily-limit: ${RAG_ASK_DAILY_LIMIT:10}
       top-k: 8
       max-answer-chars: 400
       cache-seconds: 3600
       timeout: 25s
-      suspect-threshold: 0.97
-      duplicate-threshold: 0.985
   search:
     # 搜索后端：mysql（默认，沿用原有模糊查询）| es（Elasticsearch 全文检索）
     # 设为 es 后公开列表由索引召回 id，Elasticsearch 异常时自动回落到 MySQL

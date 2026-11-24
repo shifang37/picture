@@ -1,6 +1,7 @@
 package com.tzy.picturebackend.service.impl;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
@@ -15,6 +16,7 @@ import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.rag.RagIdPage;
 import com.tzy.picturebackend.model.dto.rag.RagSearchResult;
+import com.tzy.picturebackend.model.dto.rag.RagSimilarMatch;
 import com.tzy.picturebackend.service.PictureSearchService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -25,6 +27,9 @@ import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -254,6 +259,113 @@ class ElasticsearchRagSearchServiceTest {
         assertEquals("", ElasticsearchRagSearchService.normalizeQuery(null));
     }
 
+    @Test
+    @DisplayName("相似图：用源图 imageVector 检索，filter 过审并排除自身")
+    void similar_usesImageVectorAndExcludesSelf() throws Exception {
+        respondWithImageVector(List.of(0.1f, 0.2f));
+        respondWith(List.of(7L, 8L));
+
+        List<Long> ids = service.similarIds(1L, 6);
+
+        assertEquals(List.of(7L, 8L), ids);
+        ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
+        verify(elasticsearchClient).search(captor.capture(), eq(Void.class));
+        SearchRequest request = captor.getValue();
+        assertEquals(6, request.size());
+        var knn = request.knn().get(0);
+        assertEquals("imageVector", knn.field());
+        assertEquals(6, knn.k());
+        List<String> filterFields = knn.filter().stream()
+                .flatMap(query -> query.bool().filter().stream())
+                .map(query -> query.term().field())
+                .toList();
+        assertTrue(filterFields.contains("reviewStatus"), "实际 filter 字段: " + filterFields);
+        List<String> excludedFields = knn.filter().stream()
+                .flatMap(query -> query.bool().mustNot().stream())
+                .map(query -> query.term().field())
+                .toList();
+        assertTrue(excludedFields.contains("pictureId"), "必须排除源图自身，实际: " + excludedFields);
+        String excludedId = knn.filter().stream()
+                .flatMap(query -> query.bool().mustNot().stream())
+                .filter(query -> "pictureId".equals(query.term().field()))
+                .findFirst().orElseThrow().term().value().stringValue();
+        assertEquals("1", excludedId);
+    }
+
+    @Test
+    @DisplayName("相似图：源图没有图片向量时返回空，不发起 kNN")
+    void similar_returnsEmptyWhenSourceHasNoImageVector() throws Exception {
+        respondWithoutImageVector();
+
+        assertTrue(service.similarIds(1L, 6).isEmpty());
+        verify(elasticsearchClient, never()).search(any(SearchRequest.class), any(Class.class));
+    }
+
+    @Test
+    @DisplayName("相似图：源图文档不存在时返回空")
+    void similar_returnsEmptyWhenSourceMissing() throws Exception {
+        GetResponse<Map> response = GetResponse.of(builder -> builder
+                .index("picture_vec")
+                .id("1")
+                .found(false));
+        when(elasticsearchClient.<Map>get(any(Function.class), eq(Map.class))).thenReturn(response);
+
+        assertTrue(service.similarIds(1L, 6).isEmpty());
+        verify(elasticsearchClient, never()).search(any(SearchRequest.class), any(Class.class));
+    }
+
+    @Test
+    @DisplayName("近重复：只查同作者公开图，top-1，并把 ES 归一化分数还原成余弦")
+    void nearestSameUser_convertsScoreAndFilters() throws Exception {
+        respondWithImageVector(List.of(0.1f, 0.2f));
+        when(elasticsearchClient.search(any(SearchRequest.class), eq(Void.class)))
+                .thenReturn(responseWithScore(9L, 0.9923));
+
+        Optional<RagSimilarMatch> match = service.nearestSameUser(1L, 100L);
+
+        assertTrue(match.isPresent());
+        assertEquals(9L, match.get().pictureId());
+        assertEquals(0.9846, match.get().cosine(), 1e-4);
+        ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
+        verify(elasticsearchClient).search(captor.capture(), eq(Void.class));
+        var knn = captor.getValue().knn().get(0);
+        assertEquals(1, knn.k());
+        assertEquals(100, knn.numCandidates());
+        List<String> filterFields = knn.filter().stream()
+                .flatMap(query -> query.bool().filter().stream())
+                .map(query -> query.term().field())
+                .toList();
+        assertTrue(filterFields.containsAll(List.of("reviewStatus", "userId")),
+                "实际 filter 字段: " + filterFields);
+        assertEquals(100L, knn.filter().stream()
+                .flatMap(query -> query.bool().filter().stream())
+                .filter(query -> "userId".equals(query.term().field()))
+                .findFirst().orElseThrow().term().value().longValue());
+        assertTrue(knn.filter().stream()
+                .flatMap(query -> query.bool().mustNot().stream())
+                .anyMatch(query -> "pictureId".equals(query.term().field())), "必须排除自身");
+    }
+
+    @Test
+    @DisplayName("近重复：没有候选返回 empty")
+    void nearestSameUser_returnsEmptyWithoutHit() throws Exception {
+        respondWithImageVector(List.of(0.1f, 0.2f));
+        when(elasticsearchClient.search(any(SearchRequest.class), eq(Void.class)))
+                .thenReturn(response(List.of()));
+
+        assertTrue(service.nearestSameUser(1L, 100L).isEmpty());
+    }
+
+    @Test
+    @DisplayName("ES 余弦换算：score = (1 + cosine) / 2")
+    void cosineFromScore_mapsNormalizedScore() {
+        assertEquals(1.0, ElasticsearchRagSearchService.cosineFromScore(1.0), 1e-9);
+        assertEquals(0.0, ElasticsearchRagSearchService.cosineFromScore(0.5), 1e-9);
+        assertEquals(0.9846, ElasticsearchRagSearchService.cosineFromScore(0.9923), 1e-4);
+        assertEquals(-1.0, ElasticsearchRagSearchService.cosineFromScore(0.0), 1e-9);
+        assertEquals(-1.0, ElasticsearchRagSearchService.cosineFromScore(null), 1e-9);
+    }
+
     private ElasticsearchRagSearchService newService(EmbeddingClient client) {
         return new ElasticsearchRagSearchService(elasticsearchClient, client,
                 pictureSearchService, ragProperties, ragSearchCache, pictureMetrics, new ObjectMapper());
@@ -262,6 +374,39 @@ class ElasticsearchRagSearchServiceTest {
     private void respondWith(List<Long> ids) throws IOException {
         when(elasticsearchClient.search(any(SearchRequest.class), eq(Void.class)))
                 .thenReturn(response(ids));
+    }
+
+    private void respondWithImageVector(List<Float> values) throws IOException {
+        // 索引维度是 1024：只填前几个值，其余补 0，保证通过维度校验
+        List<Float> vector = java.util.stream.IntStream.range(0, 1024)
+                .mapToObj(index -> index < values.size() ? values.get(index) : 0f)
+                .toList();
+        respondWithSource(Map.of("imageVector", vector));
+    }
+
+    private void respondWithoutImageVector() throws IOException {
+        respondWithSource(Map.of());
+    }
+
+    private void respondWithSource(Map<String, Object> source) throws IOException {
+        GetResponse<Map> response = GetResponse.of(builder -> builder
+                .index("picture_vec")
+                .id("1")
+                .found(true)
+                .source(source));
+        when(elasticsearchClient.<Map>get(any(Function.class), eq(Map.class))).thenReturn(response);
+    }
+
+    private static SearchResponse<Void> responseWithScore(Long id, double score) {
+        List<Hit<Void>> hits = List.of(Hit.<Void>of(hit -> hit
+                .index("picture_vec")
+                .id(String.valueOf(id))
+                .score(score)));
+        return SearchResponse.of(response -> response
+                .took(1)
+                .timedOut(false)
+                .shards(shards -> shards.total(1).successful(1).failed(0))
+                .hits(metadata -> metadata.hits(hits)));
     }
 
     private static SearchResponse<Void> response(List<Long> ids) {

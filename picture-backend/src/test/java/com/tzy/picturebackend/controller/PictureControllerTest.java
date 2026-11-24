@@ -47,6 +47,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -768,6 +769,97 @@ class PictureControllerTest {
         verify(ragSearchService).semantic(any());
         verify(ragSearchService, never()).hybrid(any());
         assertEquals(1.0, searchCount(false, "semantic"));
+    }
+
+    @Test
+    @DisplayName("相似图：按 kNN 顺序回表，排除自身与未过审图片")
+    void listSimilarPictures_preservesOrderAndFilters() throws Exception {
+        when(pictureService.getById(1L)).thenReturn(picture(1L, "源图", 1));
+        when(ragSearchService.enabled()).thenReturn(true);
+        when(ragSearchService.similarIds(1L, 6)).thenReturn(List.of(9L, 1L, 8L, 7L));
+        when(pictureService.listByIds(any())).thenReturn(List.of(
+                picture(9L, "相似9", 1),
+                picture(1L, "源图", 1),
+                picture(8L, "未过审", 0),
+                picture(7L, "相似7", 1)));
+        PictureVO first = new PictureVO();
+        first.setName("相似9");
+        PictureVO second = new PictureVO();
+        second.setName("相似7");
+        Page<PictureVO> voPage = new Page<>(1, 2, 2);
+        voPage.setRecords(List.of(first, second));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(voPage);
+
+        mockMvc.perform(get("/picture/similar").param("id", "1").param("limit", "6"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.length()").value(2))
+                .andExpect(jsonPath("$.data[0].name").value("相似9"))
+                .andExpect(jsonPath("$.data[1].name").value("相似7"));
+    }
+
+    @Test
+    @DisplayName("相似图：RAG 关闭时返回空数组，不发起向量检索")
+    void listSimilarPictures_returnsEmptyWhenRagDisabled() throws Exception {
+        when(pictureService.getById(1L)).thenReturn(picture(1L, "源图", 1));
+        when(ragSearchService.enabled()).thenReturn(false);
+
+        mockMvc.perform(get("/picture/similar").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.length()").value(0));
+
+        verify(ragSearchService, never()).similarIds(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("相似图：源图对访客不可见时返回 40400")
+    void listSimilarPictures_rejectsInvisibleSource() throws Exception {
+        when(pictureService.getById(1L)).thenReturn(picture(1L, "待审核", 0));
+        doAnswer(invocation -> {
+            throw new BusinessException(ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        }).when(pictureService).checkPictureVisible(any(), any());
+
+        mockMvc.perform(get("/picture/similar").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40400));
+
+        verify(ragSearchService, never()).similarIds(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("相似图：向量检索异常时降级为空数组并记 es_error")
+    void listSimilarPictures_degradesOnSearchFailure() throws Exception {
+        when(pictureService.getById(1L)).thenReturn(picture(1L, "源图", 1));
+        when(ragSearchService.enabled()).thenReturn(true);
+        when(ragSearchService.similarIds(1L, 6)).thenThrow(new IllegalStateException("knn down"));
+
+        mockMvc.perform(get("/picture/similar").param("id", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.length()").value(0));
+
+        assertEquals(1.0, ragDegradedCount("es_error"));
+    }
+
+    @Test
+    @DisplayName("相似图：limit 越界返回 40000")
+    void listSimilarPictures_rejectsInvalidLimit() throws Exception {
+        mockMvc.perform(get("/picture/similar").param("id", "1").param("limit", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verifyNoInteractions(pictureService);
+    }
+
+    @Test
+    @DisplayName("相似图：缺少 id 返回 40000")
+    void listSimilarPictures_rejectsMissingId() throws Exception {
+        mockMvc.perform(get("/picture/similar"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(40000));
+
+        verifyNoInteractions(pictureService);
     }
 
     @Test

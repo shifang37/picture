@@ -40,8 +40,10 @@ class RagPropertiesTest {
             assertEquals(3, properties.getIndex().getReindexThreads());
             assertEquals(60, properties.getSearch().getRrfK());
             assertEquals(10, properties.getAsk().getDailyLimit());
-            assertEquals(0.97, properties.getAsk().getSuspectThreshold(), 1e-9);
-            assertEquals(0.985, properties.getAsk().getDuplicateThreshold(), 1e-9);
+            assertEquals(0.97, properties.getDuplicate().getSuspectThreshold(), 1e-9);
+            assertEquals(0.985, properties.getDuplicate().getDuplicateThreshold(), 1e-9);
+            assertEquals(100, properties.getDuplicate().getNumCandidates());
+            assertEquals(30, properties.getDuplicate().getNotifyTtlDays());
         });
     }
 
@@ -53,7 +55,7 @@ class RagPropertiesTest {
                         "app.rag.embedding.batch-size=5",
                         "app.rag.embedding.timeout=3s",
                         "app.rag.index.dims=768",
-                        "app.rag.ask.duplicate-threshold=0.99")
+                        "app.rag.duplicate.duplicate-threshold=0.99")
                 .run(context -> {
                     RagProperties properties = context.getBean(RagProperties.class);
 
@@ -61,7 +63,7 @@ class RagPropertiesTest {
                     assertEquals(5, properties.getEmbedding().getBatchSize());
                     assertEquals(Duration.ofSeconds(3), properties.getEmbedding().getTimeout());
                     assertEquals(768, properties.getIndex().getDims());
-                    assertEquals(0.99, properties.getAsk().getDuplicateThreshold(), 1e-9);
+                    assertEquals(0.99, properties.getDuplicate().getDuplicateThreshold(), 1e-9);
                 });
     }
 

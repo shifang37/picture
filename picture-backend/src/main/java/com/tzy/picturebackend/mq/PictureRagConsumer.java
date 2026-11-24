@@ -2,9 +2,11 @@ package com.tzy.picturebackend.mq;
 
 import cn.hutool.core.collection.CollUtil;
 import com.tzy.picturebackend.event.PictureEvent;
+import com.tzy.picturebackend.model.dto.rag.RagDuplicateResult;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.RagDuplicateService;
 import com.tzy.picturebackend.service.RagIndexService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -27,6 +29,9 @@ import java.util.stream.Collectors;
  * 单条失败不中断整批：失败已由 {@code RagIndexService} 写入 picture_embedding.lastError，
  * 消息照常确认，由全量重建兜底；因此 {@code app.rag.enabled=false} 时消费者直接跳过，
  * 不产生 DB 查询、embedding 调用或 ES 请求。
+ * <p>
+ * 图片向量写入成功后追加一次近重复检测（M4）：命中判重阈值时给作者发站内通知。
+ * 检测失败只记日志，不影响图片本身的索引结果。
  */
 @Component
 @Slf4j
@@ -36,9 +41,13 @@ public class PictureRagConsumer {
 
     private final RagIndexService ragIndexService;
 
-    public PictureRagConsumer(PictureService pictureService, RagIndexService ragIndexService) {
+    private final RagDuplicateService ragDuplicateService;
+
+    public PictureRagConsumer(PictureService pictureService, RagIndexService ragIndexService,
+                              RagDuplicateService ragDuplicateService) {
         this.pictureService = pictureService;
         this.ragIndexService = ragIndexService;
+        this.ragDuplicateService = ragDuplicateService;
     }
 
     @RabbitListener(queues = PictureMqConfig.RAG_QUEUE)
@@ -82,6 +91,8 @@ public class PictureRagConsumer {
                 }
                 if (Objects.equals(picture.getReviewStatus(), PictureReviewStatusEnum.PASS.getValue())) {
                     ragIndexService.indexPicture(picture);
+                    // 索引成功后再检测：近重复查询读的是刚写入的图片向量
+                    checkDuplicate(picture);
                 } else {
                     // 待审核、已拒绝：不能留在公开向量索引里
                     ragIndexService.deletePicture(pictureId);
@@ -99,5 +110,23 @@ public class PictureRagConsumer {
                     pictureIds.size(), failed, event.eventId());
         }
         return true;
+    }
+
+    /**
+     * 近重复检测：只提示、不改变审核结论；异常不向上抛，避免把「检测失败」记成「索引失败」。
+     */
+    private void checkDuplicate(Picture picture) {
+        if (!ragDuplicateService.enabled()) {
+            return;
+        }
+        try {
+            RagDuplicateResult result = ragDuplicateService.check(picture);
+            if (result != null && result.notified()) {
+                log.info("近重复检测命中并已提示作者, pictureId={}, nearest={}, cosine={}",
+                        picture.getId(), result.similarPictureId(), result.cosine());
+            }
+        } catch (RuntimeException e) {
+            log.warn("近重复检测异常，不影响图片索引, pictureId={}", picture.getId(), e);
+        }
     }
 }

@@ -4,7 +4,7 @@ import request from '@/request'
 
 /** 通知类型，与后端 NotificationTypeEnum 保持一致 */
 export type NotificationType =
-  'REVIEW_PASS' | 'REVIEW_REJECT' | 'PASSWORD_RESET' | 'ROLE_CHANGED' | 'SYSTEM'
+  'REVIEW_PASS' | 'REVIEW_REJECT' | 'RAG_DUPLICATE' | 'PASSWORD_RESET' | 'ROLE_CHANGED' | 'SYSTEM'
 
 export interface NotificationItem {
   id?: string

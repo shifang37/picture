@@ -2,7 +2,9 @@ package com.tzy.picturebackend.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
@@ -19,6 +21,7 @@ import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.picture.PictureQueryRequest;
 import com.tzy.picturebackend.model.dto.rag.RagIdPage;
 import com.tzy.picturebackend.model.dto.rag.RagSearchResult;
+import com.tzy.picturebackend.model.dto.rag.RagSimilarMatch;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.model.enums.PictureSearchModeEnum;
 import com.tzy.picturebackend.service.PictureSearchService;
@@ -30,6 +33,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * 混合 / 语义检索的 Elasticsearch 实现。
@@ -54,6 +59,11 @@ public class ElasticsearchRagSearchService implements RagSearchService {
      * 文本向量字段（与 M2 的索引映射一致）
      */
     static final String CAPTION_VECTOR_FIELD = "captionVector";
+
+    /**
+     * 图片向量字段（相似图与近重复使用）
+     */
+    static final String IMAGE_VECTOR_FIELD = "imageVector";
 
     /**
      * 查询向量本地缓存的最大条数
@@ -113,6 +123,55 @@ public class ElasticsearchRagSearchService implements RagSearchService {
     @Override
     public RagSearchResult semantic(PictureQueryRequest request) {
         return search(request, PictureSearchModeEnum.SEMANTIC);
+    }
+
+    @Override
+    public List<Long> similarIds(Long sourcePictureId, int limit) {
+        if (sourcePictureId == null || limit <= 0) {
+            return List.of();
+        }
+        long started = System.nanoTime();
+        try {
+            float[] vector = readImageVector(sourcePictureId);
+            if (vector == null) {
+                // 源图还没有图片向量：不是错误，前端按「没有相似图片」处理
+                return List.of();
+            }
+            List<Query> filters = new ArrayList<>();
+            filters.add(termQuery("reviewStatus", PictureReviewStatusEnum.PASS.getValue()));
+            List<Query> excludes = List.of(termQuery("pictureId", String.valueOf(sourcePictureId)));
+            return idsOf(searchKnn(IMAGE_VECTOR_FIELD, vector, filters, excludes, limit,
+                    Math.max(ragProperties.getSearch().getNumCandidates(), limit)));
+        } finally {
+            pictureMetrics.ragSearch("similar", System.nanoTime() - started);
+        }
+    }
+
+    @Override
+    public Optional<RagSimilarMatch> nearestSameUser(Long pictureId, Long userId) {
+        if (pictureId == null || userId == null) {
+            return Optional.empty();
+        }
+        float[] vector = readImageVector(pictureId);
+        if (vector == null) {
+            return Optional.empty();
+        }
+        List<Query> filters = new ArrayList<>();
+        filters.add(termQuery("reviewStatus", PictureReviewStatusEnum.PASS.getValue()));
+        filters.add(termQuery("userId", userId));
+        List<Query> excludes = List.of(termQuery("pictureId", String.valueOf(pictureId)));
+        SearchResponse<Void> response = searchKnn(IMAGE_VECTOR_FIELD, vector, filters, excludes, 1,
+                Math.max(1, ragProperties.getDuplicate().getNumCandidates()));
+        List<Hit<Void>> hits = response.hits().hits();
+        if (hits.isEmpty()) {
+            return Optional.empty();
+        }
+        Hit<Void> hit = hits.get(0);
+        Long matchedId = parseId(hit.id());
+        if (matchedId == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new RagSimilarMatch(matchedId, cosineFromScore(hit.score())));
     }
 
     private RagSearchResult search(PictureQueryRequest request, PictureSearchModeEnum mode) {
@@ -303,29 +362,49 @@ public class ElasticsearchRagSearchService implements RagSearchService {
      * kNN 侧：只召回归一化文本向量最相近的 topN，过滤条件与 BM25 侧保持一致
      */
     private List<Long> knnIds(float[] vector, PictureQueryRequest request, int topN) {
+        int numCandidates = Math.max(ragProperties.getSearch().getNumCandidates(), topN);
+        return idsOf(searchKnn(CAPTION_VECTOR_FIELD, vector, knnFilters(request), List.of(),
+                topN, numCandidates));
+    }
+
+    /**
+     * 执行一次 kNN 查询。
+     * <p>
+     * {@code filter} 走 bool 的 filter 子句（等值过滤），{@code mustNot} 用于排除源图自身；
+     * 两者都放在 kNN 的 filter 里，保证 HNSW 在候选阶段就完成过滤，而不是召回后再剔除。
+     */
+    private SearchResponse<Void> searchKnn(String field, float[] vector, List<Query> filters,
+                                           List<Query> excludes, int k, int numCandidates) {
         List<Float> queryVector = new ArrayList<>(vector.length);
         for (float value : vector) {
             queryVector.add(value);
         }
-        Query filter = Query.of(q -> q.bool(b -> b.filter(knnFilters(request))));
-        int numCandidates = Math.max(ragProperties.getSearch().getNumCandidates(), topN);
+        Query filter = Query.of(q -> q.bool(b -> {
+            b.filter(filters);
+            if (!excludes.isEmpty()) {
+                b.mustNot(excludes);
+            }
+            return b;
+        }));
         SearchRequest searchRequest = new SearchRequest.Builder()
                 .index(ragProperties.getIndex().getAlias())
-                .size(topN)
+                .size(k)
                 .source(source -> source.fetch(false))
                 .knn(knn -> knn
-                        .field(CAPTION_VECTOR_FIELD)
+                        .field(field)
                         .queryVector(queryVector)
-                        .k(topN)
+                        .k(k)
                         .numCandidates(numCandidates)
                         .filter(filter))
                 .build();
-        SearchResponse<Void> response;
         try {
-            response = elasticsearchClient.search(searchRequest, Void.class);
+            return elasticsearchClient.search(searchRequest, Void.class);
         } catch (IOException e) {
-            throw new IllegalStateException("执行向量检索失败", e);
+            throw new IllegalStateException("执行向量检索失败, field=" + field, e);
         }
+    }
+
+    private static List<Long> idsOf(SearchResponse<Void> response) {
         List<Long> ids = new ArrayList<>(response.hits().hits().size());
         for (Hit<Void> hit : response.hits().hits()) {
             Long id = parseId(hit.id());
@@ -334,6 +413,65 @@ public class ElasticsearchRagSearchService implements RagSearchService {
             }
         }
         return ids;
+    }
+
+    /**
+     * 读取源图的图片向量。
+     * <p>
+     * 用 GET 而不是 search：GET 是实时的，刚写入（尚在 refresh 间隔内）的文档也能立即读到；
+     * 索引或文档不存在时按「没有图片向量」返回 null，不抛异常。
+     */
+    @SuppressWarnings("rawtypes")
+    private float[] readImageVector(Long pictureId) {
+        GetResponse<Map> response;
+        try {
+            response = elasticsearchClient.get(get -> get
+                    .index(ragProperties.getIndex().getAlias())
+                    .id(String.valueOf(pictureId)), Map.class);
+        } catch (ElasticsearchException e) {
+            if (e.status() == 404) {
+                return null;
+            }
+            throw new IllegalStateException("读取图片向量失败, pictureId=" + pictureId, e);
+        } catch (IOException e) {
+            throw new IllegalStateException("读取图片向量失败, pictureId=" + pictureId, e);
+        }
+        if (!Boolean.TRUE.equals(response.found()) || response.source() == null) {
+            return null;
+        }
+        Object raw = response.source().get(IMAGE_VECTOR_FIELD);
+        if (!(raw instanceof List<?> values) || values.isEmpty()) {
+            return null;
+        }
+        float[] vector = new float[values.size()];
+        for (int i = 0; i < values.size(); i++) {
+            Object value = values.get(i);
+            if (!(value instanceof Number number)) {
+                log.warn("图片向量格式不合法, pictureId={}, field={}", pictureId, IMAGE_VECTOR_FIELD);
+                return null;
+            }
+            vector[i] = number.floatValue();
+        }
+        int dims = ragProperties.getIndex().getDims();
+        if (vector.length != dims) {
+            log.warn("图片向量维度与配置不一致, pictureId={}, actual={}, expected={}",
+                    pictureId, vector.length, dims);
+            return null;
+        }
+        return vector;
+    }
+
+    /**
+     * Elasticsearch 对 cosine 相似度的 kNN 分数做了归一化：{@code score = (1 + cosine) / 2}。
+     * <p>
+     * 近重复阈值来自原始余弦（0.97 / 0.985），因此必须先还原，否则阈值会被系统性抬高
+     * （cosine 0.985 对应 ES score 0.9925，直接用分数比较会把 0.97 的图也判成重复）。
+     */
+    static double cosineFromScore(Double score) {
+        if (score == null || !Double.isFinite(score)) {
+            return -1.0;
+        }
+        return Math.max(-1.0, Math.min(1.0, score * 2.0 - 1.0));
     }
 
     /**

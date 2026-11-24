@@ -2,9 +2,11 @@ package com.tzy.picturebackend.mq;
 
 import com.tzy.picturebackend.event.PictureEvent;
 import com.tzy.picturebackend.event.PictureEventType;
+import com.tzy.picturebackend.model.dto.rag.RagDuplicateResult;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.enums.PictureReviewStatusEnum;
 import com.tzy.picturebackend.service.PictureService;
+import com.tzy.picturebackend.service.RagDuplicateService;
 import com.tzy.picturebackend.service.RagIndexService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -14,6 +16,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -23,7 +26,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
- * RAG 消费者：公开图写索引、非公开/已删除删索引，单条失败不影响整批。
+ * RAG 消费者：公开图写索引、非公开/已删除删索引，单条失败不影响整批；
+ * 索引成功后再做近重复检测，检测失败不能反过来影响索引结果。
  */
 class PictureRagConsumerTest {
 
@@ -31,13 +35,16 @@ class PictureRagConsumerTest {
 
     private RagIndexService ragIndexService;
 
+    private RagDuplicateService ragDuplicateService;
+
     private PictureRagConsumer consumer;
 
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
         ragIndexService = mock(RagIndexService.class);
-        consumer = new PictureRagConsumer(pictureService, ragIndexService);
+        ragDuplicateService = mock(RagDuplicateService.class);
+        consumer = new PictureRagConsumer(pictureService, ragIndexService, ragDuplicateService);
     }
 
     @Test
@@ -87,6 +94,40 @@ class PictureRagConsumerTest {
         verify(ragIndexService).deletePicture(2L);
         verify(ragIndexService, never()).indexPicture(reviewing);
         verify(ragIndexService, never()).indexPicture(rejected);
+        verifyNoInteractions(ragDuplicateService);
+    }
+
+    @Test
+    @DisplayName("公开图写索引成功后才做近重复检测")
+    void handle_checksDuplicateAfterIndex() {
+        when(ragIndexService.enabled()).thenReturn(true);
+        when(ragDuplicateService.enabled()).thenReturn(true);
+        Picture passed = picture(1L, PictureReviewStatusEnum.PASS.getValue());
+        when(pictureService.listByIds(anyCollection())).thenReturn(List.of(passed));
+        when(ragDuplicateService.check(passed)).thenReturn(RagDuplicateResult.hit(9L, 0.99, true));
+
+        assertTrue(consumer.handle(PictureEvent.of(PictureEventType.CHANGED, 1L)));
+
+        verify(ragIndexService).indexPicture(passed);
+        verify(ragDuplicateService).check(passed);
+    }
+
+    @Test
+    @DisplayName("近重复检测异常不打断整批，也不把索引记成失败")
+    void handle_duplicateFailureDoesNotInterruptBatch() {
+        when(ragIndexService.enabled()).thenReturn(true);
+        when(ragDuplicateService.enabled()).thenReturn(true);
+        Picture first = picture(1L, PictureReviewStatusEnum.PASS.getValue());
+        Picture second = picture(2L, PictureReviewStatusEnum.PASS.getValue());
+        when(pictureService.listByIds(anyCollection())).thenReturn(List.of(first, second));
+        when(ragDuplicateService.check(first)).thenThrow(new IllegalStateException("es down"));
+        when(ragDuplicateService.check(second)).thenReturn(RagDuplicateResult.miss());
+
+        assertTrue(consumer.handle(PictureEvent.of(PictureEventType.BATCH_CHANGED, List.of(1L, 2L))));
+
+        verify(ragIndexService).indexPicture(first);
+        verify(ragIndexService).indexPicture(second);
+        verify(ragDuplicateService).check(second);
     }
 
     @Test

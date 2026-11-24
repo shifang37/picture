@@ -29,6 +29,8 @@ public class RagProperties {
 
     private Search search = new Search();
 
+    private Duplicate duplicate = new Duplicate();
+
     private Ask ask = new Ask();
 
     /**
@@ -154,6 +156,37 @@ public class RagProperties {
     }
 
     /**
+     * 近重复检测配置（M4 使用）。
+     * <p>
+     * 双阈值来自实测校准（见 docs/rag/m4-calibration.md）：同一张图缩放 / 重压缩 / 裁剪 10%
+     * 的余弦在 0.979–0.985 左右，而「不同内容」在 0.13 量级；模板化截图可能到 0.99，
+     * 因此 0.97 只记指标、0.985 才打扰用户。
+     */
+    @Data
+    public static class Duplicate {
+
+        /**
+         * 只记指标、不发通知的疑似阈值
+         */
+        private double suspectThreshold = 0.97;
+
+        /**
+         * 发站内通知的判定阈值
+         */
+        private double duplicateThreshold = 0.985;
+
+        /**
+         * kNN 候选数；top-1 查询也要给 HNSW 足够的候选
+         */
+        private int numCandidates = 100;
+
+        /**
+         * 同一对图片的通知去重天数（Redis key 保留期）
+         */
+        private int notifyTtlDays = 30;
+    }
+
+    /**
      * 图库问答配置（M5 使用）
      */
     @Data
@@ -168,15 +201,5 @@ public class RagProperties {
         private int cacheSeconds = 3600;
 
         private Duration timeout = Duration.ofSeconds(25);
-
-        /**
-         * 近重复只记指标的阈值
-         */
-        private double suspectThreshold = 0.97;
-
-        /**
-         * 近重复发通知的阈值
-         */
-        private double duplicateThreshold = 0.985;
     }
 }

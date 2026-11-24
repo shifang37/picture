@@ -196,6 +196,7 @@ const tagColor = (type?: NotificationType) => {
   const map: Record<string, string> = {
     REVIEW_PASS: 'green',
     REVIEW_REJECT: 'red',
+    RAG_DUPLICATE: 'gold',
     PASSWORD_RESET: 'orange',
     ROLE_CHANGED: 'blue',
     SYSTEM: 'purple',

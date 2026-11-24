@@ -77,6 +77,32 @@ public class NotificationMessage implements Serializable {
     }
 
     /**
+     * 近重复提示：审核通过后发现与作者已发布的图片高度相似。
+     * <p>
+     * 只提示、不自动拒绝或删除；dedupeKey 按两个 id 的固定顺序生成，
+     * 保证同一对图片无论谁先过审都只出现一条通知（Redis 侧还有 30 天去重键）。
+     */
+    public static NotificationMessage duplicate(Long userId, Long pictureId, String pictureName,
+                                                Long similarPictureId, String similarPictureName) {
+        NotificationMessage message = new NotificationMessage();
+        message.setType(NotificationTypeEnum.RAG_DUPLICATE);
+        message.setUserId(userId);
+        message.setBizType(BIZ_TYPE_PICTURE);
+        message.setBizId(pictureId);
+        long small = Math.min(pictureId, similarPictureId);
+        long large = Math.max(pictureId, similarPictureId);
+        message.setDedupeKey(NotificationTypeEnum.RAG_DUPLICATE.getValue() + ":" + small + ":" + large);
+        message.setTitle(NotificationTypeEnum.RAG_DUPLICATE.getDefaultTitle());
+        String name = pictureName == null || pictureName.isBlank() ? "未命名图片" : pictureName;
+        String similar = similarPictureName == null || similarPictureName.isBlank()
+                ? "你此前发布的图片"
+                : "《" + similarPictureName + "》";
+        message.setContent("你的图片《" + name + "》可能与你已发布的" + similar
+                + "重复。本提示不会影响审核结果，如确认是两张不同的图可直接忽略。");
+        return message;
+    }
+
+    /**
      * 账号安全通知（密码重置、角色变更）；每次事件都应提醒，不做去重
      */
     public static NotificationMessage account(NotificationTypeEnum type, Long userId, String content) {

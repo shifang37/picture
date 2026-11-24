@@ -49,6 +49,16 @@ public final class InMemoryRedis {
             return null;
         }).when(ops).set(anyString(), anyString(), any(Duration.class));
 
+        // 近重复去重依赖 SETNX：键存在时返回 false，不存在时写入并返回 true
+        when(ops.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenAnswer(invocation -> {
+            String key = invocation.getArgument(0);
+            if (store.containsKey(key)) {
+                return Boolean.FALSE;
+            }
+            store.put(key, invocation.getArgument(1));
+            return Boolean.TRUE;
+        });
+
         when(template.delete(anyString())).thenAnswer(invocation -> {
             store.remove(invocation.getArgument(0));
             return Boolean.TRUE;
