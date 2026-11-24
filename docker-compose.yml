@@ -94,10 +94,11 @@ services:
       xpack.security.enabled: 'true'
       xpack.security.http.ssl.enabled: 'false'
       ELASTIC_PASSWORD: ${ES_PASSWORD:-picture}
-      ES_JAVA_OPTS: '-Xms512m -Xmx512m'
+      # 1024 维向量（HNSW）比纯文本占用高，堆给到 1GB；容器上限相应放到 2GB
+      ES_JAVA_OPTS: '-Xms1g -Xmx1g'
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
-    mem_limit: 1g
+    mem_limit: 2g
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS -u "elastic:$${ELASTIC_PASSWORD}" http://localhost:9200/_cluster/health || exit 1']
       interval: 10s
@@ -149,6 +150,20 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       AI_MODEL: ${AI_MODEL:-deepseek-flash}
       AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-20}
+      # RAG：向量化与问答；Key 只从 .env / 环境变量注入，代码与镜像里不落盘
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      RAG_ENABLED: ${RAG_ENABLED:-false}
+      RAG_EMBEDDING_BASE_URL: ${RAG_EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com}
+      RAG_TEXT_MODEL: ${RAG_TEXT_MODEL:-text-embedding-v4}
+      RAG_TEXT_DIM: ${RAG_TEXT_DIM:-1024}
+      RAG_IMAGE_MODEL: ${RAG_IMAGE_MODEL:-multimodal-embedding-v1}
+      RAG_IMAGE_DIM: ${RAG_IMAGE_DIM:-1024}
+      RAG_EMBED_BATCH: ${RAG_EMBED_BATCH:-10}
+      RAG_EMBED_TIMEOUT: ${RAG_EMBED_TIMEOUT:-30s}
+      RAG_EMBED_RETRIES: ${RAG_EMBED_RETRIES:-2}
+      RAG_IMAGE_INPUT: ${RAG_IMAGE_INPUT:-base64}
+      RAG_VECTOR_DIMS: ${RAG_VECTOR_DIMS:-1024}
+      RAG_ASK_DAILY_LIMIT: ${RAG_ASK_DAILY_LIMIT:-10}
       # 全文搜索：默认 mysql；设为 es 时使用下面的 Elasticsearch 连接
       SEARCH_ENGINE: ${SEARCH_ENGINE:-mysql}
       ES_URIS: ${ES_URIS:-http://elasticsearch:9200}

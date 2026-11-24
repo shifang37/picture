@@ -48,7 +48,8 @@ services:
     environment:
       discovery.type: single-node
       xpack.security.enabled: 'false'
-      ES_JAVA_OPTS: '-Xms512m -Xmx512m'
+      # 与生产 compose 对齐：1024 维向量索引需要更大的堆
+      ES_JAVA_OPTS: '-Xms1g -Xmx1g'
     ports:
       - '127.0.0.1:9200:9200'
     volumes:
