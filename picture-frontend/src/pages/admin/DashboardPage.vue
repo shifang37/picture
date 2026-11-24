@@ -118,10 +118,7 @@
           </template>
           <a-empty v-else description="暂无 RAG 状态数据" />
         </template>
-        <a-empty
-          v-else
-          description="RAG 未启用（RAG_ENABLED=false），当前搜索只走 BM25 / MySQL"
-        />
+        <a-empty v-else description="RAG 未启用（RAG_ENABLED=false），当前搜索只走 BM25 / MySQL" />
       </a-spin>
     </a-card>
 

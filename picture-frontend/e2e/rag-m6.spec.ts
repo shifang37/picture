@@ -26,22 +26,6 @@ const LOGIN_USER = {
   userAvatar: '',
 }
 
-const makePicture = (id: string, name: string) => ({
-  id,
-  url: `https://example.invalid/mock-images/${id}.jpg`,
-  thumbnailUrl: `https://example.invalid/mock-images/${id}.jpg`,
-  name,
-  introduction: 'RAG E2E 图片',
-  category: '风景',
-  tags: ['测试'],
-  picWidth: 1200,
-  picHeight: 800,
-  reviewStatus: 1,
-  favoriteCount: '0',
-  likeCount: '0',
-  downloadCount: '0',
-})
-
 /**
  * 统一的 API Mock：只处理本文件关心的接口，其余返回 code=0 的空数据。
  * `ragConfig` 决定首页 / 问答入口 / 看板状态卡是否出现。
@@ -60,9 +44,7 @@ const mockApi = async (
   const listBodies: any[] = []
   const askBodies: any[] = []
 
-  await page.route('**/mock-images/**', (route) =>
-    route.fulfill({ status: 404, body: 'not used' }),
-  )
+  await page.route('**/mock-images/**', (route) => route.fulfill({ status: 404, body: 'not used' }))
   await page.route(API_PATTERN, async (route) => {
     const url = route.request().url()
     const request = route.request()
@@ -81,22 +63,20 @@ const mockApi = async (
       await route.fulfill({
         json: {
           code: 0,
-          data:
-            options.status ??
-            {
-              enabled: true,
-              textModel: 'text-embedding-v4',
-              imageModel: 'multimodal-embedding-v1',
-              dims: 1024,
-              indexName: 'picture_vec_v1',
-              alias: 'picture_vec',
-              version: 'v1',
-              textVersion: 'v1',
-              docCount: 108,
-              pendingCount: 2,
-              failedCount: 1,
-              stale: false,
-            },
+          data: options.status ?? {
+            enabled: true,
+            textModel: 'text-embedding-v4',
+            imageModel: 'multimodal-embedding-v1',
+            dims: 1024,
+            indexName: 'picture_vec_v1',
+            alias: 'picture_vec',
+            version: 'v1',
+            textVersion: 'v1',
+            docCount: 108,
+            pendingCount: 2,
+            failedCount: 1,
+            stale: false,
+          },
           message: 'ok',
         },
       })

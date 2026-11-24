@@ -149,9 +149,7 @@ const appliedKeyword = ref('')
 // RAG 开关：开启混合检索时，带关键词的请求显式传 searchMode=hybrid
 const { ragConfig, loadRagConfig } = useRagConfig()
 const searchPlaceholder = computed(() =>
-  ragConfig.value.hybridSearch
-    ? '描述你想要的图，例如：暖色调日落海报'
-    : '从海量图片中搜索',
+  ragConfig.value.hybridSearch ? '描述你想要的图，例如：暖色调日落海报' : '从海量图片中搜索',
 )
 
 // 排序：最新（默认）/ 最多收藏 / 最多点赞 / 最多下载
@@ -199,8 +197,7 @@ const buildQuery = (page: number): API.PictureQueryRequest => ({
   sortOrder: 'descend',
   searchText: searchText.value.trim() || undefined,
   // 只有 RAG + ES 都开启且确实有关键词时才走 hybrid；否则保持后端默认 keyword
-  searchMode:
-    ragConfig.value.hybridSearch && searchText.value.trim() ? 'hybrid' : undefined,
+  searchMode: ragConfig.value.hybridSearch && searchText.value.trim() ? 'hybrid' : undefined,
   category: selectedCategory.value === 'all' ? undefined : selectedCategory.value,
   tags: selectedTags.value.length ? [...selectedTags.value] : [],
 })

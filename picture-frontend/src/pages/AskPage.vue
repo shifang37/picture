@@ -79,7 +79,9 @@
             <span class="ask-answer-title">回答</span>
             <a-tag v-if="result.degraded" color="orange" class="ask-state-tag">降级</a-tag>
             <a-tag v-else-if="result.refused" class="ask-state-tag">拒答</a-tag>
-            <a-tag v-else color="green" class="ask-state-tag">已引用 {{ citations.length }} 张</a-tag>
+            <a-tag v-else color="green" class="ask-state-tag"
+              >已引用 {{ citations.length }} 张</a-tag
+            >
           </template>
           <p class="ask-answer-text">{{ result.answer || '没有找到相关图片。' }}</p>
           <a-alert
@@ -103,13 +105,7 @@
           data-testid="ask-citations"
         >
           <a-row :gutter="[12, 12]">
-            <a-col
-              v-for="citation in citations"
-              :key="citation.id"
-              :xs="12"
-              :sm="8"
-              :md="6"
-            >
+            <a-col v-for="citation in citations" :key="citation.id" :xs="12" :sm="8" :md="6">
               <router-link
                 :to="`/picture/${citation.id}`"
                 class="citation-item"
