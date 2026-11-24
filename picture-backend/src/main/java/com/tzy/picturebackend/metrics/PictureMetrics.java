@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>{@code picture.compress} → {@code picture_compress_seconds}</li>
  *   <li>{@code picture.review.pending} → {@code picture_review_pending}</li>
  *   <li>{@code picture.ai.tokens} → {@code picture_ai_tokens_total{direction}}</li>
+ *   <li>{@code picture.search.result} → {@code picture_search_result_total{hit,mode}}</li>
  * </ul>
  * <p>
  * 为什么不统计 HTTP 5xx：{@code GlobalExceptionHandler} 与限流响应都返回 HTTP 200 + 业务码，
@@ -85,6 +86,11 @@ public class PictureMetrics {
      * 搜索元数据请求计数（type=suggest/hot）
      */
     public static final String SEARCH_META = "picture.search.meta";
+
+    /**
+     * 公开搜索召回结果计数（hit=0/1，mode=mysql/es）
+     */
+    public static final String SEARCH_RESULT = "picture.search.result";
 
     /**
      * 分享卡片渲染计数（result=rendered/not_found）
@@ -258,6 +264,25 @@ public class PictureMetrics {
         Counter.builder(SEARCH_META)
                 .description("搜索联想与热词请求次数")
                 .tag("type", type == null ? "unknown" : type)
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * 记录一次公开搜索的召回结果，用于计算零结果率基线。
+     * <p>
+     * 只统计带 {@code searchText} 且未命中列表缓存的请求：缓存命中不是一次新的检索，
+     * 计入会让「同一查询反复刷新」稀释零结果率。{@code hit} 按总命中数判断而不是当前页条数，
+     * 避免翻到超出末页时被误记成零结果。
+     *
+     * @param hit  是否召回到至少一张图片
+     * @param mode 实际提供数据的路径：mysql / es（M3 起为 hybrid / semantic）
+     */
+    public void searchResult(boolean hit, String mode) {
+        Counter.builder(SEARCH_RESULT)
+                .description("公开搜索召回结果次数")
+                .tag("hit", hit ? "1" : "0")
+                .tag("mode", mode == null ? "unknown" : mode)
                 .register(registry)
                 .increment();
     }

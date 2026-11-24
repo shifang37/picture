@@ -7,6 +7,7 @@ import com.tzy.picturebackend.exception.ErrorCode;
 import com.tzy.picturebackend.exception.GlobalExceptionHandler;
 import com.tzy.picturebackend.manager.PictureDownloadManager;
 import com.tzy.picturebackend.manager.PictureListCache;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.picture.PictureBatchEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureEditRequest;
 import com.tzy.picturebackend.model.dto.picture.PictureListPage;
@@ -26,6 +27,8 @@ import com.tzy.picturebackend.service.AiSuggestionService;
 import com.tzy.picturebackend.service.PictureSearchService;
 import com.tzy.picturebackend.service.PictureService;
 import com.tzy.picturebackend.service.UserService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -77,6 +80,8 @@ class PictureControllerTest {
 
     private PictureDownloadManager pictureDownloadManager;
 
+    private SimpleMeterRegistry meterRegistry;
+
     @BeforeEach
     void setUp() {
         pictureService = mock(PictureService.class);
@@ -86,6 +91,7 @@ class PictureControllerTest {
         aiSuggestionService = mock(AiSuggestionService.class);
         pictureSearchService = mock(PictureSearchService.class);
         pictureDownloadManager = mock(PictureDownloadManager.class);
+        meterRegistry = new SimpleMeterRegistry();
         PictureController pictureController = new PictureController();
         ReflectionTestUtils.setField(pictureController, "pictureService", pictureService);
         ReflectionTestUtils.setField(pictureController, "userService", userService);
@@ -94,6 +100,7 @@ class PictureControllerTest {
         ReflectionTestUtils.setField(pictureController, "aiSuggestionService", aiSuggestionService);
         ReflectionTestUtils.setField(pictureController, "pictureSearchService", pictureSearchService);
         ReflectionTestUtils.setField(pictureController, "pictureDownloadManager", pictureDownloadManager);
+        ReflectionTestUtils.setField(pictureController, "pictureMetrics", new PictureMetrics(meterRegistry));
         mockMvc = MockMvcBuilders.standaloneSetup(pictureController)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -487,6 +494,126 @@ class PictureControllerTest {
         verify(pictureService, never()).pagePictures(any(), any());
     }
 
+    // ==================== 搜索命中率埋点 ====================
+
+    @Test
+    @DisplayName("搜索埋点：ES 命中时记 hit=1 mode=es")
+    @SuppressWarnings("unchecked")
+    void listPictureVOByPage_recordsEsHit() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 1);
+        idPage.setRecords(List.of(1L));
+        when(pictureSearchService.searchPictureIds(any())).thenReturn(idPage);
+        when(pictureService.listByIds(any())).thenReturn(List.of(picture(1L, "海边日落", 1)));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10, 1));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"日落\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        assertEquals(1.0, searchCount(true, "es"));
+        assertEquals(0.0, searchCount(false, "es"));
+        assertEquals(1.0, totalSearchCount(), "一次搜索只允许计一次数");
+    }
+
+    @Test
+    @DisplayName("搜索埋点：ES 空结果记 hit=0 mode=es")
+    void listPictureVOByPage_recordsEsZeroResult() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureSearchService.enabled()).thenReturn(true);
+        Page<Long> idPage = new Page<>(1, 10, 0);
+        idPage.setRecords(List.of());
+        when(pictureSearchService.searchPictureIds(any())).thenReturn(idPage);
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"不存在的词\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        assertEquals(1.0, searchCount(false, "es"));
+        assertEquals(0.0, searchCount(true, "es"));
+        assertEquals(1.0, totalSearchCount());
+    }
+
+    @Test
+    @DisplayName("搜索埋点：ES 未启用时记 hit=0 mode=mysql")
+    void listPictureVOByPage_recordsMysqlZeroResult() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"夕阳\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        assertEquals(1.0, searchCount(false, "mysql"));
+        assertEquals(0.0, searchCount(false, "es"));
+        assertEquals(1.0, totalSearchCount());
+    }
+
+    @Test
+    @DisplayName("搜索埋点：ES 异常回落 MySQL 时按实际路径记 mode=mysql")
+    void listPictureVOByPage_recordsMysqlWhenEsFallsBack() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureSearchService.enabled()).thenReturn(true);
+        when(pictureSearchService.searchPictureIds(any()))
+                .thenThrow(new IllegalStateException("elasticsearch down"));
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10, 2));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10, 2));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"海边\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        assertEquals(1.0, searchCount(true, "mysql"));
+        assertEquals(0.0, searchCount(true, "es"));
+        assertEquals(1.0, totalSearchCount());
+    }
+
+    @Test
+    @DisplayName("搜索埋点：不带 searchText 的浏览请求不计入零结果率")
+    void listPictureVOByPage_skipsBrowseRequests() throws Exception {
+        when(pictureListCache.get(any())).thenReturn(null);
+        when(pictureService.pagePictures(any(Page.class), any())).thenReturn(new Page<>(1, 10));
+        when(pictureService.getPictureVOPage(any(), any())).thenReturn(new Page<>(1, 10));
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
+
+        assertEquals(0.0, totalSearchCount(), "浏览请求没有搜索词，不能拉低零结果率");
+    }
+
+    @Test
+    @DisplayName("搜索埋点：缓存命中不重复计数，避免同一查询稀释基线")
+    void listPictureVOByPage_skipsCacheHit() throws Exception {
+        PictureListPage cached = new PictureListPage();
+        cached.setRecords(List.of());
+        cached.setTotal(0);
+        cached.setCurrent(1);
+        cached.setSize(10);
+        when(pictureListCache.get(any())).thenReturn(cached);
+
+        mockMvc.perform(post("/picture/list/page/vo")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"current\":1,\"pageSize\":10,\"searchText\":\"缓存词\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.total").value(0));
+
+        assertEquals(0.0, totalSearchCount());
+        verifyNoInteractions(pictureSearchService);
+    }
+
     @Test
     @DisplayName("批量审核：返回成功与失败统计")
     void batchReview_returnsResult() throws Exception {
@@ -632,6 +759,26 @@ class PictureControllerTest {
                 .andExpect(jsonPath("$.data.successCount").value(1))
                 .andExpect(jsonPath("$.data.failCount").value(1))
                 .andExpect(jsonPath("$.data.errors[0]").value("图片 3：无权删除"));
+    }
+
+    /**
+     * 读取指定 hit / mode 组合的搜索计数；指标未注册时视为 0
+     */
+    private double searchCount(boolean hit, String mode) {
+        Counter counter = meterRegistry.find(PictureMetrics.SEARCH_RESULT)
+                .tag("hit", hit ? "1" : "0")
+                .tag("mode", mode)
+                .counter();
+        return counter == null ? 0.0 : counter.count();
+    }
+
+    /**
+     * 所有 mode 加起来的搜索计数，用于断言「一次请求只计一次」
+     */
+    private double totalSearchCount() {
+        return meterRegistry.find(PictureMetrics.SEARCH_RESULT).counters().stream()
+                .mapToDouble(Counter::count)
+                .sum();
     }
 
     private User user(Long id, String role) {

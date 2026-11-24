@@ -79,6 +79,29 @@ class PictureMetricsTest {
     }
 
     @Test
+    @DisplayName("搜索基线：零结果率按 hit 与 mode 打标签")
+    void searchResult_tagsHitAndMode() {
+        pictureMetrics.searchResult(true, "es");
+        pictureMetrics.searchResult(false, "es");
+        pictureMetrics.searchResult(false, "mysql");
+        pictureMetrics.searchResult(false, null);
+
+        assertEquals(1.0, registry.get(PictureMetrics.SEARCH_RESULT)
+                .tag("hit", "1").tag("mode", "es").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.SEARCH_RESULT)
+                .tag("hit", "0").tag("mode", "es").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.SEARCH_RESULT)
+                .tag("hit", "0").tag("mode", "mysql").counter().count());
+        assertEquals(1.0, registry.get(PictureMetrics.SEARCH_RESULT)
+                .tag("hit", "0").tag("mode", "unknown").counter().count(),
+                "mode 为空时兜底为 unknown，避免出现空标签值");
+        String scrape = registry.scrape();
+        assertTrue(scrape.contains("picture_search_result_total"));
+        assertTrue(scrape.contains("hit=\"0\""));
+        assertTrue(scrape.contains("mode=\"mysql\""));
+    }
+
+    @Test
     @DisplayName("待审核数量：Gauge 读的是定时任务写入的快照")
     void reviewPending_readsSnapshot() {
         pictureMetrics.setReviewPending(7);

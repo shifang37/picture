@@ -1,6 +1,7 @@
 package com.tzy.picturebackend.controller;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.tzy.picturebackend.annotation.AuthCheck;
 import com.tzy.picturebackend.common.BaseResponse;
@@ -14,6 +15,7 @@ import com.tzy.picturebackend.exception.ThrowUtils;
 import com.tzy.picturebackend.manager.PictureDownloadManager;
 import com.tzy.picturebackend.manager.PictureListCache;
 import com.tzy.picturebackend.manager.PictureSearchSortException;
+import com.tzy.picturebackend.metrics.PictureMetrics;
 import com.tzy.picturebackend.model.dto.picture.*;
 import com.tzy.picturebackend.model.entity.Picture;
 import com.tzy.picturebackend.model.entity.User;
@@ -69,6 +71,9 @@ public class PictureController {
 
     @Resource
     private PictureDownloadManager pictureDownloadManager;
+
+    @Resource
+    private PictureMetrics pictureMetrics;
 
 
 
@@ -230,6 +235,8 @@ public class PictureController {
         validPage(current, size, 20);
         // 公开列表只展示审核通过的图片，避免未审核 / 被拒绝的内容外泄
         pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        // 零结果率只统计真正发生检索的请求：带 searchText 且未命中列表缓存
+        boolean searched = StrUtil.isNotBlank(pictureQueryRequest.getSearchText());
         // 公开列表是唯一允许缓存的列表；我的图片、管理列表、详情页都不缓存
         PictureListPage cached = pictureListCache.get(pictureQueryRequest);
         if (cached != null) {
@@ -237,9 +244,12 @@ public class PictureController {
         }
         // 启用 Elasticsearch 时由索引召回 id，再回 MySQL 取数据；索引不可用时自动回落
         Page<PictureVO> pictureVOPage = null;
+        // 实际提供数据的路径：ES 成功为 es，未启用或异常回落为 mysql
+        String searchMode = "mysql";
         if (pictureSearchService.enabled()) {
             try {
                 pictureVOPage = searchPublicPictureVOPage(pictureQueryRequest, request, current, size);
+                searchMode = "es";
             } catch (PictureSearchSortException e) {
                 // 排序字段不合法属于参数问题，交给 MySQL 查询路径返回统一的 40000
                 log.debug("搜索排序字段不合法，回落到 MySQL 校验: {}", e.getMessage());
@@ -254,6 +264,10 @@ public class PictureController {
                     pictureQueryRequest);
             // 获取封装类
             pictureVOPage = pictureService.getPictureVOPage(picturePage, request);
+        }
+        if (searched) {
+            // 按 total 判断命中：翻页超出末页不算零结果
+            pictureMetrics.searchResult(pictureVOPage.getTotal() > 0, searchMode);
         }
         pictureListCache.put(pictureQueryRequest, PictureListPage.of(pictureVOPage));
         return ResultUtils.success(pictureVOPage);
