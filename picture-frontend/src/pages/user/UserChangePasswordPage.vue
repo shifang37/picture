@@ -103,7 +103,12 @@ const handleSubmit = async () => {
 
 <style scoped>
 #userChangePasswordPage {
-  max-width: 420px;
-  margin: 0 auto;
+  max-width: 460px;
+  margin: 28px auto;
+}
+
+#userChangePasswordPage :deep(.ant-card) {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
 }
 </style>

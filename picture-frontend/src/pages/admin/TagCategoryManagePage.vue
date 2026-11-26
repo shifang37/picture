@@ -1,66 +1,71 @@
 <template>
   <div id="tagCategoryManagePage">
-    <a-flex justify="space-between" align="center" wrap="wrap" gap="12" style="margin-bottom: 16px">
+    <div class="gallery-page-head">
       <div>
-        <h2 style="margin: 0">标签分类管理</h2>
-        <div class="page-tip">
+        <h2 class="gallery-page-title">标签分类管理</h2>
+        <div class="gallery-page-desc">
           字典维护后，上传页和首页会立即读取新选项；已有图片的标签/分类不受影响。
         </div>
       </div>
       <a-space wrap>
-        <a-button :loading="syncLoading" @click="doSync"> 从现有图片同步 </a-button>
+        <a-button :loading="syncLoading" @click="doSync">从现有图片同步</a-button>
         <a-button @click="fetchData">刷新</a-button>
         <a-button type="primary" @click="openAdd">新增{{ typeLabel(activeType) }}</a-button>
       </a-space>
-    </a-flex>
+    </div>
 
     <a-alert
       type="info"
       show-icon
       message="删除字典项不会修改已经使用该标签/分类的图片；如果图片仍在用，它只是不再出现在上传页/首页的选项里。"
-      style="margin-bottom: 16px"
+      style="margin-bottom: 18px"
     />
 
-    <a-radio-group v-model:value="activeType" button-style="solid" style="margin-bottom: 16px">
-      <a-radio-button value="category">分类</a-radio-button>
-      <a-radio-button value="tag">标签</a-radio-button>
-    </a-radio-group>
+    <div class="gallery-surface dict-shell">
+      <div class="dict-top">
+        <a-radio-group v-model:value="activeType" button-style="solid">
+          <a-radio-button value="category">分类</a-radio-button>
+          <a-radio-button value="tag">标签</a-radio-button>
+        </a-radio-group>
+        <span class="dict-count">共 {{ filteredList.length }} 项</span>
+      </div>
 
-    <a-table
-      :columns="columns"
-      :data-source="filteredList"
-      :loading="loading"
-      :pagination="false"
-      row-key="id"
-      size="small"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'type'">
-          <a-tag :color="record.type === 'category' ? 'green' : 'blue'">
-            {{ typeLabel(record.type) }}
-          </a-tag>
+      <a-table
+        :columns="columns"
+        :data-source="filteredList"
+        :loading="loading"
+        :pagination="false"
+        row-key="id"
+        size="middle"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'type'">
+            <a-tag :color="record.type === 'category' ? 'green' : 'blue'">
+              {{ typeLabel(record.type) }}
+            </a-tag>
+          </template>
+          <template v-else-if="column.dataIndex === 'createTime'">
+            {{ formatTime(record.createTime) }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-popconfirm
+              title="确定删除该字典项吗？"
+              ok-text="删除"
+              cancel-text="取消"
+              @confirm="doDelete(record)"
+            >
+              <a-button danger type="link">删除</a-button>
+            </a-popconfirm>
+          </template>
         </template>
-        <template v-else-if="column.dataIndex === 'createTime'">
-          {{ formatTime(record.createTime) }}
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-popconfirm
-            title="确定删除该字典项吗？"
-            ok-text="删除"
-            cancel-text="取消"
-            @confirm="doDelete(record)"
-          >
-            <a-button danger type="link">删除</a-button>
-          </a-popconfirm>
-        </template>
-      </template>
-    </a-table>
+      </a-table>
 
-    <a-empty
-      v-if="!loading && filteredList.length === 0"
-      :description="`暂无${typeLabel(activeType)}，可以手动新增或从现有图片同步`"
-      style="margin-top: 24px"
-    />
+      <a-empty
+        v-if="!loading && filteredList.length === 0"
+        :description="`暂无${typeLabel(activeType)}，可以手动新增或从现有图片同步`"
+        class="dict-empty"
+      />
+    </div>
 
     <a-modal
       v-model:open="modalOpen"
@@ -228,13 +233,29 @@ onMounted(() => {
 
 <style scoped>
 #tagCategoryManagePage {
-  max-width: 1000px;
+  max-width: 1040px;
   margin: 0 auto;
 }
 
-.page-tip {
-  color: #888;
+.dict-shell {
+  overflow: hidden;
+}
+
+.dict-top {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.dict-count {
+  color: var(--ink-400);
   font-size: 13px;
-  margin-top: 4px;
+}
+
+.dict-empty {
+  padding: 36px 0;
 }
 </style>

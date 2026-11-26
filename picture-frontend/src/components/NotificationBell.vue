@@ -110,9 +110,14 @@ const goAll = () => {
 
 <style scoped>
 .bell-icon {
+  color: var(--ink-700);
   font-size: 18px;
-  color: #595959;
   cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+.bell-icon:hover {
+  color: var(--ink-900);
 }
 
 /*
@@ -124,17 +129,17 @@ const goAll = () => {
 }
 
 .notification-panel {
-  width: 320px;
+  width: 340px;
 }
 
 .panel-state {
-  padding: 16px 0;
-  color: #999;
+  padding: 20px 0;
+  color: var(--ink-400);
   text-align: center;
 }
 
 .panel-error {
-  color: #ff4d4f;
+  color: var(--danger);
 }
 
 .notification-list {
@@ -144,9 +149,11 @@ const goAll = () => {
 }
 
 .notification-item {
-  padding: 8px 4px;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  transition: background-color 0.15s ease;
 }
 
 .notification-item:last-child {
@@ -154,11 +161,13 @@ const goAll = () => {
 }
 
 .notification-item:hover {
-  background: #fafafa;
+  background: var(--surface-muted);
 }
 
 .item-title {
-  font-weight: 500;
+  color: var(--ink-900);
+  font-weight: 600;
+  font-size: 13.5px;
 }
 
 .unread .item-title::before {
@@ -167,31 +176,33 @@ const goAll = () => {
   height: 6px;
   margin-right: 6px;
   vertical-align: middle;
-  background: #ff4d4f;
+  background: var(--danger);
   border-radius: 50%;
   content: '';
 }
 
 .item-content {
-  margin-top: 2px;
-  overflow: hidden;
-  color: #666;
-  font-size: 12px;
-  text-overflow: ellipsis;
   display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ink-500);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
 .item-time {
   margin-top: 4px;
-  color: #bbb;
-  font-size: 12px;
+  color: var(--ink-400);
+  font-size: 11.5px;
 }
 
 .panel-footer {
+  margin-top: 4px;
   padding-top: 8px;
   text-align: center;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--line);
 }
 </style>

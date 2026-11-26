@@ -1,93 +1,100 @@
 <template>
   <div id="myPicturesPage">
-    <div class="page-header">
+    <div class="gallery-page-head">
       <div>
-        <h2>我的图片</h2>
-        <div class="desc">查看自己上传的全部图片，包括待审核和已拒绝的图片</div>
+        <h2 class="gallery-page-title">我的图片</h2>
+        <div class="gallery-page-desc">查看自己上传的全部图片，包括待审核和已拒绝的图片</div>
       </div>
-      <a-button type="primary" @click="goUpload">上传图片</a-button>
-    </div>
-
-    <a-tabs v-model:activeKey="activeStatus" @change="handleStatusChange">
-      <a-tab-pane key="all" tab="全部" />
-      <a-tab-pane key="0" tab="待审核" />
-      <a-tab-pane key="1" tab="已通过" />
-      <a-tab-pane key="2" tab="已拒绝" />
-    </a-tabs>
-
-    <div class="batch-toolbar">
-      <span class="selected-text">已选择 {{ selectedRowKeys.length }} 张</span>
       <a-space>
-        <a-button :disabled="!selectedRowKeys.length" @click="batchEditOpen = true">
-          批量编辑
-        </a-button>
-        <a-button :disabled="!selectedRowKeys.length" @click="addToAlbumOpen = true">
-          加入专辑
-        </a-button>
-        <a-popconfirm
-          title="确定删除选中的图片吗？删除后进入回收站，可在保留期内由管理员恢复。"
-          ok-text="删除"
-          cancel-text="取消"
-          :disabled="!selectedRowKeys.length"
-          @confirm="doBatchDelete"
-        >
-          <a-button danger :disabled="!selectedRowKeys.length">批量删除</a-button>
-        </a-popconfirm>
-        <a-button v-if="selectedRowKeys.length" type="link" @click="clearSelection">
-          清空选择
-        </a-button>
+        <a-button @click="router.push('/batch_upload')">批量上传</a-button>
+        <a-button type="primary" @click="goUpload">上传图片</a-button>
       </a-space>
     </div>
 
-    <a-table
-      :data-source="dataList"
-      :columns="columns"
-      :loading="loading"
-      :pagination="pagination"
-      :row-selection="rowSelection"
-      row-key="id"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'cover'">
-          <img class="cover" :src="getThumbnailUrl(record.url)" :alt="record.name" />
-        </template>
-        <template v-else-if="column.key === 'name'">
-          <div>{{ record.name || '未命名' }}</div>
-          <div class="sub-text">{{ record.category || '默认分类' }}</div>
-        </template>
-        <template v-else-if="column.key === 'picSize'">
-          {{ formatSize(record.picSize) }}
-        </template>
-        <template v-else-if="column.key === 'reviewStatus'">
-          <a-space>
-            <a-tag :color="statusColor(record.reviewStatus)">
-              {{ statusText(record.reviewStatus) }}
-            </a-tag>
-            <a-tooltip
-              v-if="record.reviewStatus === 2 && record.reviewMessage"
-              :title="record.reviewMessage"
-            >
-              <info-circle-outlined class="status-icon" />
-            </a-tooltip>
-          </a-space>
-        </template>
-        <template v-else-if="column.key === 'createTime'">
-          {{ formatTime(record.createTime) }}
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-space>
-            <a-button type="link" size="small" @click="viewPicture(record)">查看</a-button>
-            <a-button type="link" size="small" @click="editPictureItem(record)">编辑</a-button>
+    <div class="gallery-surface table-shell">
+      <div class="shell-top">
+        <a-tabs v-model:activeKey="activeStatus" class="status-tabs" @change="handleStatusChange">
+          <a-tab-pane key="all" tab="全部" />
+          <a-tab-pane key="0" tab="待审核" />
+          <a-tab-pane key="1" tab="已通过" />
+          <a-tab-pane key="2" tab="已拒绝" />
+        </a-tabs>
+
+        <div class="batch-toolbar">
+          <span class="selected-text">已选择 {{ selectedRowKeys.length }} 张</span>
+          <a-space wrap>
+            <a-button :disabled="!selectedRowKeys.length" @click="batchEditOpen = true">
+              批量编辑
+            </a-button>
+            <a-button :disabled="!selectedRowKeys.length" @click="addToAlbumOpen = true">
+              加入专辑
+            </a-button>
             <a-popconfirm
-              title="确定删除这张图片吗？删除后进入回收站，可在保留期内由管理员恢复。"
-              @confirm="doDelete(record)"
+              title="确定删除选中的图片吗？删除后进入回收站，可在保留期内由管理员恢复。"
+              ok-text="删除"
+              cancel-text="取消"
+              :disabled="!selectedRowKeys.length"
+              @confirm="doBatchDelete"
             >
-              <a-button type="link" size="small" danger>删除</a-button>
+              <a-button danger :disabled="!selectedRowKeys.length">批量删除</a-button>
             </a-popconfirm>
+            <a-button v-if="selectedRowKeys.length" type="link" @click="clearSelection">
+              清空选择
+            </a-button>
           </a-space>
+        </div>
+      </div>
+
+      <a-table
+        :data-source="dataList"
+        :columns="columns"
+        :loading="loading"
+        :pagination="pagination"
+        :row-selection="rowSelection"
+        row-key="id"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'cover'">
+            <img class="cover" :src="getThumbnailUrl(record.url)" :alt="record.name" />
+          </template>
+          <template v-else-if="column.key === 'name'">
+            <div class="item-name">{{ record.name || '未命名' }}</div>
+            <div class="sub-text">{{ record.category || '默认分类' }}</div>
+          </template>
+          <template v-else-if="column.key === 'picSize'">
+            {{ formatSize(record.picSize) }}
+          </template>
+          <template v-else-if="column.key === 'reviewStatus'">
+            <a-space>
+              <a-tag :color="statusColor(record.reviewStatus)">
+                {{ statusText(record.reviewStatus) }}
+              </a-tag>
+              <a-tooltip
+                v-if="record.reviewStatus === 2 && record.reviewMessage"
+                :title="record.reviewMessage"
+              >
+                <info-circle-outlined class="status-icon" />
+              </a-tooltip>
+            </a-space>
+          </template>
+          <template v-else-if="column.key === 'createTime'">
+            {{ formatTime(record.createTime) }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-space>
+              <a-button type="link" size="small" @click="viewPicture(record)">查看</a-button>
+              <a-button type="link" size="small" @click="editPictureItem(record)">编辑</a-button>
+              <a-popconfirm
+                title="确定删除这张图片吗？删除后进入回收站，可在保留期内由管理员恢复。"
+                @confirm="doDelete(record)"
+              >
+                <a-button type="link" size="small" danger>删除</a-button>
+              </a-popconfirm>
+            </a-space>
+          </template>
         </template>
-      </template>
-    </a-table>
+      </a-table>
+    </div>
 
     <BatchEditModal
       v-model:open="batchEditOpen"
@@ -287,53 +294,58 @@ onMounted(() => {
 
 <style scoped>
 #myPicturesPage {
-  max-width: 1100px;
+  max-width: 1180px;
   margin: 0 auto;
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 8px;
+.table-shell {
+  overflow: hidden;
 }
 
-.page-header h2 {
-  margin-bottom: 4px;
+.shell-top {
+  padding: 4px 20px 14px;
+  border-bottom: 1px solid var(--line);
 }
 
-.desc {
-  color: #999;
-  font-size: 13px;
+.status-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 12px;
 }
 
 .cover {
+  display: block;
   width: 80px;
   height: 60px;
   object-fit: cover;
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.item-name {
+  color: var(--ink-900);
+  font-weight: 600;
 }
 
 .sub-text {
-  color: #999;
+  margin-top: 2px;
+  color: var(--ink-400);
   font-size: 12px;
 }
 
 .status-icon {
-  color: #faad14;
+  color: var(--warning);
 }
 
 .batch-toolbar {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 12px;
 }
 
 .selected-text {
-  color: #666;
+  color: var(--ink-500);
+  font-weight: 500;
   font-size: 13px;
 }
 </style>

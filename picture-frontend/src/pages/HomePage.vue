@@ -1,10 +1,13 @@
 <template>
   <div id="homePage">
-    <!-- 首屏：一句主张 + 搜索入口，搜索框沿用原有联想 / 历史 / 热词能力 -->
+    <!-- 首屏：简洁有力的策展标题 + 胶囊搜索框 -->
     <section class="hero">
-      <p class="hero-eyebrow">SHIFANG37 · 图片素材库</p>
+      <div class="hero-eyebrow">
+        <span class="hero-eyebrow-dot" aria-hidden="true"></span>
+        <span>SHIFANG37 · 精选视觉素材库</span>
+      </div>
       <h1 class="hero-title">收藏每一个<span class="hero-accent">值得被看见</span>的画面</h1>
-      <p class="hero-sub">上传、整理、检索与分享你的图片，标签和分类让素材随时可用</p>
+      <p class="hero-sub">上传、策展、语义检索与分享高质量图片素材，让每一次灵感查找都恰如其分</p>
       <div class="search-bar">
         <SearchBox
           v-model="searchText"
@@ -15,39 +18,53 @@
         />
         <!-- RAG 开启时才出现的语义检索提示；关闭时页面与改造前完全一致 -->
         <div v-if="ragConfig.hybridSearch" class="search-mode-tip" data-testid="hybrid-tip">
-          <a-tag color="purple">语义检索已开启</a-tag>
-          <span>可以试试长句、同义词或风格描述</span>
-          <router-link v-if="ragConfig.askEnabled" to="/ask" data-testid="ask-entry">
+          <span class="hybrid-pill">
+            <span class="hybrid-dot" aria-hidden="true"></span>
+            语义检索已开启
+          </span>
+          <span>试试描述光线、氛围、构图或使用场景</span>
+          <router-link
+            v-if="ragConfig.askEnabled"
+            to="/ask"
+            class="hybrid-ask-link"
+            data-testid="ask-entry"
+          >
             用一句话问图库 →
           </router-link>
         </div>
       </div>
     </section>
 
-    <!-- 分类 / 排序 / 标签：统一收进一张筛选面板 -->
+    <!-- 分类 / 排序 / 标签：精致画廊筛选栏 -->
     <section class="filters">
-      <div class="filters-categories">
-        <a-tabs v-model:activeKey="selectedCategory" class="category-tabs" @change="doSearch">
-          <a-tab-pane key="all" tab="全部" />
-          <a-tab-pane v-for="category in categoryList" :key="category" :tab="category" />
-        </a-tabs>
-      </div>
-      <div class="sort-bar">
-        <span class="filter-label">排序</span>
-        <a-radio-group
-          v-model:value="sortField"
-          size="small"
-          button-style="solid"
-          @change="doSortChange"
-        >
-          <a-radio-button v-for="option in SORT_OPTIONS" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </a-radio-button>
-        </a-radio-group>
+      <div class="filters-top">
+        <div class="filters-categories">
+          <a-tabs v-model:activeKey="selectedCategory" class="category-tabs" @change="doSearch">
+            <a-tab-pane key="all" tab="全部" />
+            <a-tab-pane v-for="category in categoryList" :key="category" :tab="category" />
+          </a-tabs>
+        </div>
+        <div class="sort-bar">
+          <span class="filter-label">排序</span>
+          <a-radio-group
+            v-model:value="sortField"
+            size="small"
+            button-style="solid"
+            @change="doSortChange"
+          >
+            <a-radio-button
+              v-for="option in SORT_OPTIONS"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </a-radio-button>
+          </a-radio-group>
+        </div>
       </div>
       <div v-if="tagList.length" class="tag-bar">
         <span class="filter-label">标签</span>
-        <a-space :size="[0, 8]" wrap>
+        <div class="tag-list">
           <a-checkable-tag
             v-for="tag in tagList"
             :key="tag"
@@ -56,7 +73,7 @@
           >
             {{ tag }}
           </a-checkable-tag>
-        </a-space>
+        </div>
       </div>
     </section>
 
@@ -65,7 +82,7 @@
       <a-spin size="large" />
     </div>
 
-    <!-- 首屏失败 -->
+    <!-- 加载失败 -->
     <div v-else-if="!dataList.length && loadError" class="state-block" data-testid="home-error">
       <a-empty description="图片加载失败，请稍后重试">
         <a-button type="primary" @click="retryLoad">重试</a-button>
@@ -77,38 +94,45 @@
       <a-empty :description="emptyDescription" />
     </div>
 
-    <!-- 等比例网格：所有封面统一 4:3，一行高度齐平，避免瀑布流的错落感 -->
-    <div v-show="dataList.length" ref="listRef" class="waterfall" data-testid="waterfall">
-      <PictureCard
-        v-for="picture in dataList"
-        :key="picture.id"
-        :picture="picture"
-        :thumbnail-size="thumbnailSize"
-        :keyword="appliedKeyword"
-        @open="doClickPicture"
-      />
-    </div>
+    <!-- 规则分页画廊：等比例 4:3 封面卡片 + 分页器 -->
+    <a-spin v-else :spinning="fetching">
+      <div ref="listRef" class="waterfall" data-testid="waterfall">
+        <PictureCard
+          v-for="picture in dataList"
+          :key="picture.id"
+          :picture="picture"
+          :thumbnail-size="thumbnailSize"
+          :keyword="appliedKeyword"
+          @open="doClickPicture"
+        />
+      </div>
 
-    <!-- 加载更多 / 没有更多 -->
-    <div v-if="dataList.length" class="load-more" data-testid="load-more">
-      <template v-if="fetching">
-        <a-spin size="small" />
-        <span>正在加载更多...</span>
-      </template>
-      <template v-else-if="loadError">
+      <div v-if="loadError" class="page-error" data-testid="page-error">
         <span class="load-more-error">{{ loadError }}</span>
         <a-button size="small" type="primary" ghost @click="retryLoad">重试</a-button>
-      </template>
-      <span v-else-if="!hasMore" class="load-more-end">没有更多了，共 {{ total }} 张</span>
-    </div>
+      </div>
+
+      <div class="pagination-bar" data-testid="home-pagination">
+        <a-pagination
+          :current="currentPage"
+          :page-size="pageSize"
+          :total="total"
+          :page-size-options="PAGE_SIZE_OPTIONS"
+          show-size-changer
+          show-quick-jumper
+          :show-total="(t: number) => `共 ${t} 张`"
+          @change="handlePageChange"
+        />
+      </div>
+    </a-spin>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { useDevicePixelRatio, useElementSize, useInfiniteScroll } from '@vueuse/core'
+import { useDevicePixelRatio, useElementSize } from '@vueuse/core'
 import { listPictureTagCategory, listPictureVoByPage } from '@/api/pictureController'
 import { fetchSearchHot } from '@/api/searchExtra'
 import { useRagConfig } from '@/composables/useRagConfig'
@@ -116,8 +140,9 @@ import PictureCard from '@/components/PictureCard.vue'
 import SearchBox from '@/components/SearchBox.vue'
 import { getColumnCount, getColumnWidth, getThumbnailSize } from '@/utils/waterfall'
 
-// 后端公开列表每页上限 20 条
-const PAGE_SIZE = 20
+// 后端公开列表每页上限 20 条，支持 8 / 12 / 16 / 20 每页切换
+const DEFAULT_PAGE_SIZE = 16
+const PAGE_SIZE_OPTIONS = ['8', '12', '16', '20']
 // 从详情页返回首页时用于恢复滚动位置
 const HOME_SCROLL_KEY = 'picture:home-scroll-top'
 
@@ -126,13 +151,11 @@ const router = useRouter()
 
 const dataList = ref<API.PictureVO[]>([])
 const total = ref(0)
-const currentPage = ref(0)
-const hasMore = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
 const fetching = ref(false)
 const initialLoading = ref(true)
 const loadError = ref('')
-// keep-alive 缓存期间暂停滚动加载，避免在详情页误触发首页分页
-const isActive = ref(true)
 
 // 搜索条件
 const searchText = ref('')
@@ -170,7 +193,7 @@ const emptyDescription = computed(() =>
     : '暂无图片，换个搜索条件试试',
 )
 
-// 瀑布流列数与缩略图尺寸
+// 网格列宽与缩略图尺寸
 const listRef = ref<HTMLElement | null>(null)
 const { width: containerWidth } = useElementSize(listRef)
 const { pixelRatio } = useDevicePixelRatio()
@@ -187,12 +210,12 @@ const thumbnailSize = computed(() =>
   getThumbnailSize(getColumnWidth(effectiveWidth.value, columnCount.value), pixelRatio.value),
 )
 
-// 请求序号：切换搜索条件时丢弃过期响应
+// 请求序号：切换搜索条件或翻页时丢弃过期响应
 let requestSeq = 0
 
 const buildQuery = (page: number): API.PictureQueryRequest => ({
   current: page,
-  pageSize: PAGE_SIZE,
+  pageSize: pageSize.value,
   sortField: sortField.value,
   sortOrder: 'descend',
   searchText: searchText.value.trim() || undefined,
@@ -202,51 +225,26 @@ const buildQuery = (page: number): API.PictureQueryRequest => ({
   tags: selectedTags.value.length ? [...selectedTags.value] : [],
 })
 
-const fetchPage = async (reset = false) => {
-  if (!reset && (fetching.value || !hasMore.value)) {
-    return
-  }
+const fetchPage = async (page = currentPage.value, resetState = false) => {
   const seq = (requestSeq += 1)
   fetching.value = true
   loadError.value = ''
-  if (reset) {
+  if (resetState) {
     dataList.value = []
     total.value = 0
-    currentPage.value = 0
-    hasMore.value = false
     initialLoading.value = true
     // 只有在真正发起查询时才更新高亮关键词，避免输入过程中列表闪烁
     appliedKeyword.value = searchText.value.trim()
   }
-  const page = currentPage.value + 1
   try {
     const res = await listPictureVoByPage(buildQuery(page))
     if (seq !== requestSeq) {
       return
     }
     if (res.data.code === 0 && res.data.data) {
-      const records = res.data.data.records ?? []
-      const newTotal = Number(res.data.data.total) || 0
-      // 滚动期间若有新图片过审，后续页会整体后移产生重复，按 id 去重
-      const seenIds = new Set(dataList.value.map((picture) => String(picture.id)))
-      const uniqueRecords = records.filter((picture) => {
-        const id = String(picture.id)
-        if (!picture.id || seenIds.has(id)) {
-          return false
-        }
-        seenIds.add(id)
-        return true
-      })
-      dataList.value = [...dataList.value, ...uniqueRecords]
-      total.value = newTotal
+      dataList.value = res.data.data.records ?? []
+      total.value = Number(res.data.data.total) || 0
       currentPage.value = page
-      // 先让新卡片渲染完成，再开启下一次滚动加载；否则列表还是旧高度时会被误判为「已到底部」
-      hasMore.value = false
-      if (records.length >= PAGE_SIZE && page * PAGE_SIZE < newTotal) {
-        nextTick(() => {
-          hasMore.value = true
-        })
-      }
     } else {
       loadError.value = res.data.message || '加载图片失败'
     }
@@ -263,20 +261,17 @@ const fetchPage = async (reset = false) => {
   }
 }
 
-// 滚动到距底部 400px 时自动加载下一页；加载失败后等待用户点重试，避免请求风暴
-useInfiniteScroll(typeof window === 'undefined' ? null : window, () => fetchPage(), {
-  distance: 400,
-  interval: 200,
-  canLoadMore: () => isActive.value && hasMore.value && !fetching.value && !loadError.value,
-})
+const handlePageChange = (page: number, nextPageSize: number) => {
+  const sizeChanged = nextPageSize !== pageSize.value
+  pageSize.value = nextPageSize
+  currentPage.value = sizeChanged ? 1 : page
+  syncQueryToUrl()
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+  fetchPage(currentPage.value)
+}
 
 const retryLoad = () => {
-  if (currentPage.value === 0) {
-    fetchPage(true)
-  } else {
-    loadError.value = ''
-    fetchPage()
-  }
+  fetchPage(currentPage.value, dataList.value.length === 0)
 }
 
 const applyQueryToState = () => {
@@ -293,9 +288,14 @@ const applyQueryToState = () => {
   // 排序也写进 URL：刷新或分享链接后能还原「最热」等视图
   const rawSort = typeof query.sort === 'string' ? query.sort : ''
   sortField.value = SORT_OPTIONS.some((option) => option.value === rawSort) ? rawSort : 'createTime'
+  // 页码与每页条数也支持从 URL 还原
+  const rawPage = Number(query.page)
+  currentPage.value = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1
+  const rawSize = Number(query.pageSize)
+  pageSize.value = PAGE_SIZE_OPTIONS.includes(String(rawSize)) ? rawSize : DEFAULT_PAGE_SIZE
 }
 
-// 搜索条件同步到 URL，刷新或分享链接后能还原
+// 搜索条件与分页同步到 URL，刷新或分享链接后能还原
 const syncQueryToUrl = () => {
   const query: Record<string, string | string[]> = {}
   const text = searchText.value.trim()
@@ -311,6 +311,12 @@ const syncQueryToUrl = () => {
   if (sortField.value !== 'createTime') {
     query.sort = sortField.value
   }
+  if (currentPage.value > 1) {
+    query.page = String(currentPage.value)
+  }
+  if (pageSize.value !== DEFAULT_PAGE_SIZE) {
+    query.pageSize = String(pageSize.value)
+  }
   router.replace({ name: 'home', query }).catch(() => {
     // 地址栏同步失败不影响列表展示
   })
@@ -318,9 +324,10 @@ const syncQueryToUrl = () => {
 
 // 搜索 / 切换分类 / 勾选标签
 const doSearch = () => {
+  currentPage.value = 1
   syncQueryToUrl()
   window.scrollTo({ top: 0, behavior: 'auto' })
-  fetchPage(true)
+  fetchPage(1, true)
 }
 
 const handleTagChange = (tag: string, checked: boolean) => {
@@ -358,11 +365,12 @@ const getHotKeywords = async () => {
   }
 }
 
-// 切换排序：回到顶部并重新分页，避免停留在旧列表的滚动位置
+// 切换排序：回到第一页并重新请求
 const doSortChange = () => {
+  currentPage.value = 1
   syncQueryToUrl()
   window.scrollTo({ top: 0, behavior: 'auto' })
-  fetchPage(true)
+  fetchPage(1, true)
 }
 
 // 获取标签和分类选项
@@ -401,13 +409,12 @@ onMounted(async () => {
   applyQueryToState()
   // 先拿 RAG 开关：URL 里带 searchText 时，首屏查询也要按 hybrid 发起
   await loadRagConfig()
-  fetchPage(true)
+  fetchPage(currentPage.value, true)
   getTagCategoryOptions()
   getHotKeywords()
 })
 
 onActivated(() => {
-  isActive.value = true
   if (!dataList.value.length) {
     // 首次进入（或没有缓存数据）时没有可恢复的位置
     try {
@@ -439,57 +446,73 @@ onActivated(() => {
     window.scrollTo({ top, behavior: 'auto' })
   })
 })
-
-onDeactivated(() => {
-  isActive.value = false
-})
 </script>
 
 <style scoped>
 .hero {
-  padding: 36px 0 30px;
+  position: relative;
+  padding: 28px 0 34px;
   text-align: center;
 }
 
 .hero-eyebrow {
   display: inline-flex;
+  gap: 8px;
   align-items: center;
   margin: 0 0 18px;
   padding: 6px 14px;
-  color: var(--brand-600);
+  color: var(--ink-700);
   font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 999px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-xs);
+}
+
+.hero-eyebrow-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--brand);
+  border-radius: 50%;
 }
 
 .hero-title {
   margin: 0 0 14px;
   color: var(--ink-900);
-  font-weight: 700;
-  font-size: clamp(30px, 4vw, 46px);
-  line-height: 1.16;
-  letter-spacing: -0.03em;
+  font-weight: 800;
+  font-size: clamp(30px, 4.2vw, 48px);
+  line-height: 1.14;
+  letter-spacing: -0.035em;
 }
 
 .hero-accent {
-  padding: 0 2px;
-  background: linear-gradient(120deg, #4f46e5 0%, #9333ea 55%, #ec4899 100%);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  position: relative;
+  display: inline-block;
+  padding: 0 3px;
+  color: var(--brand);
+}
+
+.hero-accent::after {
+  position: absolute;
+  right: 2px;
+  bottom: 4px;
+  left: 2px;
+  z-index: -1;
+  height: 10px;
+  background: rgba(37, 99, 235, 0.12);
+  border-radius: 999px;
+  content: '';
 }
 
 .hero-sub {
-  max-width: 560px;
+  max-width: 580px;
   margin: 0 auto 28px;
   color: var(--ink-500);
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.72;
 }
 
 .search-bar {
@@ -504,80 +527,145 @@ onDeactivated(() => {
   gap: 8px 12px;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
-  color: var(--ink-400);
-  font-size: 13px;
+  margin-top: 14px;
+  color: var(--ink-500);
+  font-size: 12.5px;
 }
 
-.search-mode-tip a {
-  font-weight: 500;
+.hybrid-pill {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 10px;
+  color: var(--brand-600);
+  font-weight: 600;
+  font-size: 12px;
+  background: var(--brand-soft);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 999px;
+}
+
+.hybrid-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--brand);
+  border-radius: 50%;
+}
+
+.hybrid-ask-link {
+  color: var(--ink-900);
+  font-weight: 600;
+}
+
+.hybrid-ask-link:hover {
+  color: var(--brand);
 }
 
 .filters {
   margin: 4px 0 28px;
-  padding: 2px 22px 16px;
-  background: rgba(255, 255, 255, 0.86);
+  padding: 6px 22px 16px;
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow-xs);
 }
 
-.filters-categories :deep(.ant-tabs-nav) {
-  margin-bottom: 8px;
-}
-
-.filters-categories :deep(.ant-tabs-nav::before) {
+.filters-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  align-items: center;
+  justify-content: space-between;
   border-bottom: 1px solid var(--line);
 }
 
-.category-tabs :deep(.ant-tabs-tab) {
-  padding: 14px 2px;
-  font-size: 14px;
-  font-weight: 500;
+.filters-categories {
+  flex: 1 1 320px;
+  min-width: 0;
 }
 
-.category-tabs :deep(.ant-tabs-tab-active) {
+.filters-categories :deep(.ant-tabs-nav) {
+  margin-bottom: 0;
+}
+
+.filters-categories :deep(.ant-tabs-nav::before) {
+  display: none;
+}
+
+.category-tabs :deep(.ant-tabs-tab) {
+  padding: 13px 2px;
+  color: var(--ink-500);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.category-tabs :deep(.ant-tabs-tab:hover) {
+  color: var(--ink-900);
+}
+
+.category-tabs :deep(.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  color: var(--ink-900);
   font-weight: 600;
 }
 
-.sort-bar,
-.tag-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+.category-tabs :deep(.ant-tabs-ink-bar) {
+  background: var(--ink-900);
+}
+
+.sort-bar {
+  display: inline-flex;
+  flex: none;
+  gap: 10px;
   align-items: center;
   padding: 8px 0;
 }
 
+.tag-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding-top: 14px;
+}
+
+.tag-list {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .filter-label {
   flex: none;
-  min-width: 32px;
+  min-width: 30px;
   color: var(--ink-400);
+  font-weight: 500;
   font-size: 12px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
 
 .sort-bar :deep(.ant-radio-group) {
   display: inline-flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0;
-  background: transparent;
+  flex-wrap: nowrap;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface-subtle);
+  border-radius: 999px;
 }
 
 .sort-bar :deep(.ant-radio-button-wrapper) {
-  height: 32px;
-  padding-inline: 14px;
+  height: 28px;
+  padding-inline: 11px;
   color: var(--ink-500);
-  line-height: 30px;
-  background: #fff;
-  border: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 26px;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 999px;
   transition:
     color 0.18s ease,
-    border-color 0.18s ease,
-    background 0.18s ease;
+    background-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .sort-bar :deep(.ant-radio-button-wrapper::before) {
@@ -585,55 +673,58 @@ onDeactivated(() => {
 }
 
 .sort-bar :deep(.ant-radio-button-wrapper:hover) {
-  color: var(--brand-600);
-  border-color: var(--brand-ring);
+  color: var(--ink-900);
 }
 
 .sort-bar :deep(.ant-radio-button-wrapper-checked) {
-  color: #fff;
-  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
-  border-color: transparent;
-  box-shadow: 0 8px 18px -10px rgba(79, 70, 229, 0.9);
+  color: var(--ink-900) !important;
+  font-weight: 600;
+  background: var(--surface) !important;
+  border-color: var(--line) !important;
+  box-shadow: var(--shadow-xs);
 }
 
 .tag-bar :deep(.ant-tag-checkable) {
+  margin-inline-end: 0;
   padding: 3px 12px;
-  color: var(--ink-500);
-  background: #fff;
+  color: var(--ink-700);
+  font-size: 12.5px;
+  background: var(--surface-muted);
   border: 1px solid var(--line);
   border-radius: 999px;
   transition:
     color 0.18s ease,
     border-color 0.18s ease,
-    background 0.18s ease;
+    background-color 0.18s ease;
 }
 
 .tag-bar :deep(.ant-tag-checkable:hover) {
-  color: var(--brand-600);
-  border-color: var(--brand-ring);
+  color: var(--ink-900);
+  border-color: var(--line-strong);
+  background: var(--surface);
 }
 
 .tag-bar :deep(.ant-tag-checkable-checked) {
-  color: var(--brand-600);
-  font-weight: 600;
-  background: var(--brand-soft);
-  border-color: var(--brand-ring);
+  color: #fff;
+  font-weight: 500;
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
 }
 
 .state-block {
   display: flex;
   justify-content: center;
-  padding: 72px 0;
+  padding: 76px 0;
 }
 
 .waterfall {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px;
   align-items: stretch;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1120px) {
   .waterfall {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -651,37 +742,56 @@ onDeactivated(() => {
   }
 }
 
-.load-more {
+.page-error {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  min-height: 48px;
-  margin-top: 8px;
-  padding: 24px 0;
-  color: var(--ink-400);
+  margin-top: 16px;
 }
 
 .load-more-error {
-  color: #e11d48;
+  color: var(--danger);
+  font-size: 13px;
 }
 
-.load-more-end {
-  font-size: 12.5px;
-  letter-spacing: 0.06em;
+.pagination-bar {
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
 }
 
 @media (max-width: 720px) {
   .hero {
-    padding: 20px 0 24px;
+    padding: 16px 0 24px;
   }
 
   .filters {
-    padding: 0 14px 12px;
+    padding: 2px 14px 14px;
+  }
+
+  .sort-bar {
+    width: 100%;
+    padding-top: 4px;
+    padding-bottom: 10px;
+    overflow-x: auto;
+  }
+
+  .tag-bar {
+    align-items: flex-start;
+  }
+
+  .tag-bar .filter-label {
+    padding-top: 4px;
   }
 
   .waterfall {
-    gap: 12px;
+    gap: 14px;
   }
 }
 </style>

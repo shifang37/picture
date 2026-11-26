@@ -1,8 +1,28 @@
 <template>
   <div id="pictureReviewPage">
-    <h2 style="margin-bottom: 16px">图片审核</h2>
+    <div class="gallery-page-head">
+      <div>
+        <h2 class="gallery-page-title">图片审核</h2>
+        <div class="gallery-page-desc">
+          机审疑似与违规图片自动置顶，支持单张或批量通过/拒绝并留存审核日志
+        </div>
+      </div>
+      <a-space wrap>
+        <a-button @click="fetchData">刷新</a-button>
+        <a-button
+          type="primary"
+          :disabled="selectedRowKeys.length === 0"
+          @click="openBatchReview(1)"
+        >
+          批量通过
+        </a-button>
+        <a-button danger :disabled="selectedRowKeys.length === 0" @click="openBatchReview(2)">
+          批量拒绝
+        </a-button>
+      </a-space>
+    </div>
 
-    <a-flex justify="space-between" align="center" style="margin-bottom: 16px" wrap="wrap" gap="12">
+    <div class="gallery-toolbar">
       <a-form layout="inline" :model="searchParams" @finish="doSearch">
         <a-form-item label="关键词" name="searchText">
           <a-input
@@ -19,107 +39,99 @@
         </a-form-item>
       </a-form>
 
-      <a-space>
-        <a-radio-group
-          v-model:value="searchParams.reviewStatus"
-          button-style="solid"
-          @change="doSearch"
-        >
-          <a-radio-button :value="0">待审核</a-radio-button>
-          <a-radio-button :value="1">已通过</a-radio-button>
-          <a-radio-button :value="2">已拒绝</a-radio-button>
-        </a-radio-group>
-        <a-button @click="fetchData">刷新</a-button>
-        <a-button
-          type="primary"
-          :disabled="selectedRowKeys.length === 0"
-          @click="openBatchReview(1)"
-        >
-          批量通过
-        </a-button>
-        <a-button danger :disabled="selectedRowKeys.length === 0" @click="openBatchReview(2)">
-          批量拒绝
-        </a-button>
-      </a-space>
-    </a-flex>
+      <a-radio-group
+        v-model:value="searchParams.reviewStatus"
+        button-style="solid"
+        @change="doSearch"
+      >
+        <a-radio-button :value="0">待审核</a-radio-button>
+        <a-radio-button :value="1">已通过</a-radio-button>
+        <a-radio-button :value="2">已拒绝</a-radio-button>
+      </a-radio-group>
+    </div>
 
-    <a-table
-      :columns="columns"
-      :data-source="dataList"
-      :pagination="pagination"
-      :loading="loading"
-      :row-selection="rowSelection"
-      row-key="id"
-      @change="doTableChange"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'url'">
-          <a-image :src="getThumbnailUrl(record.url)" :width="120" />
-        </template>
-        <template v-else-if="column.dataIndex === 'tags'">
-          <a-space wrap>
-            <a-tag v-for="tag in parseTags(record.tags)" :key="tag">{{ tag }}</a-tag>
-          </a-space>
-        </template>
-        <template v-else-if="column.dataIndex === 'reviewStatus'">
-          <a-tag :color="statusColor(record.reviewStatus)">
-            {{ statusText(record.reviewStatus) }}
-          </a-tag>
-        </template>
-        <template v-else-if="column.dataIndex === 'machineReviewStatus'">
-          <a-tooltip>
-            <template #title>
-              <div>{{ machineStatusText(record.machineReviewStatus) }}</div>
-              <div v-if="record.machineReviewLabel">标签：{{ record.machineReviewLabel }}</div>
-              <div
-                v-if="record.machineReviewScore !== undefined && record.machineReviewScore !== null"
-              >
-                置信度：{{ record.machineReviewScore }}
-              </div>
-              <div v-if="record.machineReviewTime">
-                机审时间：{{ formatTime(record.machineReviewTime) }}
-              </div>
-            </template>
-            <a-tag :color="machineStatusColor(record.machineReviewStatus)">
-              {{ machineStatusText(record.machineReviewStatus) }}
+    <div class="gallery-table-card">
+      <a-table
+        :columns="columns"
+        :data-source="dataList"
+        :pagination="pagination"
+        :loading="loading"
+        :row-selection="rowSelection"
+        :scroll="{ x: 1180 }"
+        row-key="id"
+        @change="doTableChange"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'url'">
+            <a-image :src="getThumbnailUrl(record.url)" :width="108" />
+          </template>
+          <template v-else-if="column.dataIndex === 'tags'">
+            <a-space wrap>
+              <a-tag v-for="tag in parseTags(record.tags)" :key="tag">{{ tag }}</a-tag>
+            </a-space>
+          </template>
+          <template v-else-if="column.dataIndex === 'reviewStatus'">
+            <a-tag :color="statusColor(record.reviewStatus)">
+              {{ statusText(record.reviewStatus) }}
             </a-tag>
-          </a-tooltip>
+          </template>
+          <template v-else-if="column.dataIndex === 'machineReviewStatus'">
+            <a-tooltip>
+              <template #title>
+                <div>{{ machineStatusText(record.machineReviewStatus) }}</div>
+                <div v-if="record.machineReviewLabel">标签：{{ record.machineReviewLabel }}</div>
+                <div
+                  v-if="
+                    record.machineReviewScore !== undefined && record.machineReviewScore !== null
+                  "
+                >
+                  置信度：{{ record.machineReviewScore }}
+                </div>
+                <div v-if="record.machineReviewTime">
+                  机审时间：{{ formatTime(record.machineReviewTime) }}
+                </div>
+              </template>
+              <a-tag :color="machineStatusColor(record.machineReviewStatus)">
+                {{ machineStatusText(record.machineReviewStatus) }}
+              </a-tag>
+            </a-tooltip>
+          </template>
+          <template v-else-if="column.dataIndex === 'textReviewStatus'">
+            <a-tooltip>
+              <template #title>
+                <div>{{ textStatusText(record.textReviewStatus) }}</div>
+                <div v-if="record.textReviewLabel">标签：{{ record.textReviewLabel }}</div>
+                <div v-if="record.textReviewScore !== undefined && record.textReviewScore !== null">
+                  置信度：{{ record.textReviewScore }}
+                </div>
+                <div v-if="record.textReviewTime">
+                  文审时间：{{ formatTime(record.textReviewTime) }}
+                </div>
+              </template>
+              <a-tag :color="textStatusColor(record.textReviewStatus)">
+                {{ textStatusText(record.textReviewStatus) }}
+              </a-tag>
+            </a-tooltip>
+          </template>
+          <template v-else-if="column.dataIndex === 'reviewTime'">
+            {{ record.reviewTime ? dayjs(record.reviewTime).format('YYYY-MM-DD HH:mm:ss') : '-' }}
+          </template>
+          <template v-else-if="column.dataIndex === 'createTime'">
+            {{ dayjs(record.createTime).format('YYYY-MM-DD HH:mm:ss') }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-space v-if="record.reviewStatus === 0">
+              <a-button type="link" @click="openReview(record, 1)">通过</a-button>
+              <a-button type="link" danger @click="openReview(record, 2)">拒绝</a-button>
+            </a-space>
+            <a-space v-else>
+              <span class="reviewed-text">已审核</span>
+              <a-button type="link" size="small" @click="openHistory(record)">历史</a-button>
+            </a-space>
+          </template>
         </template>
-        <template v-else-if="column.dataIndex === 'textReviewStatus'">
-          <a-tooltip>
-            <template #title>
-              <div>{{ textStatusText(record.textReviewStatus) }}</div>
-              <div v-if="record.textReviewLabel">标签：{{ record.textReviewLabel }}</div>
-              <div v-if="record.textReviewScore !== undefined && record.textReviewScore !== null">
-                置信度：{{ record.textReviewScore }}
-              </div>
-              <div v-if="record.textReviewTime">
-                文审时间：{{ formatTime(record.textReviewTime) }}
-              </div>
-            </template>
-            <a-tag :color="textStatusColor(record.textReviewStatus)">
-              {{ textStatusText(record.textReviewStatus) }}
-            </a-tag>
-          </a-tooltip>
-        </template>
-        <template v-else-if="column.dataIndex === 'reviewTime'">
-          {{ record.reviewTime ? dayjs(record.reviewTime).format('YYYY-MM-DD HH:mm:ss') : '-' }}
-        </template>
-        <template v-else-if="column.dataIndex === 'createTime'">
-          {{ dayjs(record.createTime).format('YYYY-MM-DD HH:mm:ss') }}
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-space v-if="record.reviewStatus === 0">
-            <a-button type="link" @click="openReview(record, 1)">通过</a-button>
-            <a-button type="link" danger @click="openReview(record, 2)">拒绝</a-button>
-          </a-space>
-          <a-space v-else>
-            <span class="reviewed-text">已审核</span>
-            <a-button type="link" size="small" @click="openHistory(record)">历史</a-button>
-          </a-space>
-        </template>
-      </template>
-    </a-table>
+      </a-table>
+    </div>
 
     <a-modal
       v-model:open="reviewModalOpen"

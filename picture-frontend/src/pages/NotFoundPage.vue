@@ -31,7 +31,12 @@ const goBack = () => {
 
 <style scoped>
 #notFoundPage {
-  max-width: 720px;
-  margin: 60px auto;
+  max-width: 680px;
+  margin: 48px auto;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
 }
 </style>

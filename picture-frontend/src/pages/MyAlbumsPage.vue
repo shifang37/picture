@@ -1,9 +1,11 @@
 <template>
   <div id="myAlbumsPage">
-    <div class="page-header">
+    <div class="gallery-page-head">
       <div>
-        <h2>我的专辑</h2>
-        <div class="desc">把作品按主题分组；公开专辑会展示在作者主页，只展示已过审图片</div>
+        <h2 class="gallery-page-title">我的专辑</h2>
+        <div class="gallery-page-desc">
+          把作品按主题分组；公开专辑会展示在作者主页，只展示已过审图片
+        </div>
       </div>
       <a-button type="primary" @click="openCreate">创建专辑</a-button>
     </div>
@@ -257,37 +259,34 @@ onMounted(() => {
 
 <style scoped>
 #myAlbumsPage {
-  max-width: 1200px;
+  max-width: 1240px;
   margin: 0 auto;
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.page-header h2 {
-  margin-bottom: 4px;
-}
-
-.desc {
-  color: #999;
-  font-size: 13px;
-}
-
 .album-card {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
   cursor: pointer;
+  transition:
+    transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.25s ease,
+    border-color 0.2s ease;
+}
+
+.album-card:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-4px);
 }
 
 .album-cover {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
   overflow: hidden;
-  background: #f2f2f2;
+  aspect-ratio: 4 / 3;
+  background: linear-gradient(135deg, #f3f4f6 0%, #eaeae6 100%);
 }
 
 .album-cover img {
@@ -295,6 +294,11 @@ onMounted(() => {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transition: transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.album-card:hover .album-cover img {
+  transform: scale(1.045);
 }
 
 .album-cover-empty {
@@ -302,51 +306,55 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #bbb;
+  color: var(--ink-400);
   font-size: 13px;
 }
 
 .album-visibility {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 10px;
+  right: 10px;
+  margin: 0;
+  backdrop-filter: blur(8px);
 }
 
 .album-desc {
+  display: -webkit-box;
   min-height: 40px;
   overflow: hidden;
-  color: #666;
+  color: var(--ink-500);
   font-size: 13px;
-  display: -webkit-box;
+  line-height: 1.55;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
 .album-stats {
-  margin-top: 6px;
-  color: #999;
+  margin-top: 8px;
+  color: var(--ink-400);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .delete-action {
-  color: #ff4d4f;
+  color: var(--danger);
 }
 
 .pagination {
   display: flex;
   justify-content: center;
-  margin-top: 24px;
+  margin-top: 28px;
 }
 
 .state-block {
   display: flex;
   justify-content: center;
-  padding: 64px 0;
+  padding: 72px 0;
 }
 
 .form-tip {
   margin-top: 6px;
-  color: #999;
+  color: var(--ink-400);
   font-size: 12px;
 }
 </style>

@@ -204,44 +204,55 @@ onMounted(async () => {
 }
 
 .ask-hero {
-  padding: 18px 0 24px;
+  padding: 16px 0 28px;
   text-align: center;
 }
 
 .ask-eyebrow {
   display: inline-flex;
+  gap: 6px;
   align-items: center;
   margin: 0 0 14px;
-  padding: 6px 14px;
+  padding: 5px 14px;
   color: var(--brand-600);
   font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.18em;
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 999px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-xs);
 }
 
 .ask-title {
   margin: 0 0 12px;
   color: var(--ink-900);
-  font-weight: 700;
-  font-size: clamp(26px, 3.6vw, 38px);
-  letter-spacing: -0.03em;
+  font-weight: 800;
+  font-size: clamp(28px, 3.8vw, 40px);
+  letter-spacing: -0.035em;
 }
 
 .ask-sub {
-  max-width: 620px;
+  max-width: 600px;
   margin: 0 auto;
   color: var(--ink-500);
   font-size: 14.5px;
-  line-height: 1.7;
+  line-height: 1.72;
 }
 
 .ask-card {
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+}
+
+.ask-card :deep(.ant-card-body) {
+  padding: 22px;
+}
+
+.ask-card :deep(textarea.ant-input) {
+  font-size: 15px;
+  line-height: 1.65;
 }
 
 .ask-actions {
@@ -250,7 +261,12 @@ onMounted(async () => {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  margin-top: 14px;
+  margin-top: 16px;
+}
+
+.ask-actions :deep(.ant-btn) {
+  padding-inline: 28px;
+  border-radius: 999px;
 }
 
 .ask-limit {
@@ -263,8 +279,8 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-top: 16px;
-  padding-top: 14px;
+  margin-top: 18px;
+  padding-top: 16px;
   border-top: 1px dashed var(--line);
 }
 
@@ -274,25 +290,29 @@ onMounted(async () => {
 }
 
 .ask-sample {
-  color: var(--ink-500);
+  margin-inline-end: 0;
+  padding: 3px 12px;
+  color: var(--ink-700);
   background: var(--surface-muted);
-  border-color: transparent;
+  border: 1px solid var(--line);
   cursor: pointer;
   user-select: none;
   transition:
     color 0.18s ease,
-    background 0.18s ease;
+    background-color 0.18s ease,
+    border-color 0.18s ease;
 }
 
 .ask-sample:hover {
   color: var(--brand-600);
   background: var(--brand-soft);
+  border-color: var(--brand-ring);
 }
 
 .ask-error,
 .ask-result-spin {
   display: block;
-  margin-top: 16px;
+  margin-top: 20px;
 }
 
 .ask-result-spin :deep(.ant-spin-container) {
@@ -300,11 +320,13 @@ onMounted(async () => {
 }
 
 .ask-answer-card {
-  margin-top: 16px;
+  margin-top: 18px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
 }
 
 .ask-answer-title {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .ask-state-tag {
@@ -313,8 +335,8 @@ onMounted(async () => {
 
 .ask-answer-text {
   margin: 0;
-  color: var(--ink-700);
-  font-size: 15px;
+  color: var(--ink-900);
+  font-size: 15.5px;
   line-height: 1.85;
   white-space: pre-wrap;
 }
@@ -325,28 +347,32 @@ onMounted(async () => {
 }
 
 .ask-citation-card {
-  margin-top: 16px;
+  margin-top: 18px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
 }
 
 .citation-item {
-  display: block;
+  display: flex;
+  flex-direction: column;
   height: 100%;
   padding: 10px;
   color: inherit;
   background: var(--surface-muted);
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
 .citation-item:hover {
   color: inherit;
+  background: var(--surface);
   border-color: var(--brand-ring);
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  transform: translateY(-3px);
 }
 
 .citation-cover {
@@ -354,26 +380,27 @@ onMounted(async () => {
   width: 100%;
   aspect-ratio: 4 / 3;
   object-fit: cover;
-  background: #f1f5f9;
+  background: var(--surface-subtle);
   border-radius: var(--radius-sm);
 }
 
 .citation-name {
-  margin-top: 8px;
+  margin-top: 10px;
+  overflow: hidden;
+  color: var(--ink-900);
   font-weight: 600;
   font-size: 13.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .citation-reason {
   display: -webkit-box;
   margin: 4px 0 0;
   overflow: hidden;
-  color: var(--ink-400);
+  color: var(--ink-500);
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -385,7 +412,11 @@ onMounted(async () => {
 
 @media (max-width: 720px) {
   .ask-hero {
-    padding: 8px 0 18px;
+    padding: 8px 0 20px;
+  }
+
+  .ask-card :deep(.ant-card-body) {
+    padding: 16px;
   }
 
   .ask-actions {

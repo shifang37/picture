@@ -1,144 +1,201 @@
 <template>
   <div id="pictureDetailPage">
-    <a-row :gutter="[16, 16]">
-      <!-- 图片展示区 -->
-      <a-col :sm="24" :md="16" :xl="18">
-        <a-card title="图片预览" :loading="loading">
-          <a-image style="max-height: 600px; object-fit: contain" :src="previewImageUrl" />
-        </a-card>
-      </a-col>
-      <!-- 图片信息区 -->
-      <a-col :sm="24" :md="8" :xl="6">
-        <a-card title="图片信息" :loading="loading">
+    <div class="detail-layout">
+      <!-- 图片展示舞台：居中暗柔底色画框，凸显作品本身 -->
+      <section class="detail-stage">
+        <a-spin :spinning="loading">
+          <div class="stage-frame">
+            <a-image
+              v-if="previewImageUrl"
+              class="stage-image"
+              :src="previewImageUrl"
+              :alt="picture.name || '图片预览'"
+            />
+            <div v-else class="stage-placeholder">图片加载中</div>
+          </div>
+        </a-spin>
+      </section>
+
+      <!-- 右侧信息与操作面板 -->
+      <aside class="detail-sidebar">
+        <a-card :loading="loading" :bordered="false" class="info-card">
           <a-alert
             v-if="picture.id && reviewStatus !== 1"
             :message="`当前图片状态：${reviewStatusText}`"
             :description="reviewDescription"
             :type="reviewStatus === 2 ? 'error' : 'warning'"
             show-icon
-            style="margin-bottom: 16px"
+            class="review-alert"
           />
-          <a-descriptions :column="1">
-            <a-descriptions-item label="作者">
-              <router-link
-                v-if="picture.user?.id"
-                :to="`/author/${picture.user.id}`"
-                class="author-link"
-                data-testid="picture-author-link"
+
+          <div class="info-head">
+            <span v-if="picture.category" class="category-chip">{{ picture.category }}</span>
+            <h1 class="picture-title">{{ picture.name ?? '未命名' }}</h1>
+            <p v-if="picture.introduction" class="picture-intro">{{ picture.introduction }}</p>
+          </div>
+
+          <!-- 作者行 -->
+          <div class="author-row">
+            <router-link
+              v-if="picture.user?.id"
+              :to="`/author/${picture.user.id}`"
+              class="author-link"
+              data-testid="picture-author-link"
+            >
+              <a-avatar
+                :size="38"
+                :src="picture.user?.userAvatar || undefined"
+                class="author-avatar"
               >
-                <a-avatar :size="24" :src="picture.user?.userAvatar" />
-                <span>{{ picture.user?.userName }}</span>
-              </router-link>
-              <a-space v-else>
-                <a-avatar :size="24" :src="picture.user?.userAvatar" />
-                <div>{{ picture.user?.userName }}</div>
-              </a-space>
-            </a-descriptions-item>
-            <a-descriptions-item label="名称">
-              {{ picture.name ?? '未命名' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="简介">
-              {{ picture.introduction ?? '-' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="分类">
-              {{ picture.category ?? '默认' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="标签">
-              <a-tag v-for="tag in picture.tags" :key="tag">
-                {{ tag }}
-              </a-tag>
-            </a-descriptions-item>
-            <a-descriptions-item label="格式">
-              {{ picture.picFormat ?? '-' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="宽度">
-              {{ picture.picWidth ?? '-' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="高度">
-              {{ picture.picHeight ?? '-' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="宽高比">
-              {{ picture.picScale ?? '-' }}
-            </a-descriptions-item>
-            <a-descriptions-item label="大小">
-              {{ formatSize(picture.picSize) }}
-            </a-descriptions-item>
-            <a-descriptions-item label="下载次数（按用户/日去重）">
-              {{ picture.downloadCount ?? 0 }}
-            </a-descriptions-item>
-            <a-descriptions-item label="收藏 / 点赞">
-              {{ formatCount(picture.favoriteCount) }} / {{ formatCount(picture.likeCount) }}
-            </a-descriptions-item>
-          </a-descriptions>
-          <a-space wrap>
-            <!-- 收藏 / 点赞：乐观更新 + 未登录跳登录并带回跳地址 -->
-            <InteractionButtons
-              v-if="picture.id"
-              :picture-id="String(picture.id)"
-              :favorite-count="picture.favoriteCount"
-              :like-count="picture.likeCount"
-            />
-            <a-button v-if="canEdit" type="default" @click="doEdit">
-              编辑
-              <template #icon>
-                <EditOutlined />
-              </template>
-            </a-button>
-            <a-popconfirm
-              v-if="canEdit"
-              title="确定删除这张图片吗？"
-              ok-text="删除"
-              cancel-text="取消"
-              @confirm="doDelete"
-            >
-              <a-button danger>
-                删除
-                <template #icon>
-                  <DeleteOutlined />
-                </template>
-              </a-button>
-            </a-popconfirm>
-            <a-button
-              v-if="picture.reviewStatus === 1"
-              data-testid="picture-share"
-              @click="doShare"
-            >
-              分享
-              <template #icon>
-                <ShareAltOutlined />
-              </template>
-            </a-button>
-            <a-button type="primary" @click="doDownload">
-              免费下载
+                {{ (picture.user?.userName || '无').slice(0, 1) }}
+              </a-avatar>
+              <div class="author-meta">
+                <div class="author-name">{{ picture.user?.userName || '未知作者' }}</div>
+                <div class="author-sub">查看作者主页 →</div>
+              </div>
+            </router-link>
+            <div v-else class="author-link is-static">
+              <a-avatar
+                :size="38"
+                :src="picture.user?.userAvatar || undefined"
+                class="author-avatar"
+              >
+                {{ (picture.user?.userName || '无').slice(0, 1) }}
+              </a-avatar>
+              <div class="author-meta">
+                <div class="author-name">{{ picture.user?.userName || '未知作者' }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 主操作：下载 + 分享 + 收藏/点赞 -->
+          <div class="primary-actions">
+            <a-button type="primary" size="large" block @click="doDownload">
               <template #icon>
                 <DownloadOutlined />
               </template>
+              免费下载原图
             </a-button>
-          </a-space>
+            <div class="secondary-actions">
+              <InteractionButtons
+                v-if="picture.id"
+                :picture-id="String(picture.id)"
+                :favorite-count="picture.favoriteCount"
+                :like-count="picture.likeCount"
+              />
+              <a-button
+                v-if="picture.reviewStatus === 1"
+                data-testid="picture-share"
+                @click="doShare"
+              >
+                <template #icon>
+                  <ShareAltOutlined />
+                </template>
+                分享
+              </a-button>
+            </div>
+            <div v-if="canEdit" class="owner-actions">
+              <a-button type="default" size="small" @click="doEdit">
+                <template #icon>
+                  <EditOutlined />
+                </template>
+                编辑
+              </a-button>
+              <a-popconfirm
+                title="确定删除这张图片吗？"
+                ok-text="删除"
+                cancel-text="取消"
+                @confirm="doDelete"
+              >
+                <a-button danger size="small">
+                  <template #icon>
+                    <DeleteOutlined />
+                  </template>
+                  删除
+                </a-button>
+              </a-popconfirm>
+            </div>
+          </div>
+
+          <!-- 标签 -->
+          <div v-if="picture.tags?.length" class="meta-block">
+            <div class="meta-heading">标签</div>
+            <div class="tag-cloud">
+              <a-tag v-for="tag in picture.tags" :key="tag" class="detail-tag">
+                {{ tag }}
+              </a-tag>
+            </div>
+          </div>
+
+          <!-- 规格参数网格 -->
+          <div class="meta-block">
+            <div class="meta-heading">图片规格</div>
+            <div class="spec-grid">
+              <div class="spec-item">
+                <span class="spec-label">尺寸</span>
+                <span class="spec-value">
+                  {{
+                    picture.picWidth && picture.picHeight
+                      ? `${picture.picWidth} × ${picture.picHeight}`
+                      : '-'
+                  }}
+                </span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">格式</span>
+                <span class="spec-value">{{ picture.picFormat ?? '-' }}</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">大小</span>
+                <span class="spec-value">{{ formatSize(picture.picSize) }}</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">宽高比</span>
+                <span class="spec-value">{{ picture.picScale ?? '-' }}</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">下载次数</span>
+                <span class="spec-value">{{ formatCount(picture.downloadCount) }}</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">收藏 / 点赞</span>
+                <span class="spec-value">
+                  {{ formatCount(picture.favoriteCount) }} / {{ formatCount(picture.likeCount) }}
+                </span>
+              </div>
+            </div>
+          </div>
         </a-card>
-      </a-col>
-    </a-row>
+      </aside>
+    </div>
+
     <!-- 相似图片：后端用 imageVector 做 kNN，无数据时不渲染整个区块 -->
-    <a-card v-if="similarPictures.length" class="similar-card" data-testid="similar-section">
-      <template #title>相似图片</template>
-      <a-row :gutter="[12, 12]">
-        <a-col v-for="item in similarPictures" :key="item.id" :xs="12" :sm="8" :md="4">
-          <router-link
-            :to="`/picture/${item.id}`"
-            class="similar-item"
-            :data-testid="`similar-item-${item.id}`"
-          >
+    <section v-if="similarPictures.length" class="similar-section" data-testid="similar-section">
+      <div class="similar-head">
+        <h2 class="similar-title">相似图片</h2>
+        <span class="similar-sub">基于视觉特征推荐的相关画面</span>
+      </div>
+      <div class="similar-grid">
+        <router-link
+          v-for="item in similarPictures"
+          :key="item.id"
+          :to="`/picture/${item.id}`"
+          class="similar-item"
+          :data-testid="`similar-item-${item.id}`"
+        >
+          <div class="similar-cover-wrap">
             <img
               :src="getThumbnailUrl(item.url, 320)"
               :alt="item.name || '相似图片'"
               class="similar-cover"
               loading="lazy"
             />
-            <div class="similar-name">{{ item.name ?? '未命名' }}</div>
-          </router-link>
-        </a-col>
-      </a-row>
-    </a-card>
+          </div>
+          <div class="similar-name">{{ item.name ?? '未命名' }}</div>
+        </router-link>
+      </div>
+    </section>
+
     <!-- 分享弹窗：复制链接 / 二维码 / 系统分享 / 下载 -->
     <ShareModal v-model:open="shareOpen" :picture="picture" />
   </div>
@@ -336,19 +393,256 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.author-link {
-  display: inline-flex;
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.95fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.detail-stage {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.stage-frame {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  min-height: 440px;
+  max-height: 680px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 40%, rgba(255, 255, 255, 0.06), transparent 65%), #141418;
+  border-radius: var(--radius-md);
+}
+
+.stage-frame :deep(.ant-image) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 660px;
+}
+
+.stage-frame :deep(.ant-image-img) {
+  max-width: 100%;
+  max-height: 660px;
+  object-fit: contain;
+}
+
+.stage-placeholder {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 13.5px;
+}
+
+.info-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.info-card :deep(.ant-card-body) {
+  padding: 24px;
+}
+
+.review-alert {
+  margin-bottom: 18px;
+}
+
+.info-head {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.category-chip {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 3px 10px;
+  color: var(--brand-600);
+  font-weight: 600;
+  font-size: 11.5px;
+  background: var(--brand-soft);
+  border-radius: 999px;
+}
+
+.picture-title {
+  margin: 0;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 22px;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  word-break: break-word;
+}
+
+.picture-intro {
+  margin: 10px 0 0;
+  color: var(--ink-500);
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.author-row {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.author-link {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  margin: -8px -10px;
   color: inherit;
+  border-radius: var(--radius-md);
+  transition: background-color 0.18s ease;
 }
 
-.author-link:hover {
-  color: #1677ff;
+.author-link:not(.is-static):hover {
+  color: inherit;
+  background: var(--surface-muted);
 }
 
-.similar-card {
-  margin-top: 16px;
+.author-avatar {
+  flex: none;
+  color: #fff;
+  font-weight: 600;
+  background: var(--brand);
+}
+
+.author-meta {
+  min-width: 0;
+}
+
+.author-name {
+  color: var(--ink-900);
+  font-weight: 600;
+  font-size: 14.5px;
+}
+
+.author-sub {
+  margin-top: 2px;
+  color: var(--ink-400);
+  font-size: 12px;
+}
+
+.primary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.owner-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.meta-block {
+  padding-top: 16px;
+}
+
+.meta-heading {
+  margin-bottom: 10px;
+  color: var(--ink-400);
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.detail-tag {
+  margin: 0;
+  color: var(--ink-700);
+  background: var(--surface-subtle);
+  border-color: transparent;
+}
+
+.spec-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.spec-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.spec-label {
+  color: var(--ink-400);
+  font-size: 11.5px;
+}
+
+.spec-value {
+  color: var(--ink-900);
+  font-weight: 600;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.similar-section {
+  margin-top: 32px;
+  padding: 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+}
+
+.similar-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  margin-bottom: 18px;
+}
+
+.similar-title {
+  margin: 0;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.similar-sub {
+  color: var(--ink-400);
+  font-size: 13px;
+}
+
+.similar-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 16px;
 }
 
 .similar-item {
@@ -356,24 +650,66 @@ onUnmounted(() => {
   color: inherit;
 }
 
+.similar-cover-wrap {
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  background: var(--surface-subtle);
+  border-radius: var(--radius-md);
+}
+
 .similar-cover {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: 100%;
   object-fit: cover;
-  border-radius: 8px;
-  background: #f5f5f5;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.similar-item:hover .similar-cover {
+  transform: scale(1.05);
 }
 
 .similar-name {
-  margin-top: 6px;
-  font-size: 13px;
+  margin-top: 8px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--ink-700);
+  font-weight: 500;
+  font-size: 13px;
   white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: color 0.18s ease;
 }
 
 .similar-item:hover .similar-name {
-  color: #1677ff;
+  color: var(--brand);
+}
+
+@media (max-width: 1024px) {
+  .detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .similar-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .detail-stage {
+    padding: 12px;
+  }
+
+  .stage-frame {
+    min-height: 280px;
+  }
+
+  .similar-section {
+    padding: 18px;
+  }
+
+  .similar-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
 }
 </style>

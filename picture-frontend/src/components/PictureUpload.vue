@@ -151,44 +151,62 @@ const handleUpload = async ({ file, onSuccess: uploadSuccess, onError }: any) =>
 }
 </script>
 <style scoped>
-.picture-upload :deep(.ant-upload) {
+.picture-upload :deep(.ant-upload-select) {
   width: 100% !important;
-  height: 100% !important;
-  min-height: 152px;
-  min-width: 152px;
+  height: auto !important;
+  min-height: 220px;
+  margin: 0 !important;
+  padding: 20px;
+  background: var(--surface-muted) !important;
+  border: 1.5px dashed var(--line-strong) !important;
+  border-radius: var(--radius-lg) !important;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.picture-upload :deep(.ant-upload-select:hover) {
+  background: var(--brand-soft) !important;
+  border-color: var(--brand) !important;
 }
 
 .picture-upload img {
   max-width: 100%;
-  max-height: 480px;
+  max-height: 440px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .upload-status {
-  margin-top: 8px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  margin-top: 12px;
 }
 
 .status-text {
-  color: #1677ff;
-  font-size: 12px;
+  color: var(--brand);
+  font-weight: 500;
+  font-size: 12.5px;
 }
 
 .upload-tip {
-  margin-top: 8px;
-  color: #999;
-  font-size: 12px;
-  line-height: 1.5;
+  margin-top: 12px;
+  color: var(--ink-400);
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
-.ant-upload-select-picture-card i {
-  font-size: 32px;
-  color: #999;
+.picture-upload :deep(.anticon-plus),
+.picture-upload :deep(.anticon-loading) {
+  color: var(--brand);
+  font-size: 28px;
 }
 
-.ant-upload-select-picture-card .ant-upload-text {
-  margin-top: 8px;
-  color: #666;
+.picture-upload :deep(.ant-upload-text) {
+  margin-top: 10px;
+  color: var(--ink-700);
+  font-weight: 500;
+  font-size: 14px;
 }
 </style>

@@ -1,10 +1,24 @@
 <template>
   <div id="addPicturePage">
-    <h2 style="margin-bottom: 16px">
-      {{ isEdit ? '修改图片' : '创建图片' }}
-    </h2>
+    <div class="gallery-page-head">
+      <div>
+        <h2 class="gallery-page-title">
+          {{ isEdit ? '修改图片' : '创建图片' }}
+        </h2>
+        <div class="gallery-page-desc">
+          {{
+            isEdit
+              ? '更新图片元数据或重新上传文件，保存后立即生效'
+              : '上传图片后可自动获取 AI 建议，一键填充名称、简介、分类与标签'
+          }}
+        </div>
+      </div>
+      <a-button v-if="!isEdit" @click="router.push('/batch_upload')">批量上传 →</a-button>
+    </div>
 
-    <PictureUpload :picture="picture" :onSuccess="onSuccess" />
+    <a-card class="upload-panel" :bordered="false">
+      <PictureUpload :picture="picture" :onSuccess="onSuccess" />
+    </a-card>
 
     <a-alert
       v-if="picture && picture.reviewStatus !== 1"
@@ -12,7 +26,7 @@
       show-icon
       :message="picture.reviewStatus === 2 ? '图片未通过审核' : '图片已上传，等待管理员审核'"
       :description="reviewDescription"
-      style="margin: 16px 0"
+      class="panel-gap"
     />
 
     <a-alert
@@ -21,10 +35,16 @@
       show-icon
       message="修改后需要重新审核"
       description="修改名称、简介、分类或标签后，图片会重新进入待审核，审核通过前不会出现在首页。内容没有变化则不会触发重新审核。"
-      style="margin: 16px 0"
+      class="panel-gap"
     />
 
-    <a-card v-if="aiSuggestion" size="small" title="AI 建议" style="margin: 16px 0">
+    <a-card v-if="aiSuggestion" size="small" class="ai-card panel-gap">
+      <template #title>
+        <span class="ai-card-title">AI 智能标注建议</span>
+      </template>
+      <template #extra>
+        <a-button type="primary" size="small" @click="applyAiSuggestion">一键填入</a-button>
+      </template>
       <div class="ai-suggestion-item">
         <span class="ai-suggestion-label">名称</span>
         <span>{{ aiSuggestion.name }}</span>
@@ -43,52 +63,53 @@
           <a-tag v-for="tag in aiSuggestion.tags" :key="tag">{{ tag }}</a-tag>
         </a-space>
       </div>
-      <a-button type="primary" ghost size="small" @click="applyAiSuggestion"> 一键填入 </a-button>
     </a-card>
 
-    <a-form
-      v-if="picture"
-      layout="vertical"
-      :model="pictureForm"
-      :rules="formRules"
-      @finish="handleSubmit"
-    >
-      <a-form-item label="名称" name="name">
-        <a-input v-model:value="pictureForm.name" placeholder="请输入名称" allowClear />
-      </a-form-item>
-      <a-form-item label="简介" name="introduction">
-        <a-textarea
-          v-model:value="pictureForm.introduction"
-          placeholder="请输入简介"
-          :rows="2"
-          autoSize
-          allowClear
-        />
-      </a-form-item>
-      <a-form-item label="分类" name="category">
-        <a-auto-complete
-          v-model:value="pictureForm.category"
-          :options="categoryOptions"
-          placeholder="请选择或输入分类"
-          allowClear
-        />
-      </a-form-item>
-      <a-form-item label="标签" name="tags">
-        <a-select
-          v-model:value="pictureForm.tags"
-          :options="tagOptions"
-          mode="tags"
-          placeholder="请输入或选择标签"
-          allowClear
-        />
-      </a-form-item>
+    <a-card v-if="picture" class="form-panel panel-gap" :bordered="false" title="图片信息">
+      <a-form layout="vertical" :model="pictureForm" :rules="formRules" @finish="handleSubmit">
+        <a-form-item label="名称" name="name">
+          <a-input v-model:value="pictureForm.name" placeholder="请输入名称" allowClear />
+        </a-form-item>
+        <a-form-item label="简介" name="introduction">
+          <a-textarea
+            v-model:value="pictureForm.introduction"
+            placeholder="请输入简介"
+            :rows="3"
+            autoSize
+            allowClear
+          />
+        </a-form-item>
+        <a-row :gutter="16">
+          <a-col :xs="24" :sm="12">
+            <a-form-item label="分类" name="category">
+              <a-auto-complete
+                v-model:value="pictureForm.category"
+                :options="categoryOptions"
+                placeholder="请选择或输入分类"
+                allowClear
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :xs="24" :sm="12">
+            <a-form-item label="标签" name="tags">
+              <a-select
+                v-model:value="pictureForm.tags"
+                :options="tagOptions"
+                mode="tags"
+                placeholder="请输入或选择标签"
+                allowClear
+              />
+            </a-form-item>
+          </a-col>
+        </a-row>
 
-      <a-form-item>
-        <a-button type="primary" html-type="submit" style="width: 100%" :loading="submitting">
-          {{ isEdit ? '保存修改' : '创建' }}
-        </a-button>
-      </a-form-item>
-    </a-form>
+        <a-form-item class="submit-row">
+          <a-button type="primary" size="large" html-type="submit" block :loading="submitting">
+            {{ isEdit ? '保存修改' : '发布图片' }}
+          </a-button>
+        </a-form-item>
+      </a-form>
+    </a-card>
   </div>
 </template>
 
@@ -334,19 +355,52 @@ onUnmounted(() => {
 
 <style scoped>
 #addPicturePage {
-  max-width: 720px;
+  max-width: 780px;
   margin: 0 auto;
+}
+
+.upload-panel,
+.form-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+}
+
+.panel-gap {
+  margin-top: 18px;
+}
+
+.ai-card {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.04) 0%, #ffffff 60%);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: var(--radius-lg);
+}
+
+.ai-card-title {
+  color: var(--brand-600);
+  font-weight: 600;
 }
 
 .ai-suggestion-item {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 8px;
-  line-height: 1.6;
+  color: var(--ink-700);
+  line-height: 1.65;
+}
+
+.ai-suggestion-item:last-child {
+  margin-bottom: 0;
 }
 
 .ai-suggestion-label {
-  flex: 0 0 40px;
-  color: #999;
+  flex: 0 0 42px;
+  color: var(--ink-400);
+  font-size: 13px;
+}
+
+.submit-row {
+  margin-top: 8px;
+  margin-bottom: 0;
 }
 </style>

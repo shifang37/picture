@@ -38,10 +38,11 @@
         </span>
       </template>
       <template #description>
-        <div class="picture-tags">
-          <a-tag v-for="tag in picture.tags" :key="tag" class="picture-tag">
+        <div v-if="picture.tags?.length" class="picture-tags">
+          <a-tag v-for="tag in visibleTags" :key="tag" class="picture-tag">
             {{ tag }}
           </a-tag>
+          <span v-if="extraTagCount > 0" class="picture-tag-more">+{{ extraTagCount }}</span>
         </div>
         <!-- 互动计数：热度排序时用户能直观看到排序依据 -->
         <div class="picture-stats">
@@ -80,6 +81,9 @@ const emit = defineEmits<{
 const nameSegments = computed(() =>
   highlightSegments(props.picture.name || '未命名', props.keyword),
 )
+
+const visibleTags = computed(() => (props.picture.tags ?? []).slice(0, 3))
+const extraTagCount = computed(() => Math.max(0, (props.picture.tags?.length ?? 0) - 3))
 </script>
 
 <style scoped>
@@ -88,17 +92,20 @@ const nameSegments = computed(() =>
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-  background: #fff;
-  border-radius: 18px;
-  box-shadow: 0 2px 10px -6px rgba(15, 23, 42, 0.28);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
   cursor: pointer;
   transition:
-    transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1),
-    box-shadow 0.25s ease;
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s ease,
+    border-color 0.22s ease;
 }
 
 .picture-card:hover {
-  box-shadow: 0 26px 50px -30px rgba(15, 23, 42, 0.55);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
   transform: translateY(-4px);
 }
 
@@ -107,8 +114,32 @@ const nameSegments = computed(() =>
 }
 
 .picture-card :deep(.ant-card-body) {
+  display: flex;
   flex: 1 1 auto;
-  padding: 12px 14px 14px;
+  flex-direction: column;
+  padding: 13px 15px 14px;
+}
+
+.picture-card :deep(.ant-card-meta) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.picture-card :deep(.ant-card-meta-detail) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.picture-card :deep(.ant-card-meta-title) {
+  margin-bottom: 8px !important;
+}
+
+.picture-card :deep(.ant-card-meta-description) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
 }
 
 /* 统一 4:3 封面：所有卡片等高，网格每行自动对齐 */
@@ -117,7 +148,26 @@ const nameSegments = computed(() =>
   width: 100%;
   overflow: hidden;
   aspect-ratio: 4 / 3;
-  background: linear-gradient(135deg, #eef2ff 0%, #f8fafc 100%);
+  background: linear-gradient(135deg, #f3f4f6 0%, #eaeae6 100%);
+}
+
+.picture-cover::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(24, 24, 27, 0.38) 0%,
+    rgba(24, 24, 27, 0) 42%,
+    rgba(24, 24, 27, 0.16) 100%
+  );
+  opacity: 0;
+  transition: opacity 0.28s ease;
+  content: '';
+  pointer-events: none;
+}
+
+.picture-card:hover .picture-cover::after {
+  opacity: 1;
 }
 
 .picture-cover img {
@@ -125,57 +175,59 @@ const nameSegments = computed(() =>
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .picture-card:hover .picture-cover img {
-  transform: scale(1.04);
+  transform: scale(1.045);
 }
 
 .cover-category {
   position: absolute;
-  bottom: 12px;
-  left: 12px;
+  bottom: 10px;
+  left: 10px;
+  z-index: 2;
   padding: 3px 10px;
   color: #fff;
+  font-weight: 500;
   font-size: 11.5px;
   letter-spacing: 0.02em;
-  background: rgba(15, 23, 42, 0.52);
+  background: rgba(24, 24, 27, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 999px;
-  opacity: 0;
-  transform: translateY(6px);
-  transition:
-    opacity 0.25s ease,
-    transform 0.25s ease;
-  backdrop-filter: blur(8px);
-}
-
-.picture-card:hover .cover-category {
-  opacity: 1;
-  transform: none;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .interaction-overlay {
   position: absolute;
   top: 10px;
   right: 10px;
+  z-index: 2;
   padding: 4px;
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(24, 24, 27, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 999px;
   opacity: 0;
-  transition: opacity 0.2s ease;
-  backdrop-filter: blur(8px);
+  transform: translateY(-3px);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 /* 悬浮或键盘聚焦时露出互动按钮；触屏设备没有 hover，始终可见 */
 .picture-card:hover .interaction-overlay,
 .picture-card:focus-within .interaction-overlay {
   opacity: 1;
+  transform: none;
 }
 
 @media (hover: none) {
   .interaction-overlay {
     opacity: 1;
+    transform: none;
   }
 }
 
@@ -191,9 +243,9 @@ const nameSegments = computed(() =>
 }
 
 .picture-name-hit {
-  padding: 0 1px;
-  color: inherit;
-  background: rgba(250, 204, 21, 0.42);
+  padding: 0 3px;
+  color: var(--ink-900);
+  background: #fef08a;
   border-radius: 4px;
 }
 
@@ -201,7 +253,8 @@ const nameSegments = computed(() =>
   display: flex;
   flex-wrap: nowrap;
   gap: 6px;
-  margin-bottom: 8px;
+  align-items: center;
+  margin-bottom: 10px;
   overflow: hidden;
 }
 
@@ -209,17 +262,27 @@ const nameSegments = computed(() =>
   margin: 0;
   padding-inline: 8px;
   color: var(--ink-500);
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 20px;
-  background: #f6f7fb;
+  background: var(--surface-subtle);
   border-color: transparent;
+}
+
+.picture-tag-more {
+  flex: none;
+  color: var(--ink-400);
+  font-size: 11px;
 }
 
 .picture-stats {
   display: flex;
   gap: 14px;
+  margin-top: auto;
+  padding-top: 8px;
   color: var(--ink-400);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid var(--line);
 }
 
 .picture-stats span {

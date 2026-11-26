@@ -15,7 +15,13 @@
           </router-view>
         </div>
       </a-layout-content>
-      <a-layout-footer class="footer"> shifang37 </a-layout-footer>
+      <a-layout-footer class="footer">
+        <div class="footer-inner">
+          <span class="footer-brand">shifang37 · 云图库</span>
+          <span class="footer-dot" aria-hidden="true">·</span>
+          <span class="footer-note">图片素材管理、策展与智能检索平台</span>
+        </div>
+      </a-layout-footer>
     </a-layout>
   </div>
 </template>
@@ -34,39 +40,65 @@ import GlobalHeader from '@/components/GlobalHeader.vue'
   position: sticky;
   top: 0;
   z-index: 100;
-  height: 64px;
+  height: 68px;
   padding: 0;
   color: var(--ink-900);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(250, 250, 248, 0.84);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: saturate(180%) blur(16px);
-  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
 }
 
 .content {
-  padding: 32px 24px 64px;
+  padding: 32px 24px 72px;
   background: transparent;
 }
 
 .page-container {
   width: 100%;
-  max-width: 1240px;
+  max-width: 1280px;
   margin: 0 auto;
 }
 
 .footer {
-  padding: 24px;
+  padding: 26px 24px;
   color: var(--ink-400);
   font-size: 12.5px;
-  text-align: center;
-  letter-spacing: 0.04em;
   background: transparent;
   border-top: 1px solid var(--line);
 }
 
+.footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.footer-brand {
+  color: var(--ink-700);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.footer-dot {
+  color: var(--ink-300);
+}
+
+.footer-note {
+  letter-spacing: 0.02em;
+}
+
 @media (max-width: 720px) {
+  .header {
+    height: 60px;
+  }
+
   .content {
-    padding: 20px 14px 48px;
+    padding: 20px 14px 52px;
   }
 }
 </style>

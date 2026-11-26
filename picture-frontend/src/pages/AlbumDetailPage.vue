@@ -57,7 +57,7 @@
         </div>
       </a-card>
 
-      <!-- 浏览模式：瀑布流 -->
+      <!-- 浏览模式：网格分页 -->
       <template v-if="mode === 'view'">
         <div v-if="initialLoading" class="state-block" data-testid="album-pictures-loading">
           <a-spin />
@@ -74,18 +74,24 @@
             "
           />
         </div>
-        <PictureWaterfall v-else :pictures="pictures" @open="openPicture" />
-        <div v-if="pictures.length" class="load-more" data-testid="album-load-more">
-          <template v-if="fetching">
-            <a-spin size="small" />
-            <span>正在加载更多...</span>
-          </template>
-          <template v-else-if="loadError">
+        <a-spin v-else :spinning="fetching">
+          <PictureWaterfall :pictures="pictures" @open="openPicture" />
+          <div v-if="loadError" class="page-error">
             <span class="load-more-error">{{ loadError }}</span>
             <a-button size="small" type="primary" ghost @click="retryLoad">重试</a-button>
-          </template>
-          <span v-else-if="!hasMore" class="load-more-end">没有更多了</span>
-        </div>
+          </div>
+          <div class="pagination-bar" data-testid="album-pagination">
+            <a-pagination
+              :current="currentPage"
+              :page-size="pageSize"
+              :total="total"
+              :page-size-options="PAGE_SIZE_OPTIONS"
+              show-size-changer
+              :show-total="(t: number) => `共 ${t} 张`"
+              @change="handlePageChange"
+            />
+          </div>
+        </a-spin>
       </template>
 
       <!-- 管理模式：表格（仅作者/管理员） -->
@@ -173,10 +179,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { useInfiniteScroll } from '@vueuse/core'
 import {
   getAlbum,
   listAlbumPicturePage,
@@ -188,7 +193,8 @@ import { formatCount } from '@/utils/interaction'
 import { getThumbnailUrl } from '@/utils'
 import PictureWaterfall from '@/components/PictureWaterfall.vue'
 
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 16
+const PAGE_SIZE_OPTIONS = ['8', '12', '16', '20']
 
 const props = defineProps<{
   id: string
@@ -203,14 +209,13 @@ const album = ref<AlbumDetailVO>({})
 const mode = ref<'view' | 'manage'>('view')
 const pictures = ref<API.PictureVO[]>([])
 const total = ref(0)
-const currentPage = ref(0)
-const hasMore = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
 const fetching = ref(false)
 const initialLoading = ref(true)
 const loadError = ref('')
 
-// 管理模式：单独做服务端分页，避免和无限滚动的列表状态互相干扰
-const manageMode = computed(() => mode.value === 'manage' && album.value.canManage === true)
+// 管理模式：单独做服务端分页，避免和浏览模式的分页状态互相干扰
 const managePictures = ref<API.PictureVO[]>([])
 const manageTotal = ref(0)
 const manageCurrent = ref(1)
@@ -256,52 +261,28 @@ const fetchAlbum = async () => {
 
 let requestSeq = 0
 
-const fetchPage = async (reset = false) => {
-  if (!reset && (fetching.value || !hasMore.value)) {
-    return
-  }
+const fetchPage = async (page = currentPage.value, resetState = false) => {
   const seq = (requestSeq += 1)
   fetching.value = true
   loadError.value = ''
-  if (reset) {
+  if (resetState) {
     pictures.value = []
     total.value = 0
-    currentPage.value = 0
-    hasMore.value = false
     initialLoading.value = true
   }
-  const page = currentPage.value + 1
   try {
     const res = await listAlbumPicturePage({
       albumId: props.id,
       current: page,
-      pageSize: PAGE_SIZE,
+      pageSize: pageSize.value,
     })
     if (seq !== requestSeq) {
       return
     }
     if (res.data.code === 0 && res.data.data) {
-      const records = res.data.data.records ?? []
-      const newTotal = Number(res.data.data.total) || 0
-      // 滚动期间若有图片移入/移除，后续页会整体位移，按 id 去重
-      const seenIds = new Set(pictures.value.map((picture) => String(picture.id)))
-      const uniqueRecords = records.filter((picture) => {
-        const id = String(picture.id)
-        if (!picture.id || seenIds.has(id)) {
-          return false
-        }
-        seenIds.add(id)
-        return true
-      })
-      pictures.value = [...pictures.value, ...uniqueRecords]
-      total.value = newTotal
+      pictures.value = res.data.data.records ?? []
+      total.value = Number(res.data.data.total) || 0
       currentPage.value = page
-      hasMore.value = false
-      if (records.length >= PAGE_SIZE && page * PAGE_SIZE < newTotal) {
-        nextTick(() => {
-          hasMore.value = true
-        })
-      }
     } else {
       loadError.value = res.data.message || '加载作品失败'
     }
@@ -318,13 +299,16 @@ const fetchPage = async (reset = false) => {
   }
 }
 
+const handlePageChange = (page: number, nextPageSize: number) => {
+  const sizeChanged = nextPageSize !== pageSize.value
+  pageSize.value = nextPageSize
+  currentPage.value = sizeChanged ? 1 : page
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+  fetchPage(currentPage.value)
+}
+
 const retryLoad = () => {
-  if (currentPage.value === 0) {
-    fetchPage(true)
-  } else {
-    loadError.value = ''
-    fetchPage()
-  }
+  fetchPage(currentPage.value, pictures.value.length === 0)
 }
 
 const fetchManagePictures = async () => {
@@ -348,18 +332,12 @@ const fetchManagePictures = async () => {
   }
 }
 
-// 切到管理模式时按需加载；切回浏览模式继续用无限滚动列表
+// 切到管理模式时按需加载；切回浏览模式保持原有分页
 watch(mode, (value) => {
   if (value === 'manage' && album.value.canManage) {
     manageCurrent.value = 1
     fetchManagePictures()
   }
-})
-
-useInfiniteScroll(typeof window === 'undefined' ? null : window, () => fetchPage(), {
-  distance: 400,
-  interval: 200,
-  canLoadMore: () => !manageMode.value && hasMore.value && !fetching.value && !loadError.value,
 })
 
 const openPicture = (picture: API.PictureVO) => {
@@ -410,7 +388,7 @@ const removePicture = async (picture: API.PictureVO) => {
       }
       await fetchAlbum()
       await fetchManagePictures()
-      await fetchPage(true)
+      await fetchPage(1, true)
     } else {
       message.error('移除失败：' + (res.data.message || '未知错误'))
     }
@@ -467,7 +445,7 @@ const doShare = async () => {
 onMounted(async () => {
   await fetchAlbum()
   if (!notFound.value) {
-    fetchPage(true)
+    fetchPage(1, true)
   } else {
     initialLoading.value = false
   }
@@ -476,30 +454,40 @@ onMounted(async () => {
 
 <style scoped>
 #albumDetailPage {
-  max-width: 1200px;
+  max-width: 1240px;
   margin: 0 auto;
 }
 
 .album-header {
-  margin-bottom: 24px;
-  background: #fafafa;
+  margin-bottom: 26px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.album-header :deep(.ant-card-body) {
+  padding: 24px;
 }
 
 .album-header-main {
   display: flex;
-  gap: 20px;
+  gap: 24px;
+  align-items: center;
 }
 
 .album-cover {
-  flex: 0 0 160px;
-  width: 160px;
-  height: 120px;
+  flex: 0 0 184px;
+  width: 184px;
+  height: 138px;
   overflow: hidden;
-  border-radius: 8px;
-  background: #eee;
+  background: var(--surface-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
 }
 
 .album-cover img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -510,7 +498,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #bbb;
+  color: var(--ink-400);
   font-size: 13px;
 }
 
@@ -521,62 +509,95 @@ onMounted(async () => {
 
 .album-title {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
-  gap: 8px;
 }
 
 .album-title h2 {
   margin: 0;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: -0.02em;
 }
 
 .album-desc {
   margin-top: 8px;
-  color: #666;
+  color: var(--ink-500);
+  font-size: 14px;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .album-meta {
   display: flex;
-  gap: 16px;
-  margin-top: 8px;
-  color: #999;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 10px;
+  color: var(--ink-400);
   font-size: 13px;
 }
 
 .album-actions {
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .manage-cover {
+  display: block;
   width: 72px;
   height: 54px;
   object-fit: cover;
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }
 
 .sub-text {
-  color: #999;
+  color: var(--ink-400);
   font-size: 12px;
 }
 
 .state-block {
   display: flex;
   justify-content: center;
-  padding: 64px 0;
+  padding: 72px 0;
 }
 
-.load-more {
+.page-error {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 16px 0;
-  color: rgba(0, 0, 0, 0.45);
+  margin-top: 16px;
 }
 
 .load-more-error {
-  color: #ff4d4f;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: center;
+  margin-top: 28px;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+
+@media (max-width: 680px) {
+  .album-header-main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .album-cover {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 4 / 3;
+  }
 }
 </style>

@@ -1,6 +1,7 @@
 <template>
   <div class="search-box" data-testid="search-box">
     <div class="search-box-input">
+      <SearchOutlined class="search-box-icon" aria-hidden="true" />
       <a-auto-complete
         v-model:value="keyword"
         class="search-box-autocomplete"
@@ -19,8 +20,8 @@
 
     <!-- 搜索历史：只存本地，可一键清空 -->
     <div v-if="history.length" class="search-box-row" data-testid="search-history">
-      <span class="search-box-label">历史：</span>
-      <a-space :size="[0, 8]" wrap>
+      <span class="search-box-label">历史</span>
+      <a-space :size="[6, 8]" wrap>
         <a-tag
           v-for="item in history"
           :key="item"
@@ -31,20 +32,26 @@
           {{ item }}
         </a-tag>
       </a-space>
-      <a-button type="link" size="small" data-testid="search-history-clear" @click="clearHistory">
+      <a-button
+        type="link"
+        size="small"
+        class="search-clear-btn"
+        data-testid="search-history-clear"
+        @click="clearHistory"
+      >
         清空
       </a-button>
     </div>
 
     <!-- 热词：来自公开图片的标签与分类热度，点击直接搜索 -->
     <div v-if="hotKeywords.length" class="search-box-row" data-testid="search-hot">
-      <span class="search-box-label">热门：</span>
-      <a-space :size="[0, 8]" wrap>
+      <span class="search-box-label">热门</span>
+      <a-space :size="[6, 8]" wrap>
         <a-tag
           v-for="item in hotKeywords"
           :key="item.value"
-          :color="item.kind === 'tag' ? 'blue' : undefined"
           class="search-box-chip"
+          :class="{ 'is-hot-tag': item.kind === 'tag' }"
           data-testid="search-hot-item"
           @click="submit(item.value)"
         >
@@ -57,6 +64,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { SearchOutlined } from '@ant-design/icons-vue'
 import { useDebounceFn } from '@vueuse/core'
 import { fetchSearchSuggest } from '@/api/searchExtra'
 import { clearSearchHistory, pushSearchHistory, readSearchHistory } from '@/utils/searchHistory'
@@ -245,18 +253,18 @@ onMounted(() => {
 
 <style scoped>
 .search-box {
-  max-width: 680px;
+  max-width: 700px;
   margin: 0 auto;
 }
 
-/* 搜索框做成悬浮胶囊：白底 + 柔和阴影，聚焦时出现品牌色描边 */
+/* 悬浮胶囊搜索栏：白底 + 柔和投影，聚焦时呈现清晰钴蓝光环 */
 .search-box-input {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   align-items: center;
-  padding: 6px;
-  background: #fff;
-  border: 1px solid var(--line);
+  padding: 6px 6px 6px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
   box-shadow: var(--shadow-md);
   transition:
@@ -265,8 +273,16 @@ onMounted(() => {
 }
 
 .search-box-input:focus-within {
-  border-color: var(--brand-ring);
-  box-shadow: 0 20px 44px -22px rgba(79, 70, 229, 0.55);
+  border-color: var(--brand);
+  box-shadow:
+    0 0 0 4px var(--brand-soft),
+    var(--shadow-md);
+}
+
+.search-box-icon {
+  flex: none;
+  color: var(--ink-400);
+  font-size: 17px;
 }
 
 .search-box-autocomplete {
@@ -276,7 +292,7 @@ onMounted(() => {
 
 .search-box-input :deep(.ant-select-selector) {
   height: 44px !important;
-  padding-inline: 18px !important;
+  padding-inline: 10px !important;
   background: transparent !important;
   border: none !important;
   box-shadow: none !important;
@@ -284,16 +300,19 @@ onMounted(() => {
 
 .search-box-input :deep(.ant-select-selection-search-input) {
   height: 44px !important;
+  font-size: 14.5px;
 }
 
 .search-box-input :deep(.ant-select-selection-placeholder) {
   color: var(--ink-400);
+  font-size: 14.5px;
   line-height: 44px;
 }
 
 .search-box-input :deep(.ant-btn) {
   height: 44px;
-  padding-inline: 28px;
+  padding-inline: 26px;
+  font-weight: 600;
   border-radius: 999px;
 }
 
@@ -303,32 +322,57 @@ onMounted(() => {
   gap: 6px 8px;
   align-items: center;
   justify-content: center;
-  margin-top: 14px;
-  font-size: 13px;
+  margin-top: 12px;
+  font-size: 12.5px;
 }
 
 .search-box-label {
-  margin-right: 2px;
   color: var(--ink-400);
+  font-weight: 500;
 }
 
 .search-box-chip {
-  color: var(--ink-500);
-  background: rgba(255, 255, 255, 0.7);
-  border-color: transparent;
+  margin-inline-end: 0;
+  padding: 2px 11px;
+  color: var(--ink-700);
+  font-size: 12.5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
   cursor: pointer;
   user-select: none;
   transition:
     color 0.18s ease,
-    background 0.18s ease;
+    border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.search-box-chip.is-hot-tag {
+  color: var(--brand-600);
+  background: var(--brand-soft);
+  border-color: rgba(37, 99, 235, 0.16);
 }
 
 .search-box-chip:hover {
-  color: var(--brand-600);
-  background: #fff;
+  color: var(--ink-900);
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+
+.search-clear-btn {
+  padding-inline: 4px;
+  color: var(--ink-400);
+  font-size: 12px;
+}
+
+.search-clear-btn:hover {
+  color: var(--ink-900);
 }
 
 @media (max-width: 720px) {
+  .search-box-input {
+    padding-left: 14px;
+  }
+
   .search-box-input :deep(.ant-btn) {
     padding-inline: 18px;
   }

@@ -1,62 +1,68 @@
 <template>
   <div id="notificationPage">
-    <div class="page-header">
+    <div class="gallery-page-head">
       <div>
-        <h2>通知中心</h2>
-        <div class="desc">审核结果与账号安全提醒会在这里通知你</div>
+        <h2 class="gallery-page-title">通知中心</h2>
+        <div class="gallery-page-desc">审核结果、系统公告与账号安全提醒会在这里通知你</div>
       </div>
-      <a-space>
+      <a-space wrap>
         <a-button v-if="isAdmin" data-testid="broadcast-button" @click="openBroadcast">
           发公告
         </a-button>
         <a-button :disabled="!unreadCount" @click="doMarkAllRead">全部已读</a-button>
-        <a-button type="primary" ghost @click="fetchData">刷新</a-button>
+        <a-button type="primary" @click="fetchData">刷新</a-button>
       </a-space>
     </div>
 
-    <a-tabs v-model:activeKey="activeTab" @change="handleTabChange">
-      <a-tab-pane key="all" tab="全部" />
-      <a-tab-pane key="unread" :tab="`未读${unreadCount ? `（${unreadCount}）` : ''}`" />
-    </a-tabs>
+    <div class="gallery-surface notify-shell">
+      <div class="notify-tabs-wrap">
+        <a-tabs v-model:activeKey="activeTab" class="notify-tabs" @change="handleTabChange">
+          <a-tab-pane key="all" tab="全部" />
+          <a-tab-pane key="unread" :tab="`未读${unreadCount ? `（${unreadCount}）` : ''}`" />
+        </a-tabs>
+      </div>
 
-    <div v-if="loading" class="state-block">
-      <a-spin />
+      <div v-if="loading" class="state-block">
+        <a-spin />
+      </div>
+      <div v-else-if="!dataList.length" class="state-block">
+        <a-empty description="还没有通知" />
+      </div>
+      <a-list v-else :data-source="dataList" item-layout="horizontal" class="notify-list">
+        <template #renderItem="{ item }">
+          <a-list-item class="notification-item" :class="{ unread: item.isRead === 0 }">
+            <a-list-item-meta>
+              <template #title>
+                <a-space>
+                  <span :class="{ 'unread-title': item.isRead === 0 }">{{ item.title }}</span>
+                  <a-tag :color="tagColor(item.type)">{{ item.typeText || item.type }}</a-tag>
+                </a-space>
+              </template>
+              <template #description>
+                <div class="item-content">{{ item.content }}</div>
+                <div class="item-time">{{ formatTime(item.createTime) }}</div>
+              </template>
+            </a-list-item-meta>
+            <template #actions>
+              <a-button
+                v-if="item.bizType === 'PICTURE' && item.bizId"
+                type="link"
+                size="small"
+                @click="openPicture(item)"
+              >
+                查看图片
+              </a-button>
+              <a-button v-if="item.isRead === 0" type="link" size="small" @click="markRead(item)">
+                标记已读
+              </a-button>
+              <a-popconfirm title="确定删除这条通知吗？" @confirm="removeItem(item)">
+                <a-button type="link" size="small" danger>删除</a-button>
+              </a-popconfirm>
+            </template>
+          </a-list-item>
+        </template>
+      </a-list>
     </div>
-    <a-empty v-else-if="!dataList.length" description="还没有通知" />
-    <a-list v-else :data-source="dataList" item-layout="horizontal">
-      <template #renderItem="{ item }">
-        <a-list-item class="notification-item" :class="{ unread: item.isRead === 0 }">
-          <a-list-item-meta>
-            <template #title>
-              <a-space>
-                <span :class="{ 'unread-title': item.isRead === 0 }">{{ item.title }}</span>
-                <a-tag :color="tagColor(item.type)">{{ item.typeText || item.type }}</a-tag>
-              </a-space>
-            </template>
-            <template #description>
-              <div class="item-content">{{ item.content }}</div>
-              <div class="item-time">{{ formatTime(item.createTime) }}</div>
-            </template>
-          </a-list-item-meta>
-          <template #actions>
-            <a-button
-              v-if="item.bizType === 'PICTURE' && item.bizId"
-              type="link"
-              size="small"
-              @click="openPicture(item)"
-            >
-              查看图片
-            </a-button>
-            <a-button v-if="item.isRead === 0" type="link" size="small" @click="markRead(item)">
-              标记已读
-            </a-button>
-            <a-popconfirm title="确定删除这条通知吗？" @confirm="removeItem(item)">
-              <a-button type="link" size="small" danger>删除</a-button>
-            </a-popconfirm>
-          </template>
-        </a-list-item>
-      </template>
-    </a-list>
 
     <div v-if="total > pageSize" class="pager">
       <a-pagination
@@ -305,25 +311,25 @@ onMounted(() => {
 
 <style scoped>
 #notificationPage {
-  max-width: 900px;
+  max-width: 920px;
   margin: 0 auto;
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 8px;
+.notify-shell {
+  overflow: hidden;
 }
 
-.page-header h2 {
-  margin-bottom: 4px;
+.notify-tabs-wrap {
+  padding: 4px 20px 0;
+  border-bottom: 1px solid var(--line);
 }
 
-.desc {
-  color: #999;
-  font-size: 13px;
+.notify-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 0;
+}
+
+.notify-tabs :deep(.ant-tabs-nav::before) {
+  display: none;
 }
 
 .state-block {
@@ -332,26 +338,35 @@ onMounted(() => {
   padding: 64px 0;
 }
 
+.notify-list :deep(.ant-list-item) {
+  padding: 16px 20px;
+  border-block-end-color: var(--line);
+  transition: background-color 0.15s ease;
+}
+
 .notification-item.unread {
-  background: #fafafa;
+  background: rgba(37, 99, 235, 0.035);
 }
 
 .unread-title {
-  font-weight: 600;
+  color: var(--ink-900);
+  font-weight: 700;
 }
 
 .item-content {
-  color: #595959;
+  margin-top: 4px;
+  color: var(--ink-700);
+  line-height: 1.6;
 }
 
 .item-time {
-  margin-top: 4px;
-  color: #bbb;
+  margin-top: 6px;
+  color: var(--ink-400);
   font-size: 12px;
 }
 
 .pager {
-  margin-top: 16px;
+  margin-top: 20px;
   text-align: center;
 }
 </style>

@@ -1,9 +1,9 @@
 <template>
   <div id="dashboardPage">
-    <a-flex justify="space-between" align="center" wrap="wrap" gap="12" class="page-header">
+    <div class="gallery-page-head">
       <div>
-        <h2 class="page-title">数据看板</h2>
-        <div class="page-tip">
+        <h2 class="gallery-page-title">数据看板</h2>
+        <div class="gallery-page-desc">
           统计结果在后端缓存 5 分钟；点击刷新会重新请求，但短时间内仍可能命中缓存。
         </div>
       </div>
@@ -13,7 +13,7 @@
         </template>
         刷新
       </a-button>
-    </a-flex>
+    </div>
 
     <!-- 运维操作：计数漂移修复与搜索索引维护。三个按钮都走二次确认，避免误触全量重算 -->
     <a-card size="small" title="运维操作" class="ops-card">
@@ -317,25 +317,25 @@ const hasReviewData = computed(
 // ==================== 图表配置 ====================
 
 const trendOption = computed<EChartsOption>(() => ({
-  color: ['#1677ff'],
+  color: ['#2563eb'],
   tooltip: { trigger: 'axis' },
   grid: { left: 8, right: 16, top: 16, bottom: 8, containLabel: true },
   xAxis: {
     type: 'category',
     boundaryGap: false,
     data: trend.value.map((item) => item.date ?? ''),
-    axisLine: { lineStyle: { color: '#e5e7eb' } },
+    axisLine: { lineStyle: { color: '#e4e4e7' } },
     axisTick: { show: false },
     axisLabel: {
-      color: '#6b7280',
+      color: '#71717a',
       formatter: (value: string) => value.slice(5),
     },
   },
   yAxis: {
     type: 'value',
     minInterval: 1,
-    splitLine: { lineStyle: { color: '#f0f0f0' } },
-    axisLabel: { color: '#6b7280' },
+    splitLine: { lineStyle: { color: '#f4f4f5' } },
+    axisLabel: { color: '#71717a' },
   },
   series: [
     {
@@ -344,23 +344,23 @@ const trendOption = computed<EChartsOption>(() => ({
       smooth: true,
       showSymbol: false,
       data: trend.value.map((item) => toNumber(item.count)),
-      lineStyle: { width: 2 },
-      areaStyle: { opacity: 0.12 },
+      lineStyle: { width: 2.5 },
+      areaStyle: { opacity: 0.14 },
     },
   ],
 }))
 
 const reviewOption = computed<EChartsOption>(() => ({
-  color: ['#52c41a', '#ff4d4f'],
+  color: ['#10b981', '#e11d48'],
   tooltip: { trigger: 'item', formatter: '{b}：{c} 张（{d}%）' },
   legend: { bottom: 0, icon: 'circle', itemWidth: 10, itemHeight: 10 },
   series: [
     {
       type: 'pie',
-      radius: ['52%', '72%'],
+      radius: ['54%', '74%'],
       center: ['50%', '44%'],
       avoidLabelOverlap: true,
-      itemStyle: { borderColor: '#fff', borderWidth: 2 },
+      itemStyle: { borderColor: '#fff', borderWidth: 3 },
       label: { show: false },
       data: [
         { name: '已通过', value: toNumber(review.value?.approvedCount) },
@@ -371,7 +371,7 @@ const reviewOption = computed<EChartsOption>(() => ({
 }))
 
 const categoryOption = computed<EChartsOption>(() => ({
-  color: ['#1677ff'],
+  color: ['#18181b'],
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
@@ -394,9 +394,9 @@ const categoryOption = computed<EChartsOption>(() => ({
     type: 'category',
     data: categories.value.map((item) => item.category ?? '未分类'),
     axisTick: { show: false },
-    axisLine: { lineStyle: { color: '#e5e7eb' } },
+    axisLine: { lineStyle: { color: '#e4e4e7' } },
     axisLabel: {
-      color: '#6b7280',
+      color: '#71717a',
       interval: 0,
       rotate: categories.value.length > 6 ? 30 : 0,
     },
@@ -404,15 +404,15 @@ const categoryOption = computed<EChartsOption>(() => ({
   yAxis: {
     type: 'value',
     minInterval: 1,
-    splitLine: { lineStyle: { color: '#f0f0f0' } },
-    axisLabel: { color: '#6b7280' },
+    splitLine: { lineStyle: { color: '#f4f4f5' } },
+    axisLabel: { color: '#71717a' },
   },
   series: [
     {
       name: '图片数',
       type: 'bar',
-      barMaxWidth: 32,
-      itemStyle: { borderRadius: [4, 4, 0, 0] },
+      barMaxWidth: 30,
+      itemStyle: { borderRadius: [6, 6, 0, 0] },
       data: categories.value.map((item) => toNumber(item.count)),
     },
   ],
@@ -422,29 +422,29 @@ const tagOption = computed<EChartsOption>(() => {
   // 横向条形图从下往上画，反转后使用最多的标签显示在最上方
   const items = [...tags.value].reverse()
   return {
-    color: ['#52c41a'],
+    color: ['#2563eb'],
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 8, right: 32, top: 8, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 36, top: 8, bottom: 8, containLabel: true },
     xAxis: {
       type: 'value',
       minInterval: 1,
-      splitLine: { lineStyle: { color: '#f0f0f0' } },
-      axisLabel: { color: '#6b7280' },
+      splitLine: { lineStyle: { color: '#f4f4f5' } },
+      axisLabel: { color: '#71717a' },
     },
     yAxis: {
       type: 'category',
       data: items.map((item) => item.tag ?? ''),
       axisTick: { show: false },
       axisLine: { show: false },
-      axisLabel: { color: '#4b5563' },
+      axisLabel: { color: '#3f3f46' },
     },
     series: [
       {
         name: '使用次数',
         type: 'bar',
         barMaxWidth: 14,
-        itemStyle: { borderRadius: [0, 4, 4, 0] },
-        label: { show: true, position: 'right', color: '#6b7280' },
+        itemStyle: { borderRadius: [0, 6, 6, 0] },
+        label: { show: true, position: 'right', color: '#71717a' },
         data: items.map((item) => toNumber(item.count)),
       },
     ],
@@ -605,40 +605,26 @@ onMounted(async () => {
 
 <style scoped>
 #dashboardPage {
-  max-width: 1200px;
+  max-width: 1240px;
   margin: 0 auto;
 }
 
-.page-header {
-  margin-bottom: 16px;
-}
-
-.page-title {
-  margin: 0;
-}
-
-.page-tip {
-  margin-top: 4px;
-  color: #888;
-  font-size: 13px;
-}
-
 .error-alert {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .ops-card {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .ops-tip {
   margin-bottom: 12px;
-  color: #888;
+  color: var(--ink-500);
   font-size: 13px;
 }
 
 .rag-card {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .rag-stale {
@@ -648,43 +634,54 @@ onMounted(async () => {
 .rag-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .metric-card {
   height: 100%;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.metric-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
 }
 
 .metric-label {
-  color: #6b7280;
+  color: var(--ink-500);
+  font-weight: 500;
   font-size: 13px;
 }
 
 .metric-value {
   margin-top: 8px;
-  color: #111827;
-  font-size: 26px;
-  font-weight: 600;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
   line-height: 1.2;
+  letter-spacing: -0.02em;
   word-break: break-all;
 }
 
 .metric-hint {
   margin-top: 6px;
-  color: #9ca3af;
+  color: var(--ink-400);
   font-size: 12px;
 }
 
 .chart-row {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .chart {
@@ -701,27 +698,42 @@ onMounted(async () => {
 }
 
 .review-summary {
-  color: #4b5563;
+  color: var(--ink-700);
+  font-weight: 500;
   font-size: 13px;
   text-align: center;
 }
 
 .review-average {
   margin-top: 4px;
-  color: #6b7280;
-  font-size: 13px;
+  color: var(--ink-400);
+  font-size: 12.5px;
   text-align: center;
 }
 
 .table-card {
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .rank {
-  color: #6b7280;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--ink-500);
+  font-weight: 600;
+  font-size: 12px;
+  background: var(--surface-subtle);
+  border-radius: 999px;
 }
 
 .picture-link {
-  color: #1677ff;
+  color: var(--ink-900);
+  font-weight: 500;
+}
+
+.picture-link:hover {
+  color: var(--brand);
 }
 </style>

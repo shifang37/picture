@@ -22,7 +22,11 @@
       <!-- 作者资料卡 -->
       <a-card class="profile-card" :bordered="false" data-testid="author-profile">
         <div class="profile">
-          <a-avatar :size="72" :src="profile?.user?.userAvatar" data-testid="author-avatar">
+          <a-avatar
+            :size="72"
+            :src="profile?.user?.userAvatar || undefined"
+            data-testid="author-avatar"
+          >
             {{ (profile?.user?.userName || '无').slice(0, 1) }}
           </a-avatar>
           <div class="profile-main">
@@ -91,28 +95,33 @@
         <a-empty description="TA 还没有公开作品" />
       </div>
 
-      <PictureWaterfall v-else :pictures="pictures" @open="openPicture" />
+      <a-spin v-else :spinning="fetching">
+        <PictureWaterfall :pictures="pictures" @open="openPicture" />
 
-      <!-- 加载更多 -->
-      <div v-if="pictures.length" class="load-more" data-testid="author-load-more">
-        <template v-if="fetching">
-          <a-spin size="small" />
-          <span>正在加载更多...</span>
-        </template>
-        <template v-else-if="loadError">
+        <div v-if="loadError" class="page-error">
           <span class="load-more-error">{{ loadError }}</span>
           <a-button size="small" type="primary" ghost @click="retryLoad">重试</a-button>
-        </template>
-        <span v-else-if="!hasMore" class="load-more-end">没有更多了</span>
-      </div>
+        </div>
+
+        <div class="pagination-bar" data-testid="author-pagination">
+          <a-pagination
+            :current="currentPage"
+            :page-size="pageSize"
+            :total="total"
+            :page-size-options="PAGE_SIZE_OPTIONS"
+            show-size-changer
+            :show-total="(t: number) => `共 ${t} 张`"
+            @change="handlePageChange"
+          />
+        </div>
+      </a-spin>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useInfiniteScroll } from '@vueuse/core'
 import dayjs from 'dayjs'
 import { getPublicUserProfile, type PublicUserProfile } from '@/api/userExtra'
 import { listPictureVoByPage } from '@/api/pictureController'
@@ -121,7 +130,8 @@ import { formatCount } from '@/utils/interaction'
 import PictureWaterfall from '@/components/PictureWaterfall.vue'
 
 // 与公开列表接口保持一致：每页最多 20 条
-const PAGE_SIZE = 20
+const DEFAULT_PAGE_SIZE = 16
+const PAGE_SIZE_OPTIONS = ['8', '12', '16', '20']
 
 const props = defineProps<{
   id: string
@@ -136,8 +146,8 @@ const profile = ref<PublicUserProfile | null>(null)
 
 const pictures = ref<API.PictureVO[]>([])
 const total = ref(0)
-const currentPage = ref(0)
-const hasMore = ref(false)
+const currentPage = ref(1)
+const pageSize = ref(DEFAULT_PAGE_SIZE)
 const fetching = ref(false)
 const initialLoading = ref(true)
 const loadError = ref('')
@@ -183,28 +193,22 @@ const fetchProfile = async () => {
   }
 }
 
-// 请求序号：作者切换或重试时丢弃过期响应
+// 请求序号：作者切换或翻页时丢弃过期响应
 let requestSeq = 0
 
-const fetchPage = async (reset = false) => {
-  if (!reset && (fetching.value || !hasMore.value)) {
-    return
-  }
+const fetchPage = async (page = currentPage.value, resetState = false) => {
   const seq = (requestSeq += 1)
   fetching.value = true
   loadError.value = ''
-  if (reset) {
+  if (resetState) {
     pictures.value = []
     total.value = 0
-    currentPage.value = 0
-    hasMore.value = false
     initialLoading.value = true
   }
-  const page = currentPage.value + 1
   try {
     const res = await listPictureVoByPage({
       current: page,
-      pageSize: PAGE_SIZE,
+      pageSize: pageSize.value,
       userId: props.id,
       sortField: 'createTime',
       sortOrder: 'descend',
@@ -213,28 +217,9 @@ const fetchPage = async (reset = false) => {
       return
     }
     if (res.data.code === 0 && res.data.data) {
-      const records = res.data.data.records ?? []
-      const newTotal = Number(res.data.data.total) || 0
-      // 分页期间若有新作品过审，后续页会整体后移，按 id 去重
-      const seenIds = new Set(pictures.value.map((picture) => String(picture.id)))
-      const uniqueRecords = records.filter((picture) => {
-        const id = String(picture.id)
-        if (!picture.id || seenIds.has(id)) {
-          return false
-        }
-        seenIds.add(id)
-        return true
-      })
-      pictures.value = [...pictures.value, ...uniqueRecords]
-      total.value = newTotal
+      pictures.value = res.data.data.records ?? []
+      total.value = Number(res.data.data.total) || 0
       currentPage.value = page
-      // 先让新卡片渲染完成，再开启下一次滚动加载；否则列表还是旧高度时会被误判为「已到底部」
-      hasMore.value = false
-      if (records.length >= PAGE_SIZE && page * PAGE_SIZE < newTotal) {
-        nextTick(() => {
-          hasMore.value = true
-        })
-      }
     } else {
       loadError.value = res.data.message || '加载作品失败'
     }
@@ -251,27 +236,23 @@ const fetchPage = async (reset = false) => {
   }
 }
 
-const retryLoad = () => {
-  if (currentPage.value === 0) {
-    fetchPage(true)
-  } else {
-    loadError.value = ''
-    fetchPage()
-  }
+const handlePageChange = (page: number, nextPageSize: number) => {
+  const sizeChanged = nextPageSize !== pageSize.value
+  pageSize.value = nextPageSize
+  currentPage.value = sizeChanged ? 1 : page
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+  fetchPage(currentPage.value)
 }
 
-// 滚动到距底部 400px 时自动加载下一页；失败后等用户点重试，避免请求风暴
-useInfiniteScroll(typeof window === 'undefined' ? null : window, () => fetchPage(), {
-  distance: 400,
-  interval: 200,
-  canLoadMore: () => hasMore.value && !fetching.value && !loadError.value,
-})
+const retryLoad = () => {
+  fetchPage(currentPage.value, pictures.value.length === 0)
+}
 
 onMounted(async () => {
   await fetchProfile()
   // 作者不存在时不再请求作品列表，避免无意义的 404 请求
   if (!notFound.value) {
-    fetchPage(true)
+    fetchPage(1, true)
   } else {
     initialLoading.value = false
   }
@@ -280,19 +261,35 @@ onMounted(async () => {
 
 <style scoped>
 #authorPage {
-  max-width: 1200px;
+  max-width: 1240px;
   margin: 0 auto;
 }
 
 .profile-card {
-  margin-bottom: 24px;
-  background: #fafafa;
+  margin-bottom: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.profile-card :deep(.ant-card-body) {
+  padding: 28px;
 }
 
 .profile {
   display: flex;
+  gap: 22px;
   align-items: center;
-  gap: 20px;
+}
+
+.profile :deep(.ant-avatar) {
+  flex: none;
+  color: #fff;
+  font-weight: 700;
+  font-size: 26px;
+  background: var(--brand);
+  box-shadow: var(--shadow-sm);
 }
 
 .profile-main {
@@ -302,74 +299,105 @@ onMounted(async () => {
 
 .profile-name {
   display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   align-items: center;
-  gap: 8px;
-  font-size: 20px;
-  font-weight: 600;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: -0.02em;
 }
 
 .profile-desc {
-  margin-top: 6px;
-  color: #666;
+  margin-top: 8px;
+  color: var(--ink-500);
+  font-size: 14px;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .profile-meta {
-  margin-top: 6px;
-  color: #999;
-  font-size: 12px;
+  margin-top: 8px;
+  color: var(--ink-400);
+  font-size: 12.5px;
 }
 
 .stats {
-  margin-top: 20px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.stat {
+  padding: 14px 16px;
   text-align: center;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
 }
 
 .stat-value {
-  font-size: 22px;
-  font-weight: 600;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
 }
 
 .stat-label {
-  margin-top: 2px;
-  color: #999;
-  font-size: 12px;
+  margin-top: 4px;
+  color: var(--ink-400);
+  font-size: 12.5px;
 }
 
 .section-header {
   display: flex;
+  gap: 10px;
   align-items: baseline;
-  gap: 12px;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .section-header h3 {
   margin: 0;
+  color: var(--ink-900);
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: -0.02em;
 }
 
 .section-total {
-  color: #999;
+  color: var(--ink-400);
   font-size: 13px;
 }
 
 .state-block {
   display: flex;
   justify-content: center;
-  padding: 64px 0;
+  padding: 72px 0;
 }
 
-.load-more {
+.page-error {
   display: flex;
+  gap: 12px;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  min-height: 48px;
-  padding: 16px 0;
-  color: rgba(0, 0, 0, 0.45);
+  margin-top: 16px;
 }
 
 .load-more-error {
-  color: #ff4d4f;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: center;
+  margin-top: 28px;
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
 }
 </style>

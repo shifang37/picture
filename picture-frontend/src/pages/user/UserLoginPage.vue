@@ -104,12 +104,12 @@ const handleSubmit = async (values: any) => {
 
 .auth-card {
   display: grid;
-  grid-template-columns: 1.02fr 1fr;
-  width: min(920px, 100%);
+  grid-template-columns: 1.04fr 1fr;
+  width: min(940px, 100%);
   overflow: hidden;
-  background: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  border-radius: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
 }
 
@@ -120,16 +120,19 @@ const handleSubmit = async (values: any) => {
   padding: 46px 42px;
   overflow: hidden;
   color: #fff;
-  background: linear-gradient(150deg, #312e81 0%, #4f46e5 48%, #9333ea 100%);
+  background:
+    radial-gradient(420px 300px at 10% 0%, rgba(37, 99, 235, 0.35), transparent 65%),
+    radial-gradient(360px 280px at 95% 100%, rgba(14, 165, 233, 0.25), transparent 65%),
+    linear-gradient(155deg, #18181b 0%, #1e2433 55%, #111827 100%);
 }
 
 .auth-aside::after {
   position: absolute;
   top: -80px;
   right: -60px;
-  width: 260px;
-  height: 260px;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.28), transparent 65%);
+  width: 240px;
+  height: 240px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.14), transparent 65%);
   border-radius: 50%;
   content: '';
   pointer-events: none;

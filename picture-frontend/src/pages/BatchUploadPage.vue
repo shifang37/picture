@@ -1,81 +1,99 @@
 <template>
   <div id="batchUploadPage">
-    <h2>批量上传</h2>
+    <div class="gallery-page-head">
+      <div>
+        <h2 class="gallery-page-title">批量上传</h2>
+        <div class="gallery-page-desc">
+          自动支持 HEIC 转 JPG 与智能压缩，最多 3 张并发上传，支持失败重试与一键批量设置信息
+        </div>
+      </div>
+      <a-button type="primary" @click="goMyPictures">查看我的图片</a-button>
+    </div>
+
     <a-alert
       type="info"
       show-icon
       message="批量上传会以文件名作为图片名称；HEIC 会自动转成 JPG，超过 2MB 的图片会先压缩。普通用户上传后统一进入待审核，管理员上传自动通过。最多同时上传 3 张，失败项可以重试。"
-      style="margin-bottom: 16px"
+      class="batch-alert"
     />
 
-    <a-upload-dragger
-      multiple
-      :show-upload-list="false"
-      :custom-request="handleUpload"
-      :before-upload="beforeUpload"
-      accept=".jpg,.jpeg,.png,.webp,.heic,.heif"
-    >
-      <p class="ant-upload-drag-icon">
-        <inbox-outlined />
-      </p>
-      <p class="ant-upload-text">点击或拖拽多张图片到此处</p>
-      <p class="ant-upload-hint">
-        支持 jpg / jpeg / png / webp / heic，单张不超过 10MB；超过的目标体积会压缩到 2MB
-        以内，超限文件会显示为失败并可以重试。
-      </p>
-    </a-upload-dragger>
+    <a-card class="dragger-card" :bordered="false">
+      <a-upload-dragger
+        multiple
+        :show-upload-list="false"
+        :custom-request="handleUpload"
+        :before-upload="beforeUpload"
+        accept=".jpg,.jpeg,.png,.webp,.heic,.heif"
+      >
+        <p class="ant-upload-drag-icon">
+          <inbox-outlined />
+        </p>
+        <p class="ant-upload-text">点击或拖拽多张图片到此处</p>
+        <p class="ant-upload-hint">
+          支持 jpg / jpeg / png / webp / heic，单张不超过 10MB；超过目标体积会压缩到 2MB
+          以内，超限文件会显示为失败并可以重试。
+        </p>
+      </a-upload-dragger>
+    </a-card>
 
-    <a-space style="margin: 16px 0" wrap>
-      <a-button type="primary" @click="goMyPictures">查看我的图片</a-button>
-      <a-button :disabled="!hasRecords" @click="clearRecords">清空记录</a-button>
-      <a-button :disabled="failedCount === 0" @click="retryAllFailed">
-        重试全部失败（{{ failedCount }}）
-      </a-button>
-      <a-button :disabled="!successPictureIds.length" @click="batchEditOpen = true">
-        批量设置信息（{{ successPictureIds.length }}）
-      </a-button>
+    <div class="gallery-toolbar batch-toolbar">
+      <a-space wrap>
+        <a-button :disabled="!hasRecords" @click="clearRecords">清空记录</a-button>
+        <a-button :disabled="failedCount === 0" @click="retryAllFailed">
+          重试全部失败（{{ failedCount }}）
+        </a-button>
+        <a-button
+          type="primary"
+          :disabled="!successPictureIds.length"
+          @click="batchEditOpen = true"
+        >
+          批量设置信息（{{ successPictureIds.length }}）
+        </a-button>
+      </a-space>
       <span v-if="uploadingCount > 0" class="uploading-text">
         正在上传 {{ uploadingCount }} 张...
       </span>
-    </a-space>
+    </div>
 
-    <a-table
-      :columns="columns"
-      :data-source="scheduler.items"
-      :pagination="false"
-      row-key="uid"
-      size="small"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'status'">
-          <a-tag :color="statusColor(record.status)">{{ statusText(record.status) }}</a-tag>
+    <div class="gallery-table-card">
+      <a-table
+        :columns="columns"
+        :data-source="scheduler.items"
+        :pagination="false"
+        row-key="uid"
+        size="middle"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'status'">
+            <a-tag :color="statusColor(record.status)">{{ statusText(record.status) }}</a-tag>
+          </template>
+          <template v-else-if="column.key === 'progress'">
+            <a-progress
+              v-if="record.status === 'uploading'"
+              :percent="record.progress"
+              size="small"
+              style="width: 120px"
+            />
+            <span v-else-if="record.status === 'success'" class="done-percent">100%</span>
+            <span v-else class="action-placeholder">-</span>
+          </template>
+          <template v-else-if="column.key === 'message'">
+            {{ record.message || '-' }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-button
+              v-if="record.status === 'error'"
+              type="link"
+              size="small"
+              @click="scheduler.retry(record.uid)"
+            >
+              重试
+            </a-button>
+            <span v-else class="action-placeholder">-</span>
+          </template>
         </template>
-        <template v-else-if="column.key === 'progress'">
-          <a-progress
-            v-if="record.status === 'uploading'"
-            :percent="record.progress"
-            size="small"
-            style="width: 120px"
-          />
-          <span v-else-if="record.status === 'success'">100%</span>
-          <span v-else class="action-placeholder">-</span>
-        </template>
-        <template v-else-if="column.key === 'message'">
-          {{ record.message || '-' }}
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-button
-            v-if="record.status === 'error'"
-            type="link"
-            size="small"
-            @click="scheduler.retry(record.uid)"
-          >
-            重试
-          </a-button>
-          <span v-else class="action-placeholder">-</span>
-        </template>
-      </template>
-    </a-table>
+      </a-table>
+    </div>
 
     <BatchEditModal
       v-model:open="batchEditOpen"
@@ -209,15 +227,52 @@ const handleBatchEdited = () => {
 
 <style scoped>
 #batchUploadPage {
-  max-width: 900px;
+  max-width: 960px;
   margin: 0 auto;
 }
 
+.batch-alert {
+  margin-bottom: 18px;
+}
+
+.dragger-card {
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+}
+
+.dragger-card :deep(.ant-upload-drag) {
+  background: var(--surface-muted);
+  border-color: var(--line-strong);
+  border-radius: var(--radius-lg);
+}
+
+.dragger-card :deep(.ant-upload-drag:hover) {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}
+
+.dragger-card :deep(.ant-upload-drag-icon .anticon) {
+  color: var(--brand);
+}
+
+.batch-toolbar {
+  margin-bottom: 16px;
+}
+
 .uploading-text {
-  color: #1677ff;
+  color: var(--brand);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.done-percent {
+  color: var(--success);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .action-placeholder {
-  color: #bbb;
+  color: var(--ink-300);
 }
 </style>

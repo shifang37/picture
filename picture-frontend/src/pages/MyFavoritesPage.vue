@@ -1,50 +1,54 @@
 <template>
   <div id="myFavoritesPage">
-    <div class="page-header">
+    <div class="gallery-page-head">
       <div>
-        <h2>我的收藏</h2>
-        <div class="desc">收藏与点赞过的图片，只展示已经通过审核的作品</div>
+        <h2 class="gallery-page-title">我的收藏</h2>
+        <div class="gallery-page-desc">收藏与点赞过的图片，只展示已经通过审核的作品</div>
       </div>
       <a-button type="primary" @click="goHome">去逛逛</a-button>
     </div>
 
-    <a-tabs v-model:activeKey="activeType" @change="handleTypeChange">
-      <a-tab-pane key="favorite" tab="我的收藏" />
-      <a-tab-pane key="like" tab="我的点赞" />
-    </a-tabs>
+    <div class="gallery-surface fav-shell">
+      <div class="fav-tabs-wrap">
+        <a-tabs v-model:activeKey="activeType" class="fav-tabs" @change="handleTypeChange">
+          <a-tab-pane key="favorite" tab="我的收藏" />
+          <a-tab-pane key="like" tab="我的点赞" />
+        </a-tabs>
+      </div>
 
-    <a-table
-      :data-source="dataList"
-      :columns="columns"
-      :loading="loading"
-      :pagination="pagination"
-      row-key="id"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'cover'">
-          <img class="cover" :src="getThumbnailUrl(record.url)" :alt="record.name" />
+      <a-table
+        :data-source="dataList"
+        :columns="columns"
+        :loading="loading"
+        :pagination="pagination"
+        row-key="id"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'cover'">
+            <img class="cover" :src="getThumbnailUrl(record.url)" :alt="record.name" />
+          </template>
+          <template v-else-if="column.key === 'name'">
+            <div class="item-name">{{ record.name || '未命名' }}</div>
+            <div class="sub-text">{{ record.category || '默认分类' }}</div>
+          </template>
+          <template v-else-if="column.key === 'author'">
+            {{ record.user?.userName || '未知作者' }}
+          </template>
+          <template v-else-if="column.key === 'counts'">
+            <a-space>
+              <span class="count-pill">收藏 {{ formatCount(record.favoriteCount) }}</span>
+              <span class="count-pill">点赞 {{ formatCount(record.likeCount) }}</span>
+            </a-space>
+          </template>
+          <template v-else-if="column.key === 'createTime'">
+            {{ formatTime(record.createTime) }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-button type="link" size="small" @click="viewPicture(record)">查看</a-button>
+          </template>
         </template>
-        <template v-else-if="column.key === 'name'">
-          <div>{{ record.name || '未命名' }}</div>
-          <div class="sub-text">{{ record.category || '默认分类' }}</div>
-        </template>
-        <template v-else-if="column.key === 'author'">
-          {{ record.user?.userName || '未知作者' }}
-        </template>
-        <template v-else-if="column.key === 'counts'">
-          <a-space>
-            <span>收藏 {{ formatCount(record.favoriteCount) }}</span>
-            <span>点赞 {{ formatCount(record.likeCount) }}</span>
-          </a-space>
-        </template>
-        <template v-else-if="column.key === 'createTime'">
-          {{ formatTime(record.createTime) }}
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-button type="link" size="small" @click="viewPicture(record)">查看</a-button>
-        </template>
-      </template>
-    </a-table>
+      </a-table>
+    </div>
   </div>
 </template>
 
@@ -129,36 +133,50 @@ onMounted(() => {
 
 <style scoped>
 #myFavoritesPage {
-  max-width: 1100px;
+  max-width: 1180px;
   margin: 0 auto;
 }
 
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 8px;
+.fav-shell {
+  overflow: hidden;
 }
 
-.page-header h2 {
-  margin-bottom: 4px;
+.fav-tabs-wrap {
+  padding: 4px 20px 0;
+  border-bottom: 1px solid var(--line);
 }
 
-.desc {
-  color: #999;
-  font-size: 13px;
+.fav-tabs :deep(.ant-tabs-nav) {
+  margin-bottom: 0;
+}
+
+.fav-tabs :deep(.ant-tabs-nav::before) {
+  display: none;
 }
 
 .cover {
+  display: block;
   width: 80px;
   height: 60px;
   object-fit: cover;
-  border-radius: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.item-name {
+  color: var(--ink-900);
+  font-weight: 600;
 }
 
 .sub-text {
-  color: #999;
+  margin-top: 2px;
+  color: var(--ink-400);
   font-size: 12px;
+}
+
+.count-pill {
+  color: var(--ink-500);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 </style>

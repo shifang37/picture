@@ -216,33 +216,36 @@ test('首页卡片使用统一比例封面并保持网格齐平', async ({ page 
   }
 })
 
-test('首页滚动到底部自动加载下一页并按 id 去重', async ({ page }) => {
+test('首页通过分页切换页码查看下一页并同步 URL', async ({ page }) => {
   const requestedPages: number[] = []
   await mockHomeApi(page, (body) => {
-    requestedPages.push(Number(body.current))
-    if (Number(body.current) === 1) {
+    const current = Number(body.current)
+    requestedPages.push(current)
+    if (current === 1) {
       return {
-        records: Array.from({ length: 20 }, (_, index) => makePicture(String(index + 1))),
-        total: 21,
+        records: Array.from({ length: 16 }, (_, index) => makePicture(String(index + 1))),
+        total: 18,
       }
     }
     return {
       records: [
-        makePicture('20', { name: '第二页重复图片' }),
-        makePicture('21', { name: '第二页图片' }),
+        makePicture('17', { name: '第二页图片 A' }),
+        makePicture('18', { name: '第二页图片 B' }),
       ],
-      total: 21,
+      total: 18,
     }
   })
 
   await page.goto('/')
-  await expect(page.getByTestId('picture-card')).toHaveCount(20)
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  await expect(page.getByTestId('picture-card')).toHaveCount(16)
+  await expect(page.getByTestId('home-pagination')).toContainText('共 18 张')
 
-  await expect(page.getByText('第二页图片')).toBeVisible()
-  await expect(page.getByTestId('picture-card')).toHaveCount(21)
-  await expect(page.getByText(/没有更多了/)).toBeVisible()
-  expect(requestedPages).toContain(2)
+  await page.getByTestId('home-pagination').getByTitle('2', { exact: true }).click()
+
+  await expect(page.getByText('第二页图片 A')).toBeVisible()
+  await expect(page.getByTestId('picture-card')).toHaveCount(2)
+  await expect(page).toHaveURL(/page=2/)
+  expect(requestedPages).toEqual([1, 2])
 })
 
 test('首页从 URL 还原搜索词、分类和标签', async ({ page }) => {

@@ -1,6 +1,17 @@
 <template>
   <div id="userManagePage">
-    <a-flex justify="space-between" align="center" wrap="wrap" gap="12" style="margin-bottom: 16px">
+    <div class="gallery-page-head">
+      <div>
+        <h2 class="gallery-page-title">用户管理</h2>
+        <div class="gallery-page-desc">管理平台账号、角色权限、个人存储配额及密码安全重置</div>
+      </div>
+      <a-space wrap>
+        <a-button :loading="recalcLoading" @click="handleRecalcAll">重算全部配额</a-button>
+        <a-button type="primary" @click="openCreate">新增用户</a-button>
+      </a-space>
+    </div>
+
+    <div class="gallery-toolbar">
       <a-form layout="inline" :model="searchParams" @finish="doSearch">
         <a-form-item label="账号">
           <a-input v-model:value="searchParams.userAccount" placeholder="输入账号" allow-clear />
@@ -12,74 +23,73 @@
           <a-button type="primary" html-type="submit">搜索</a-button>
         </a-form-item>
       </a-form>
-      <a-space>
-        <a-button :loading="recalcLoading" @click="handleRecalcAll">重算全部配额</a-button>
-        <a-button type="primary" @click="openCreate">新增用户</a-button>
-      </a-space>
-    </a-flex>
+    </div>
 
-    <a-table
-      :columns="columns"
-      :data-source="dataList"
-      :pagination="pagination"
-      :loading="loading"
-      @change="doTableChange"
-    >
-      <template #headerCell="{ column }">
-        <template v-if="column.key === 'userName'">
-          <span>
-            <smile-outlined />
-            用户名
-          </span>
+    <div class="gallery-table-card">
+      <a-table
+        :columns="columns"
+        :data-source="dataList"
+        :pagination="pagination"
+        :loading="loading"
+        :scroll="{ x: 1180 }"
+        @change="doTableChange"
+      >
+        <template #headerCell="{ column }">
+          <template v-if="column.key === 'userName'">
+            <span>
+              <smile-outlined />
+              用户名
+            </span>
+          </template>
         </template>
-      </template>
 
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'userAvatar'">
-          <a-image v-if="record.userAvatar" :src="record.userAvatar" :width="80" />
-          <span v-else>-</span>
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'userAvatar'">
+            <a-image v-if="record.userAvatar" :src="record.userAvatar" :width="64" />
+            <span v-else>-</span>
+          </template>
+          <template v-else-if="column.dataIndex === 'userProfile'">
+            <span :title="record.userProfile">{{ record.userProfile || '-' }}</span>
+          </template>
+          <template v-else-if="column.dataIndex === 'userRole'">
+            <div v-if="record.userRole === 'admin'">
+              <a-tag color="green">管理员</a-tag>
+            </div>
+            <div v-else>
+              <a-tag color="blue">普通用户</a-tag>
+            </div>
+          </template>
+          <template v-else-if="column.dataIndex === 'createTime'">
+            {{ formatTime(record.createTime) }}
+          </template>
+          <template v-else-if="column.key === 'quota'">
+            <div class="quota-cell">
+              <a-progress
+                :percent="quotaPercent(record.storageUsed, record.storageQuota)"
+                size="small"
+                style="width: 120px; margin-bottom: 0"
+              />
+              <span class="quota-text">{{ describeQuota(record) }}</span>
+            </div>
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-space>
+              <a-button type="link" @click="openEdit(record)">编辑</a-button>
+              <a-button type="link" @click="openQuota(record)">配额</a-button>
+              <a-button type="link" @click="openReset(record)">重置密码</a-button>
+              <a-popconfirm
+                title="确定删除该用户吗？"
+                ok-text="删除"
+                cancel-text="取消"
+                @confirm="doDelete(record.id)"
+              >
+                <a-button danger type="link">删除</a-button>
+              </a-popconfirm>
+            </a-space>
+          </template>
         </template>
-        <template v-else-if="column.dataIndex === 'userProfile'">
-          <span :title="record.userProfile">{{ record.userProfile || '-' }}</span>
-        </template>
-        <template v-else-if="column.dataIndex === 'userRole'">
-          <div v-if="record.userRole === 'admin'">
-            <a-tag color="green">管理员</a-tag>
-          </div>
-          <div v-else>
-            <a-tag color="blue">普通用户</a-tag>
-          </div>
-        </template>
-        <template v-else-if="column.dataIndex === 'createTime'">
-          {{ formatTime(record.createTime) }}
-        </template>
-        <template v-else-if="column.key === 'quota'">
-          <div class="quota-cell">
-            <a-progress
-              :percent="quotaPercent(record.storageUsed, record.storageQuota)"
-              size="small"
-              style="width: 120px; margin-bottom: 0"
-            />
-            <span class="quota-text">{{ describeQuota(record) }}</span>
-          </div>
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-space>
-            <a-button type="link" @click="openEdit(record)">编辑</a-button>
-            <a-button type="link" @click="openQuota(record)">配额</a-button>
-            <a-button type="link" @click="openReset(record)">重置密码</a-button>
-            <a-popconfirm
-              title="确定删除该用户吗？"
-              ok-text="删除"
-              cancel-text="取消"
-              @confirm="doDelete(record.id)"
-            >
-              <a-button danger type="link">删除</a-button>
-            </a-popconfirm>
-          </a-space>
-        </template>
-      </template>
-    </a-table>
+      </a-table>
+    </div>
 
     <a-modal
       v-model:open="modalOpen"

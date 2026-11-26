@@ -1,13 +1,23 @@
 <template>
   <div id="pictureRecyclePage">
-    <h2>图片回收站</h2>
+    <div class="gallery-page-head">
+      <div>
+        <h2 class="gallery-page-title">图片回收站</h2>
+        <div class="gallery-page-desc">
+          误删的图片可在保留期内一键恢复，到期后将连同 COS 对象彻底清理
+        </div>
+      </div>
+      <a-button @click="fetchData">刷新</a-button>
+    </div>
+
     <a-alert
       type="info"
       show-icon
-      style="margin-bottom: 16px"
+      style="margin-bottom: 18px"
       message="回收站中的图片会在保留期满后自动彻底删除（默认 7 天，含 COS 文件）；审核日志按合规要求长期保留。"
     />
-    <a-flex justify="space-between" align="center" style="margin-bottom: 16px">
+
+    <div class="gallery-toolbar">
       <a-form layout="inline" :model="searchParams" @finish="doSearch">
         <a-form-item label="名称" name="name">
           <a-input v-model:value="searchParams.name" placeholder="请输入图片名称" allow-clear />
@@ -28,48 +38,51 @@
           <a-button type="primary" html-type="submit">搜索</a-button>
         </a-form-item>
       </a-form>
-      <a-button @click="fetchData">刷新</a-button>
-    </a-flex>
-    <a-table
-      :columns="columns"
-      :data-source="dataList"
-      :pagination="pagination"
-      :loading="loading"
-      row-key="id"
-      @change="doTableChange"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'url'">
-          <a-image :src="getThumbnailUrl(record.url)" :width="120" />
+    </div>
+
+    <div class="gallery-table-card">
+      <a-table
+        :columns="columns"
+        :data-source="dataList"
+        :pagination="pagination"
+        :loading="loading"
+        :scroll="{ x: 1120 }"
+        row-key="id"
+        @change="doTableChange"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'url'">
+            <a-image :src="getThumbnailUrl(record.url)" :width="108" />
+          </template>
+          <template v-if="column.dataIndex === 'tags'">
+            <a-space wrap>
+              <a-tag v-for="tag in parseTags(record.tags)" :key="tag">{{ tag }}</a-tag>
+            </a-space>
+          </template>
+          <template v-if="column.dataIndex === 'reviewStatus'">
+            <a-tag :color="statusColor(record.reviewStatus)">
+              {{ statusText(record.reviewStatus) }}
+            </a-tag>
+          </template>
+          <template v-else-if="column.dataIndex === 'deletedAt'">
+            {{ formatTime(record.deletedAt) }}
+          </template>
+          <template v-else-if="column.dataIndex === 'deletedBy'">
+            {{ record.deletedBy ? `用户#${record.deletedBy}` : '-' }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-popconfirm
+              title="确定恢复这张图片吗？已通过审核的图片会立即重新公开。"
+              ok-text="恢复"
+              cancel-text="取消"
+              @confirm="doRestore(record.id)"
+            >
+              <a-button type="link">恢复</a-button>
+            </a-popconfirm>
+          </template>
         </template>
-        <template v-if="column.dataIndex === 'tags'">
-          <a-space wrap>
-            <a-tag v-for="tag in parseTags(record.tags)" :key="tag">{{ tag }}</a-tag>
-          </a-space>
-        </template>
-        <template v-if="column.dataIndex === 'reviewStatus'">
-          <a-tag :color="statusColor(record.reviewStatus)">
-            {{ statusText(record.reviewStatus) }}
-          </a-tag>
-        </template>
-        <template v-else-if="column.dataIndex === 'deletedAt'">
-          {{ formatTime(record.deletedAt) }}
-        </template>
-        <template v-else-if="column.dataIndex === 'deletedBy'">
-          {{ record.deletedBy ? `用户#${record.deletedBy}` : '-' }}
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-popconfirm
-            title="确定恢复这张图片吗？已通过审核的图片会立即重新公开。"
-            ok-text="恢复"
-            cancel-text="取消"
-            @confirm="doRestore(record.id)"
-          >
-            <a-button type="link">恢复</a-button>
-          </a-popconfirm>
-        </template>
-      </template>
-    </a-table>
+      </a-table>
+    </div>
   </div>
 </template>
 

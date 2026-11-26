@@ -1,8 +1,16 @@
 <template>
   <div id="userProfilePage">
-    <h2 class="title">个人中心</h2>
+    <div class="gallery-page-head">
+      <div>
+        <h2 class="gallery-page-title">个人中心</h2>
+        <div class="gallery-page-desc">管理个人资料、查看存储空间配额与更新账号安全设置</div>
+      </div>
+      <a-button v-if="loginUser.id" @click="router.push(`/author/${loginUser.id}`)">
+        查看公开主页 →
+      </a-button>
+    </div>
 
-    <a-card class="section" title="账号信息">
+    <a-card class="section" title="账号信息" :bordered="false">
       <a-descriptions :column="2" bordered size="middle">
         <a-descriptions-item label="账号">
           {{ loginUser.userAccount || '-' }}
@@ -146,6 +154,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { message, type FormProps } from 'ant-design-vue'
 import dayjs from 'dayjs'
 import { useLoginUserStore } from '@/stores/useLoginUserStore'
@@ -155,6 +164,7 @@ import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, passwordStrengthRule } from '@/util
 import { describePictureQuota, describeStorageQuota, summarizeQuota } from '@/utils/quota'
 import { percentOf } from '@/utils/size'
 
+const router = useRouter()
 const loginUserStore = useLoginUserStore()
 
 const loginUser = computed(() => loginUserStore.loginUser)
@@ -291,31 +301,32 @@ onMounted(async () => {
 
 <style scoped>
 #userProfilePage {
-  max-width: 720px;
+  max-width: 820px;
   margin: 0 auto;
 }
 
-.title {
-  margin-bottom: 16px;
-}
-
 .section {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
 }
 
 .quota-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
   margin-bottom: 4px;
 }
 
 .quota-label {
-  color: #666;
+  color: var(--ink-500);
+  font-size: 13.5px;
 }
 
 .quota-value {
-  color: #111;
+  color: var(--ink-900);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 </style>

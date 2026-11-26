@@ -1,8 +1,15 @@
 <template>
   <div id="pictureManagePage">
-    <h2>图片管理</h2>
-    <a-flex justify="space-between" align="center" style="margin-bottom: 16px">
-      <a-form layout="inline" :model="searchParams" @finish="doSearch">
+    <div class="gallery-page-head">
+      <div>
+        <h2 class="gallery-page-title">图片管理</h2>
+        <div class="gallery-page-desc">按关键词、分类、标签与审核状态检索并维护全站图片素材</div>
+      </div>
+      <a-button type="primary" href="/add_picture" target="_blank">+ 创建图片</a-button>
+    </div>
+
+    <div class="gallery-toolbar">
+      <a-form layout="inline" :model="searchParams" class="search-form" @finish="doSearch">
         <a-form-item label="关键词" name="searchText">
           <a-input
             v-model:value="searchParams.searchText"
@@ -18,7 +25,7 @@
             v-model:value="searchParams.tags"
             mode="tags"
             placeholder="请输入标签"
-            style="min-width: 180px"
+            style="min-width: 170px"
             allow-clear
           />
         </a-form-item>
@@ -27,7 +34,7 @@
             v-model:value="searchParams.reviewStatus"
             :options="reviewStatusOptions"
             placeholder="全部状态"
-            style="min-width: 140px"
+            style="min-width: 130px"
             allow-clear
           />
         </a-form-item>
@@ -35,63 +42,66 @@
           <a-button type="primary" html-type="submit">搜索</a-button>
         </a-form-item>
       </a-form>
-      <a-button type="primary" href="/add_picture" target="_blank">+ 创建图片</a-button>
-    </a-flex>
-    <a-table
-      :columns="columns"
-      :data-source="dataList"
-      :pagination="pagination"
-      :loading="loading"
-      row-key="id"
-      @change="doTableChange"
-    >
-      <template #bodyCell="{ column, record }">
-        <template v-if="column.dataIndex === 'url'">
-          <a-image :src="getThumbnailUrl(record.url)" :width="120" />
+    </div>
+
+    <div class="gallery-table-card">
+      <a-table
+        :columns="columns"
+        :data-source="dataList"
+        :pagination="pagination"
+        :loading="loading"
+        :scroll="{ x: 1220 }"
+        row-key="id"
+        @change="doTableChange"
+      >
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.dataIndex === 'url'">
+            <a-image :src="getThumbnailUrl(record.url)" :width="108" />
+          </template>
+          <!-- 标签 -->
+          <template v-if="column.dataIndex === 'tags'">
+            <a-space wrap>
+              <a-tag v-for="tag in parseTags(record.tags)" :key="tag">{{ tag }}</a-tag>
+            </a-space>
+          </template>
+          <!-- 审核状态 -->
+          <template v-if="column.dataIndex === 'reviewStatus'">
+            <a-tag :color="statusColor(record.reviewStatus)">
+              {{ statusText(record.reviewStatus) }}
+            </a-tag>
+          </template>
+          <!-- 图片信息 -->
+          <template v-if="column.dataIndex === 'picInfo'">
+            <div>格式：{{ record.picFormat }}</div>
+            <div>宽度：{{ record.picWidth }}</div>
+            <div>高度：{{ record.picHeight }}</div>
+            <div>宽高比：{{ record.picScale }}</div>
+            <div>大小：{{ formatSize(record.picSize) }}</div>
+          </template>
+          <template v-else-if="column.dataIndex === 'createTime'">
+            {{ formatTime(record.createTime) }}
+          </template>
+          <template v-else-if="column.dataIndex === 'editTime'">
+            {{ formatTime(record.editTime) }}
+          </template>
+          <template v-else-if="column.key === 'action'">
+            <a-space>
+              <a-button type="link" :href="`/add_picture?id=${record.id}`" target="_blank"
+                >编辑</a-button
+              >
+              <a-popconfirm
+                title="确定删除这张图片吗？删除后进入回收站，可在「图片回收站」中恢复。"
+                ok-text="删除"
+                cancel-text="取消"
+                @confirm="doDelete(record.id)"
+              >
+                <a-button type="link" danger>删除</a-button>
+              </a-popconfirm>
+            </a-space>
+          </template>
         </template>
-        <!-- 标签 -->
-        <template v-if="column.dataIndex === 'tags'">
-          <a-space wrap>
-            <a-tag v-for="tag in parseTags(record.tags)" :key="tag">{{ tag }}</a-tag>
-          </a-space>
-        </template>
-        <!-- 审核状态 -->
-        <template v-if="column.dataIndex === 'reviewStatus'">
-          <a-tag :color="statusColor(record.reviewStatus)">
-            {{ statusText(record.reviewStatus) }}
-          </a-tag>
-        </template>
-        <!-- 图片信息 -->
-        <template v-if="column.dataIndex === 'picInfo'">
-          <div>格式：{{ record.picFormat }}</div>
-          <div>宽度：{{ record.picWidth }}</div>
-          <div>高度：{{ record.picHeight }}</div>
-          <div>宽高比：{{ record.picScale }}</div>
-          <div>大小：{{ formatSize(record.picSize) }}</div>
-        </template>
-        <template v-else-if="column.dataIndex === 'createTime'">
-          {{ formatTime(record.createTime) }}
-        </template>
-        <template v-else-if="column.dataIndex === 'editTime'">
-          {{ formatTime(record.editTime) }}
-        </template>
-        <template v-else-if="column.key === 'action'">
-          <a-space>
-            <a-button type="link" :href="`/add_picture?id=${record.id}`" target="_blank"
-              >编辑</a-button
-            >
-            <a-popconfirm
-              title="确定删除这张图片吗？删除后进入回收站，可在「图片回收站」中恢复。"
-              ok-text="删除"
-              cancel-text="取消"
-              @confirm="doDelete(record.id)"
-            >
-              <a-button type="link" danger>删除</a-button>
-            </a-popconfirm>
-          </a-space>
-        </template>
-      </template>
-    </a-table>
+      </a-table>
+    </div>
   </div>
 </template>
 

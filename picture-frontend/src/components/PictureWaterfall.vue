@@ -49,11 +49,11 @@ const thumbnailSize = computed(() =>
 .waterfall {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px;
   align-items: stretch;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1120px) {
   .waterfall {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -68,6 +68,7 @@ const thumbnailSize = computed(() =>
 @media (max-width: 520px) {
   .waterfall {
     grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
   }
 }
 </style>
